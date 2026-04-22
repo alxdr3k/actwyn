@@ -200,6 +200,12 @@ ledger integration test (playbook §8.1) asserts against.
   3. An attachment is recorded in `storage_objects` *before* any
      `turns` or memory reference points to it; retention class
      defaults to `session` (PRD §12.8.3, §13.5).
+  4. The inbound transaction inserts attachment metadata only
+     (`capture_status = 'pending'`, `source_external_id` = Telegram
+     `file_id`). It **never** performs Telegram `getFile`, a file
+     download, a MIME probe, or any other network / filesystem I/O.
+     Byte capture runs in a separate transaction after the inbound
+     commit (§7.2, §9.3, §15 transaction boundaries).
 
 ### 4.3 `queue/worker`
 
@@ -637,6 +643,16 @@ States: `pending`, `uploaded`, `failed`, `deletion_requested`,
 `deleted`, `delete_failed`. All deletions are soft in SQLite;
 S3 object deletion (when applicable) is driven by `storage/sync`.
 
+`storage_objects.status` is the **sync** state machine and is only
+meaningful when `capture_status = 'captured'` (PRD Appendix D
+capture invariants). For Telegram attachments the row spends its
+first life inside `capture_status = pending` (no network I/O in
+the inbound txn); the sync machine below is entered only after the
+worker's capture pass (§7.2 step 3) commits
+`capture_status = captured`. Rows whose retention class is
+S3-ineligible (`ephemeral`, `session` without promotion) stay in
+`status = pending` forever — this is expected, not a backlog.
+
 Transitions:
 
 | From                  | To                    | Trigger                                                          | Transaction                              | Side effects                                                                                            | Retry                                                      | User-visible notification |
@@ -663,6 +679,11 @@ Invariants:
    not auto-retry these; it records the error and moves on.
 5. `ephemeral` artifacts never reach `uploaded`; they live and
    die in the local FS.
+6. Entry into this sync machine (any transition with `From = —`
+   or `pending → …`) requires `capture_status = 'captured'` for
+   the same row. `storage/sync` must filter on that column when
+   selecting candidates; a `capture_status = 'failed'` row is
+   never synced.
 
 ### 6.5 `memory_items.status`
 
@@ -748,6 +769,13 @@ Happy path:
    b. Advance `settings.telegram_next_offset` to `max(update_id) + 1`.
 4. Commit.
 
+Attachment handling in this transaction is metadata-only: if the
+update carries a photo / document / audio / video, classify it and
+insert a `storage_objects` row with `capture_status = pending` and
+`source_external_id` set to the Telegram `file_id`. Do **not**
+call `getFile`, do **not** download bytes, and do **not** probe
+MIME in this transaction; capture runs in §7.2.
+
 Failure modes:
 
 - Crash between step 2 and step 3: the updates reappear on next
@@ -757,8 +785,6 @@ Failure modes:
 - Inbound classifier throws for a single update: that row moves to
   `failed`, other rows in the batch still advance normally; offset
   advances only past the ones that reached a final status.
-- Attachment download fails (see §13.5 of PRD): the `jobs` row is
-  still created with attachment metadata indicating capture failed.
 
 ### 7.2 Worker loop → provider run
 
@@ -768,16 +794,33 @@ Happy path:
    now, job_type = provider_run`.
 2. Worker claims atomically: `UPDATE ... SET status='running',
    started_at=now, attempts=attempts+1 WHERE id=? AND
-   status='queued'`.
-3. Worker loads the `sessions` row and decides `resume_mode` vs
+   status='queued'`. This claim is its own short transaction; no
+   network I/O inside it (§15 transaction boundaries).
+3. **Attachment capture pass** (outside the claim transaction):
+   for each `storage_objects` row tied to this job with
+   `capture_status = pending`:
+   a. Call Telegram `getFile`, download bytes to the local store,
+      detect MIME, compute `sha256`, measure `size_bytes`.
+   b. In a single capture transaction, set
+      `capture_status = captured`, `captured_at = now`, and
+      populate `sha256` / `mime_type` / `size_bytes`. Enqueue a
+      `storage_sync` job only if the retention class is S3-eligible.
+   c. On download / probe failure: in a single transaction set
+      `capture_status = failed` with `capture_error_json`. The
+      `provider_run` continues; the user turn records that capture
+      failed so the user can retry (PRD §13.5).
+4. Worker loads the `sessions` row and decides `resume_mode` vs
    `replay_mode` (§10).
-4. `context/builder` + `context/packer` assemble the prompt.
-5. `providers/claude` spawns the subprocess (§14), streams events,
+5. `context/builder` + `context/packer` assemble the prompt,
+   injecting attachment metadata only for rows with
+   `capture_status = captured` (failed captures surface as a
+   user-visible note instead of bytes).
+6. `providers/claude` spawns the subprocess (§14), streams events,
    writes `provider_raw_events` (redacted) and `turns` as it goes.
-6. On subprocess exit code 0 with a valid final event: worker
+7. On subprocess exit code 0 with a valid final event: worker
    commits `status = succeeded`, `finished_at`, `result_json`, and
    inserts `outbound_notifications` row `job_completed`.
-7. `telegram/outbound` sends the notification and moves it to
+8. `telegram/outbound` sends the notification and moves it to
    `sent`.
 
 Failure modes:
@@ -1117,22 +1160,43 @@ Order of checks (first match wins):
 
 ### 9.3 Attachment handling (HLD-level)
 
-Per PRD §13.5:
+Per PRD §13.5. Attachment handling is split across **two** phases
+to keep the inbound SQLite transaction short and free of network
+I/O (§15 transaction boundaries).
 
-1. For each attachment file_id in the update, call `getFile`.
-2. Download to a local temp path.
-3. Compute `sha256`, detect MIME, measure size.
-4. Insert `storage_objects` row with `retention_class =
-   session`, `status = pending`, `source_channel = 'telegram'`,
-   `source_message_id = update.message_id`.
-5. Attach metadata (not bytes) to the provider prompt via
-   `context/packer`.
-6. Promotion to `long_term` is handled by explicit user intent
-   (`/save_last_attachment` or natural-language match).
+**Phase 1 — inbound metadata (runs inside the inbound txn, §7.1):**
 
-If the download itself fails, the `telegram_updates` row still
-moves to `enqueued` and the `jobs` row is created; the turn
-records that attachment capture failed, so the user can retry.
+1. For each attachment in the update, classify its Telegram type
+   (photo / document / audio / video) and read the metadata
+   Telegram already supplied in the update payload (file_id, claimed
+   MIME/size when present, message_id).
+2. Insert a `storage_objects` row with:
+   - `retention_class = session`
+   - `source_channel = 'telegram'`
+   - `source_message_id = update.message_id`
+   - `source_external_id = update.file_id`
+   - `capture_status = pending`
+   - `status = pending` (sync status; only meaningful once
+     `capture_status = captured`)
+   - `sha256` / `mime_type` / `size_bytes` left nullable.
+3. Create the `jobs` row and advance the Telegram offset as usual.
+   Do not call `getFile`, download bytes, or probe MIME in this
+   transaction.
+
+**Phase 2 — byte capture (runs in the worker, §7.2 step 3):**
+
+4. Worker pre-step, per attachment: `getFile` → download →
+   `sha256` / MIME / size.
+5. In a single capture transaction, set `capture_status = captured`,
+   `captured_at = now`, and populate the computed fields. If the
+   retention class is S3-eligible, enqueue a `storage_sync` job
+   here (not before).
+6. On failure, set `capture_status = failed` with
+   `capture_error_json`. The owning `provider_run` continues and
+   the user turn records that capture failed, so the user can retry.
+7. Promotion to `long_term` is handled by explicit user intent
+   (`/save_last_attachment` or natural-language match) and only
+   applies to rows with `capture_status = captured`.
 
 ### 9.4 Outbound delivery
 

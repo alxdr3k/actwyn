@@ -1417,19 +1417,23 @@ Owns artifact metadata for every durable or session-scoped binary. See
 | `storage_key`                 | TEXT     | Canonical key per §12.8.4. Unique within `(storage_backend, bucket)`.                           |
 | `original_filename_redacted`  | TEXT     | nullable; stored only if filename itself is not sensitive.                                      |
 | `mime_type`                   | TEXT     | Detected MIME type (not user-claimed).                                                          |
-| `size_bytes`                  | INTEGER  |                                                                                                 |
-| `sha256`                      | TEXT     | Content hash; used for dedupe and integrity.                                                    |
+| `size_bytes`                  | INTEGER  | nullable until capture completes for channels that only learn size after download. |
+| `sha256`                      | TEXT     | nullable until capture completes; content hash for dedupe and integrity.           |
 | `source_channel`              | TEXT     | `telegram` \| `provider` \| `system`.                                                           |
 | `source_turn_id`              | TEXT     | nullable.                                                                                       |
 | `source_message_id`           | TEXT     | nullable; Telegram message id when `source_channel = telegram`.                                 |
 | `source_job_id`               | TEXT     | nullable.                                                                                       |
+| `source_external_id`          | TEXT     | nullable; e.g. Telegram `file_id` used by the capture pass to fetch bytes.                      |
 | `artifact_type`               | TEXT     | `user_upload` \| `generated_artifact` \| `redacted_provider_transcript` \| `conversation_transcript` \| `memory_snapshot` \| `parser_fixture` \| `other`. |
 | `retention_class`             | TEXT     | `ephemeral` \| `session` \| `long_term` \| `archive`.                                           |
 | `visibility`                  | TEXT     | `private` (only value in P0).                                                                   |
-| `status`                      | TEXT     | `pending` \| `uploaded` \| `failed` \| `deletion_requested` \| `deleted` \| `delete_failed`.    |
+| `capture_status`              | TEXT     | `pending` \| `captured` \| `failed`. Tracks "do we hold the bytes locally yet?". Orthogonal to `status`. See capture invariants below. |
+| `status`                      | TEXT     | Sync status: `pending` \| `uploaded` \| `failed` \| `deletion_requested` \| `deleted` \| `delete_failed`. Meaningful only when `capture_status = captured`. |
 | `created_at`                  | DATETIME |                                                                                                 |
+| `captured_at`                 | DATETIME | nullable; set when `capture_status` transitions to `captured`.                                  |
 | `uploaded_at`                 | DATETIME | nullable.                                                                                       |
 | `deleted_at`                  | DATETIME | nullable; set by soft-delete, not hard-delete.                                                  |
+| `capture_error_json`          | TEXT     | nullable; last capture error (e.g. Telegram `getFile` failure).                                 |
 | `error_json`                  | TEXT     | nullable; last sync error for operator visibility.                                              |
 
 Invariants:
@@ -1453,6 +1457,26 @@ Invariants:
   `delete_failed`.
 - `delete_failed` is not automatically retried; it surfaces via
   `/doctor` for operator intervention.
+
+Capture invariants (separate from sync):
+
+- `capture_status = pending` is the only legal initial value for
+  rows inserted by `telegram/inbound` for attachments; bytes are
+  not yet on disk. The inbound SQLite transaction that created the
+  row must **not** perform any network I/O (Telegram `getFile`,
+  download, or MIME probe). The capture pass runs outside that
+  transaction (HLD §7.1, §9.3, §15 transaction boundaries).
+- `capture_status: pending → captured` requires the bytes to be on
+  the local disk, `sha256`/`mime_type`/`size_bytes` to be populated,
+  and `captured_at` to be set, all in a single post-capture
+  transaction.
+- `capture_status: pending → failed` sets `capture_error_json`; the
+  row is retained for audit and retry. No `storage_sync` job is
+  enqueued while `capture_status != captured`.
+- `status` transitions (sync) are only legal when `capture_status =
+  captured`. A row with `capture_status = failed` whose retention
+  class would otherwise eligible for S3 sync stays out of the
+  sync loop.
 
 **`memory_items`**
 
