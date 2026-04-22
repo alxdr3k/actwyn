@@ -81,9 +81,13 @@ short on purpose — if they grow, they stop being principles.
    specific, documented point in the pipeline. Both "pre-redaction raw" and
    "post-redaction stored" exist intentionally; everything else is at one
    side of that boundary.
-7. **S3 is an archive, not the source of truth.** The SQLite job ledger is
-   the source of truth for P0. S3 is an asynchronous mirror. A failed S3
-   sync never rolls back a successful job.
+7. **S3 is an artifact archive, not a memory database.** SQLite owns
+   state, meaning, index, and provenance; the local filesystem owns
+   ephemeral working copies; S3 holds the durable originals (images,
+   files, generated artifacts, snapshots). An S3 object in isolation
+   must not reveal why it exists — meaning lives in SQLite metadata
+   and `memory_artifact_links`. A failed S3 sync never rolls back a
+   successful job. Full policy: PRD §12.8.
 8. **Vertical slices over horizontal layers.** We do not finish "the DB"
    before building "the Telegram layer". We build a thin end-to-end path
    and thicken it.
