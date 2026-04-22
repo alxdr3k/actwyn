@@ -32,15 +32,50 @@ Phase 10 → Commands + /doctor + startup recovery
 Phase 11 → systemd unit + RUNBOOK handoff
 ```
 
+## Milestones
+
+P0 groups the phases above into five user-visible milestones. This
+is the level at which scope, "is it useful yet?", and go/no-go
+decisions are made. Phase numbers are fixed; milestone boundaries
+are the product lens on the same build order.
+
+| Milestone | Name                               | Phases            | What the user/operator gets                                                                                     |
+| --------- | ---------------------------------- | ----------------- | --------------------------------------------------------------------------------------------------------------- |
+| **M0**    | Docs + spikes                      | pre-Phase 1       | PRD / HLD / Risk Spikes closed; no runtime yet. Exit: Risk Spike gate passed for the spikes Phase 1 depends on. |
+| **M1**    | Walking skeleton (fake provider)   | Phase 1 → Phase 6 | Telegram inbound durable, job ledger, outbound retry, fake provider end-to-end. Exit: Walking Skeleton gate ✦. |
+| **M2**    | Claude vertical slice              | Phase 7           | Real Claude subprocess replaces the fake provider; stream-json parsed; permission lockdown enforced.            |
+| **M3**    | Memory + summary                   | Phase 8           | Context builder/packer, `/end` + `/summary`, `memory_summaries`, `memory_items` with provenance.                 |
+| **M4**    | Attachment + S3                    | Phase 9           | Attachment capture (two-phase, HLD §9.3) + S3 sync; `storage_objects` fully live; `/doctor` S3 smoke passes.    |
+| **M5**    | Operate-and-polish                 | Phase 10 → 11     | `/forget_*`, `/correct`, `/status`, `/doctor`, startup recovery, systemd + runbook. Exit: P0 Acceptance gate.   |
+
+Milestone rules:
+
+- A milestone cannot begin until all of its component phases'
+  entry criteria are met (in particular, the risk-spike gate
+  listed below).
+- "P0 done" means M5 has passed the P0 Acceptance gate. Earlier
+  milestones are not "P0 done" even if they are releasable
+  internally.
+- Any re-scoping decision (e.g. cut forget/correct to P1) moves
+  work between milestones, not between phases. Phase numbers
+  stay stable so that cross-doc references (HLD §18, runbook,
+  traceability) do not drift.
+
 Gates (playbook §5):
 
-- Before Phase 1: Risk Spike gate must be met (SP-01, SP-02, SP-03
-  in particular; others can land in parallel but must pass before
-  the phase that depends on them).
-- Before Phase 7: SP-04, SP-05, SP-06, SP-07 must be passed.
-- Before Phase 9: SP-08 must be passed.
-- After Phase 6: Walking Skeleton gate.
-- After Phase 10: P0 Acceptance Test gate (AC01–AC25).
+- Before Phase 1 (entering M1): Risk Spike gate must be met
+  (SP-01, SP-02, SP-03 in particular; others can land in parallel
+  but must pass before the phase that depends on them).
+- Before Phase 7 (entering M2): SP-04, SP-05, SP-06, SP-07 must be
+  passed.
+- Before Phase 9 (entering M4): SP-08 must be passed.
+- After Phase 6 (end of M1): Walking Skeleton gate.
+- After Phase 10 (end of M5 code work, before Phase 11): P0
+  Acceptance Test gate — every `AC-*` in
+  [`docs/06_ACCEPTANCE_TESTS.md`](./06_ACCEPTANCE_TESTS.md) whose
+  priority is P0 must pass; `/doctor` returns `ok` for all P0
+  checks. This gate is defined by the test file, not by a fixed
+  numeric range.
 
 ## Definition of "done" for a phase
 

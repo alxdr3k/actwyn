@@ -1087,22 +1087,71 @@ last issue: <short redacted string>   # optional
 
 ## 18. Milestones
 
-### P0 — MVP (Claude Vertical Slice)
+P0 is divided into five milestones (M0–M5). The detailed phase map
+with entry / exit criteria and ledger tests lives in
+[`docs/04_IMPLEMENTATION_PLAN.md`](./04_IMPLEMENTATION_PLAN.md);
+this section is the product-lens summary. "P0 done" means M5 has
+passed the P0 Acceptance gate.
 
-- [ ] Claude Code adapter (session_args + permission_profile_args, lockdown smoke test 포함)
-- [ ] SQLite job ledger + `telegram_updates` + `outbound_notifications` + single worker (concurrency 1)
-- [ ] Telegram long polling (1:1 DM, direct fetch, `allowed_updates=["message"]`, offset durability, bootstrap whoami)
-- [ ] Telegram response chunking
-- [ ] Context Builder + Packer (resume_mode / replay_mode, conservative token estimator)
-- [ ] Context injection 최소 버전 (retrieved memory 슬롯 비활성)
-- [ ] 단기 memory + session summary 저장 (provenance 포함)
-- [ ] `summary_generation` job (Claude advisory lockdown profile)
-- [ ] S3 async sync (Bun.S3Client, driver abstraction, response delivery와 분리)
-- [ ] notification과 storage_sync를 독립 post-processing job으로 처리
-- [ ] 운영 로그 + redacted raw event 저장 (디지털 트윈 원천 데이터와 분리)
-- [ ] subprocess process group 관리 (Bun.spawn detached, proc.exited tracking, no unref)
-- [ ] systemd healthcheck + 재시작 복구
-- [ ] Claude stream-json parser fixture test
+### P0 — MVP (Reliable Personal Agent Runtime)
+
+**M0 — Docs + spikes** (pre-code)
+
+- [ ] PRD / HLD / Risk Spikes / Acceptance Tests / Runbook closed.
+- [ ] Risk Spike gate passed for SP-01..SP-03 (others land in
+      parallel before the phase that depends on them).
+
+**M1 — Walking skeleton with fake provider**
+
+- [ ] SQLite job ledger + `telegram_updates` + `outbound_notifications`
+      + `outbound_notification_chunks` + single worker (concurrency 1).
+- [ ] Telegram long polling (1:1 DM, direct fetch,
+      `allowed_updates=["message"]`, offset durability, bootstrap
+      whoami).
+- [ ] Outbound chunking + per-chunk retry ledger.
+- [ ] Fake provider produces end-to-end flow for CI + dev.
+- [ ] Redactor single-writer boundary live; grep-check in CI.
+- [ ] Exit: Walking Skeleton gate (04_IMPLEMENTATION_PLAN §Phase 6).
+
+**M2 — Claude vertical slice**
+
+- [ ] Claude Code adapter (`session_args` + `permission_profile_args`,
+      lockdown smoke test included).
+- [ ] Claude stream-json parser + fixture test.
+- [ ] `provider_runs` table live (schema per PRD Appendix D).
+- [ ] Subprocess process group management (`Bun.spawn` detached,
+      `proc.exited` tracking, no `unref`).
+
+**M3 — Memory + summary**
+
+- [ ] Context Builder + Packer (`resume_mode` / `replay_mode`,
+      conservative token estimator).
+- [ ] Context injection minimal version (retrieved memory slots
+      disabled in P0).
+- [ ] Short-term memory + session summary storage with provenance.
+- [ ] `summary_generation` job (Claude advisory lockdown profile).
+
+**M4 — Attachment + S3**
+
+- [ ] Two-phase attachment capture (PRD §13.5, HLD §9.3): inbound
+      metadata row with `capture_status = pending`, worker-driven
+      byte capture pass outside the inbound transaction.
+- [ ] S3 async sync (`Bun.S3Client`, driver abstraction, response
+      delivery 와 분리).
+- [ ] Notification and `storage_sync` as independent post-processing
+      jobs (neither rolls back `provider_runs.status`).
+
+**M5 — Operate-and-polish**
+
+- [ ] `/forget_memory`, `/forget_artifact`, `/forget_last`,
+      `/forget_session`, `/correct` + natural-language correction.
+- [ ] `/status`, `/doctor` (including S3 smoke), startup recovery.
+- [ ] Operational logs + redacted raw event retention (디지털 트윈
+      원천 데이터와 분리).
+- [ ] systemd healthcheck + restart recovery.
+- [ ] Exit: P0 Acceptance gate — every P0 `AC-*` entry in
+      `docs/06_ACCEPTANCE_TESTS.md` passes; `/doctor` returns `ok`
+      for all P0 checks.
 
 ### P1 — Claude 안정화 후
 
