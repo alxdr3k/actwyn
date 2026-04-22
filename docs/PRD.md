@@ -1509,7 +1509,7 @@ Capture invariants (separate from sync):
   not yet on disk. The inbound SQLite transaction that created the
   row must **not** perform any network I/O (Telegram `getFile`,
   download, or MIME probe). The capture pass runs outside that
-  transaction (HLD §7.1, §9.3, §15 transaction boundaries).
+  transaction (HLD §7.1, §9.3, §7.10 transaction boundaries).
 - `capture_status: pending → captured` requires the bytes to be on
   the local disk, `sha256`/`mime_type`/`size_bytes` to be populated,
   and `captured_at` to be set, all in a single post-capture

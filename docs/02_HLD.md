@@ -205,7 +205,7 @@ ledger integration test (playbook §8.1) asserts against.
      `file_id`). It **never** performs Telegram `getFile`, a file
      download, a MIME probe, or any other network / filesystem I/O.
      Byte capture runs in a separate transaction after the inbound
-     commit (§7.2, §9.3, §15 transaction boundaries).
+     commit (§7.2, §9.3, §7.10 transaction boundaries).
 
 ### 4.3 `queue/worker`
 
@@ -815,7 +815,7 @@ Happy path:
 2. Worker claims atomically: `UPDATE ... SET status='running',
    started_at=now, attempts=attempts+1 WHERE id=? AND
    status='queued'`. This claim is its own short transaction; no
-   network I/O inside it (§15 transaction boundaries).
+   network I/O inside it (§7.10 transaction boundaries).
 3. **Attachment capture pass** (outside the claim transaction):
    for each `storage_objects` row tied to this job with
    `capture_status = pending`:
@@ -1034,6 +1034,105 @@ Failure modes: if recovery itself fails (e.g. DB unreadable),
 systemd restarts the service; if it keeps failing, the service
 enters failed state and the operator is alerted out-of-band.
 
+### 7.10 Transaction boundaries
+
+This section is binding. SQLite transactions in this system must
+be short and must never perform any I/O that can block, fail
+independently, or race with other writers. That rule is what
+keeps the Telegram offset ledger durable, the `jobs` claim
+exclusive, and the `storage_sync` / `notification_retry` machines
+independent.
+
+Every committing transaction in P0 belongs to one of the
+following named classes. No transaction may span more than one
+class. No code path may open a transaction not listed here.
+
+**T1 — Inbound ingest** (`telegram/inbound` per §7.1):
+- Insert `telegram_updates` row(s), classify, insert attachment
+  `storage_objects` rows with `capture_status = 'pending'`, insert
+  `jobs` row(s), advance `settings.telegram_next_offset`.
+- Prohibited inside T1: Telegram `getFile`, any HTTP call, any
+  file I/O beyond SQLite, MIME sniffing of bytes, provider
+  subprocess spawn, `sendMessage`, S3 `PUT`/`DELETE`, logger
+  sinks that block on network.
+
+**T2 — Worker claim** (`queue/worker` per §7.2 step 2):
+- Single-row atomic `UPDATE` that moves a `jobs` row from
+  `queued → running` and increments `attempts`.
+- Prohibited inside T2: anything except that one `UPDATE`. No
+  context packing, no provider spawn, no notification write.
+
+**T3 — Attachment capture commit** (§7.2 step 3):
+- Per attachment: after the out-of-transaction `getFile` +
+  download + hash + MIME probe have succeeded, a single
+  transaction sets `capture_status = 'captured'`, populates
+  `sha256` / `mime_type` / `size_bytes` / `captured_at`, and
+  (only if retention is S3-eligible) inserts a `storage_sync`
+  job.
+- Prohibited: any further network I/O; any mutation to
+  `provider_runs`, `turns`, or `outbound_notifications`.
+
+**T4 — Provider raw event append** (§7.3):
+- One transaction per stream-json line: redact → insert
+  `provider_raw_events` row. Kept per-line on purpose so parse
+  failures mid-stream don't lose already-captured events.
+- Prohibited: `sendMessage`, S3 I/O, waiting on `proc.exited`.
+
+**T5 — Provider run completion** (§7.2 step 7):
+- Close out the `provider_runs` row (`status = succeeded|failed`,
+  `usage_json`, `parser_status`, `finished_at`), insert the final
+  assistant `turns` row, flip the owning `jobs` row to `succeeded`
+  (or `failed`), insert the parent `outbound_notifications` row
+  and its `chunk_count` `outbound_notification_chunks` rows with
+  `status = 'pending'`.
+- Prohibited: Telegram `sendMessage` (that's T7), S3 I/O.
+
+**T6 — Resume-fallback flip** (§6.2 resume-fallback transition):
+- Same-row mutation on a `jobs` row: `status = 'queued'`,
+  `request_json.context_packing_mode = 'replay_mode'`,
+  `result_json.resume_failed = true`; plus the
+  `provider_runs` row for the failed attempt is closed with
+  `status = 'failed', error_type = 'resume_failed'`.
+- Prohibited: inserting a new `jobs` row (§5.3); touching
+  `attempts`; sending a notification.
+
+**T7 — Outbound chunk delivery** (§7.7):
+- After a successful `sendMessage` for one chunk: set
+  `outbound_notification_chunks.status = 'sent'`,
+  `telegram_message_id`, `sent_at`; if this was the last chunk,
+  derive parent `outbound_notifications.status = 'sent'` and
+  populate `telegram_message_ids_json`.
+- Prohibited: Telegram `sendMessage` (that already happened
+  outside the transaction); mutating `provider_runs` or `jobs`.
+
+**T8 — Storage sync commit** (§7.6):
+- After a successful S3 `PUT` / `DELETE` outside the transaction:
+  flip `storage_objects.status` (`pending → uploaded`,
+  `deletion_requested → deleted`) and set timestamps.
+- Prohibited: S3 I/O inside the transaction; mutation of
+  `provider_runs` or `jobs` (PRD AC12, AC25).
+
+**T9 — Startup recovery** (§7.9 / §15):
+- Single boot transaction: `running → interrupted` for every
+  stale `jobs` row; for each, decide `interrupted → queued` in
+  the same transaction per `safe_retry`.
+- Prohibited: spawning subprocesses; sending notifications;
+  S3 I/O.
+
+Cross-class prohibitions (apply everywhere):
+
+- No transaction opens a subprocess or waits on one (`proc.exited`
+  is always awaited outside a transaction).
+- No transaction performs Telegram HTTP calls, S3 calls, or blocks
+  on a logger sink that hits the network.
+- No transaction spans two core flows (e.g. inbound ingest and
+  worker claim are always separate transactions, even if a future
+  optimisation tempts otherwise).
+
+Code review and tests should treat any transaction that violates
+the above as a defect regardless of whether the current behaviour
+looks correct.
+
 ---
 
 ## 8. Provider Adapter Design
@@ -1195,7 +1294,7 @@ Order of checks (first match wins):
 
 Per PRD §13.5. Attachment handling is split across **two** phases
 to keep the inbound SQLite transaction short and free of network
-I/O (§15 transaction boundaries).
+I/O (§7.10 transaction boundaries).
 
 **Phase 1 — inbound metadata (runs inside the inbound txn, §7.1):**
 
