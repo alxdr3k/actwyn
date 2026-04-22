@@ -393,9 +393,11 @@ does not issue `INSERT` / `UPDATE` / `DELETE` on that table.
 | `provider_runs`          | `providers/claude`                             |
 | `provider_raw_events`    | `providers/claude`                             |
 | `memory_summaries`       | `memory/summary`                               |
+| `memory_items` (insert)  | `memory/summary` (from summary output), `commands/correct` (user corrections) |
+| `memory_items.status` (transitions) | `commands/correct` (`active → superseded`), `commands/forget_memory` (`active | superseded → revoked`) |
 | `storage_objects` (insert) | `telegram/inbound` (attachments), `providers/claude` (generated artifacts), `memory/summary` (snapshots), `storage/local` (transcripts) |
-| `storage_objects.status` (transitions) | `storage/sync`, `startup/recovery`, `commands/*` (soft delete) |
-| `memory_artifact_links`  | `memory/summary`, `commands/save_last_attachment` |
+| `storage_objects.status` (transitions) | `storage/sync` (`pending ↔ failed`, `→ uploaded`, `deletion_requested → deleted | delete_failed`), `startup/recovery`, `commands/forget_artifact` (`→ deletion_requested`) |
+| `memory_artifact_links`  | `memory/summary`, `commands/save_last_attachment`, `commands/forget_artifact` (delete) |
 | `outbound_notifications` (insert) | `queue/worker`, `commands/*`          |
 | `outbound_notifications.status` | `telegram/outbound`                    |
 | `allowed_users`          | out-of-band (config); not written at runtime   |
@@ -598,35 +600,93 @@ Invariants:
                 ▼         ▼          │
             uploaded   failed ───────┘
                 │    (retry loop via storage_sync)
+                │
                 ▼
-             deleted (soft)
+         deletion_requested
+                │
+          ┌─────┴─────┐
+          ▼           ▼
+       deleted   delete_failed
 ```
 
-States: `pending`, `uploaded`, `failed`, `deleted`.
+States: `pending`, `uploaded`, `failed`, `deletion_requested`,
+`deleted`, `delete_failed`. All deletions are soft in SQLite;
+S3 object deletion (when applicable) is driven by `storage/sync`.
 
 Transitions:
 
-| From       | To         | Trigger                                                     | Transaction                              | Side effects                                                | Retry                                   | User-visible notification |
-| ---------- | ---------- | ----------------------------------------------------------- | ---------------------------------------- | ----------------------------------------------------------- | --------------------------------------- | ------------------------- |
-| —          | `pending`  | Artifact captured (attachment, generated, snapshot).        | Atomic with the insert.                  | Local file written; `storage_key` computed; `storage_sync` job enqueued for eligible retention classes. | N/A.                                    | N/A.                      |
-| `pending`  | `uploaded` | S3 `PUT` succeeded (`storage/sync`).                        | Single-row update after S3 returns OK.   | `uploaded_at` set.                                          | Terminal unless soft-deleted later.     | N/A.                      |
-| `pending`  | `failed`   | S3 `PUT` failed non-transiently or budget exhausted.        | Single-row update.                       | `error_json` set.                                           | `storage_sync` may later move `failed → pending` for another attempt. | Admin notice only.        |
-| `failed`   | `pending`  | Retry scheduler decided to reattempt.                       | Single-row update.                       | —                                                           | Bounded by `max_attempts` per attempt.  | N/A.                      |
-| `uploaded` | `deleted`  | User or system soft-deletes (e.g. `/forget_last_attachment`). | Single-row update.                     | `deleted_at` set; S3 object optionally `DELETE`d by a later sync pass (configurable). | N/A.                                    | Command acknowledgment.   |
-| `pending`  | `deleted`  | Soft-delete before upload finishes.                         | Single-row update + sync job cancel.     | Local file removed; no S3 call made.                         | N/A.                                    | Command acknowledgment.   |
+| From                  | To                    | Trigger                                                          | Transaction                              | Side effects                                                                                            | Retry                                                      | User-visible notification |
+| --------------------- | --------------------- | ---------------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | ------------------------- |
+| —                     | `pending`             | Artifact captured (attachment, generated, snapshot).             | Atomic with the insert.                  | Local file written; `storage_key` computed; `storage_sync` job enqueued for eligible retention classes. | N/A.                                                       | N/A.                      |
+| `pending`             | `uploaded`            | S3 `PUT` succeeded (`storage/sync`).                             | Single-row update after S3 returns OK.   | `uploaded_at` set.                                                                                      | Terminal unless `deletion_requested` is later applied.     | N/A.                      |
+| `pending`             | `failed`              | S3 `PUT` failed non-transiently or budget exhausted.             | Single-row update.                       | `error_json` set.                                                                                       | `storage/sync` may later move `failed → pending` again.    | Admin notice only.        |
+| `failed`              | `pending`             | Retry scheduler decided to reattempt.                            | Single-row update.                       | —                                                                                                       | Bounded by `max_attempts` per attempt.                     | N/A.                      |
+| `uploaded` / `pending`| `deletion_requested`  | `/forget_artifact <id>` or revoked `long_term` promotion.        | Single-row update + sync job enqueued.   | `deleted_at` not yet set; S3 `DELETE` scheduled.                                                        | N/A.                                                       | Command acknowledgment.   |
+| `deletion_requested`  | `deleted`             | S3 `DELETE` succeeded (or `storage_backend = local` so only local file removed). | Single-row update.                       | `deleted_at` set; local file removed; `memory_artifact_links` rows that reference this row removed in the same txn. | Terminal.                                                  | Optional admin acknowledgment. |
+| `deletion_requested`  | `delete_failed`       | S3 `DELETE` failed non-transiently (credentials / not-found race / network). | Single-row update.                       | `error_json` set; local file retained for inspection.                                                    | Not auto-retried; surfaces via `/doctor` for operator.     | Admin notice.             |
 
 Invariants:
 
 1. `uploaded` is the only state that satisfies the `long_term`
    preconditions in §5.2 invariant 5.
 2. A `failed` row is never silently dropped; either it reaches
-   `uploaded` via retry, or it is surfaced by `/doctor`.
-3. Soft-delete never hard-removes the row; deletion is reversible
-   via ops procedures. Hard delete is out of scope for P0.
-4. `ephemeral` artifacts are not represented with
-   `status = uploaded`; they live and die in the local FS.
+   `uploaded` via retry, `deletion_requested` via user forget,
+   or it surfaces via `/doctor`.
+3. `deleted` is a soft-delete marker. Hard row-level deletion is
+   out of scope for P0; ops can reverse via `deletion_requested
+   → pending` if the object is still retrievable.
+4. `delete_failed` requires operator action. `storage/sync` does
+   not auto-retry these; it records the error and moves on.
+5. `ephemeral` artifacts never reach `uploaded`; they live and
+   die in the local FS.
 
-### 6.5 Interactions between machines (summary)
+### 6.5 `memory_items.status`
+
+```
+                 ┌─────────┐
+                 │ active  │
+                 └────┬────┘
+                      │
+               ┌──────┼──────┐
+               ▼             ▼
+         superseded      revoked
+             │               │
+             ▼               │
+         revoked ◄───────────┘
+           (terminal tombstone)
+```
+
+States: `active`, `superseded`, `revoked`. All transitions are
+single-row updates; there is no hard delete in P0.
+
+Transitions:
+
+| From          | To            | Trigger                                                 | Transaction                                   | Side effects                                                         | Retry | User-visible notification       |
+| ------------- | ------------- | ------------------------------------------------------- | --------------------------------------------- | -------------------------------------------------------------------- | ----- | ------------------------------- |
+| —             | `active`      | `memory/summary` promotes a summary item; or `commands/correct` inserts a correction. | Atomic with the insert.                       | `source_turn_ids` populated.                                         | N/A.  | Footer line in the owning reply. |
+| `active`      | `superseded`  | `commands/correct` inserted a new row whose `supersedes_memory_id` points here. | Same txn as the new row's `INSERT`.           | `status_changed_at` set.                                             | N/A.  | Footer `정정함: <old> → <new>`. |
+| `active`      | `revoked`     | `/forget_memory <id>` or `/forget_session`.             | Single-row update.                            | `status_changed_at` set.                                             | N/A.  | Command acknowledgment.          |
+| `superseded`  | `revoked`     | `/forget_memory <id>` on a superseded row.              | Single-row update.                            | `status_changed_at` set.                                             | N/A.  | Command acknowledgment.          |
+
+Invariants:
+
+1. Only `status = active` items are eligible for injection via
+   `context/packer` (HLD §10.3 drop order always skips
+   non-active).
+2. A new `active` row with `supersedes_memory_id = X` must flip
+   `X` from `active` to `superseded` in the **same transaction**
+   that inserts the new row. This is the "supersede, not
+   overwrite" guarantee referenced by PRD §12.2a and
+   DEC-007.
+3. `revoked` is terminal. A later correction attempt against a
+   revoked id creates a fresh `active` row (no `supersedes`
+   pointer) and logs the event.
+4. `long_term` personal preferences (per PRD §12.2) require
+   `provenance ∈ {user_stated, user_confirmed}`. Items that do
+   not meet this rule are never promoted out of the session
+   summary, regardless of `status`.
+
+### 6.6 Interactions between machines (summary)
 
 - `telegram_updates → enqueued` is the **only** legitimate creator of
   a `provider_run` job from the inbound path.
@@ -1145,15 +1205,30 @@ dependency in P0.
 
 ### 11.1 Triggers
 
-- **`/summary`**: on-demand snapshot of the current session; does
-  not change `sessions.status`.
-- **`/end`**: summary + close the session; next DM creates a new
-  `session_id`.
-- **Policy-driven**: after a configurable turn count, the worker
-  may enqueue a `summary_generation` job implicitly (optional in
-  P0; disabled by default).
+Per PRD §12.3 and DEC-019, two classes of triggers exist:
 
-All three routes produce identical artifacts.
+- **Explicit** (always allowed):
+  - `/summary` — on-demand snapshot of the current session; does
+    not change `sessions.status`.
+  - `/end` — summary + close the session; the next DM creates a
+    new `session_id`.
+- **Automatic** (gated by a throttle):
+  - A `summary_generation` job is enqueued automatically when any
+    one of the following is true and **the throttle is
+    satisfied**:
+    - `turn_count ≥ 20` since the last summary for this session.
+    - `transcript_estimated_tokens ≥ 6_000`.
+    - `session_age ≥ 24h`.
+  - **Throttle**: automatic triggers fire only when **≥ 8 new
+    user turns** have occurred since the previous summary. This
+    prevents near-simultaneous re-summaries around the thresholds.
+- The automatic check runs inside the worker after each
+  `provider_run` transitions to `succeeded`. It never runs during
+  a `provider_run` because it would change context-packer input
+  mid-job.
+
+All three routes (`/summary`, `/end`, automatic) produce identical
+`memory_summaries` + local file artifacts.
 
 ### 11.2 Generation procedure
 
@@ -1511,26 +1586,39 @@ Telegram, the boot version logs it.
 
 ### 16.1 Checks (P0)
 
-| Check                          | Pass criterion                                               |
-| ------------------------------ | ------------------------------------------------------------ |
-| `config_loaded`                | All required config fields present; none contain obvious placeholders. |
-| `sqlite_open_wal`              | `PRAGMA journal_mode` returns `wal`; a test write+read succeeds. |
-| `migrations_applied`           | Schema version matches the code's expected version.          |
-| `telegram_api_reachable`       | `getMe` returns 200; bot id matches config.                  |
-| `claude_binary_present`        | Claude CLI present at configured path; `--version` returns.  |
-| `claude_version_pinned`        | Version matches the value recorded in `03_RISK_SPIKES.md`.   |
-| `s3_endpoint_smoke`            | `put` + `get` + `stat` + `list` + `delete` on a temp key per PRD §12.8. AC16. |
-| `disk_free_ok`                 | Free bytes > configured threshold for SQLite + local storage. |
-| `interrupted_jobs`             | Count of `status = interrupted` (informational; > 0 is a warn). |
-| `stale_pending_notifications`  | Count of `pending` older than N minutes (warn threshold).    |
-| `stale_pending_storage_sync`   | Count of `pending`/`failed` `storage_objects` older than N minutes. |
-| `orphan_processes`             | 0 orphan Claude process groups from `provider_runs`.         |
-| `redaction_boundary_quick`     | A small self-test string containing a known pattern is redacted correctly. |
+Per DEC-017, `/doctor` is a single command in P0. Each check is
+tagged as `quick` or `deep` in the output and every line reports
+`category`, `duration_ms`, and `status` (`ok | warn | fail`).
+
+| Check                          | Category | Pass criterion                                               |
+| ------------------------------ | -------- | ------------------------------------------------------------ |
+| `config_loaded`                | quick    | All required config fields present; none contain obvious placeholders. |
+| `sqlite_open_wal`              | quick    | `PRAGMA journal_mode` returns `wal`; a test write+read succeeds. |
+| `migrations_applied`           | quick    | Schema version matches the code's expected version.          |
+| `telegram_api_reachable`       | quick    | `getMe` returns 200; bot id matches config.                  |
+| `claude_binary_present`        | quick    | Claude CLI present at configured path; `--version` returns.  |
+| `claude_version_pinned`        | quick    | Version matches the value recorded in `03_RISK_SPIKES.md`.   |
+| `redaction_boundary_quick`     | quick    | A small self-test string containing a known pattern is redacted correctly. |
+| `bootstrap_whoami_guard`       | quick    | If `BOOTSTRAP_WHOAMI=true`, remaining auto-expiry time is reported; `warn` while on, `fail` past the 30-minute window (DEC-009). |
+| `s3_endpoint_smoke`            | deep     | `put` + `get` + `stat` + `list` + `delete` on a temp key per PRD §12.8. AC16. |
+| `claude_lockdown_smoke`        | deep     | A short prompt under `--tools ""` + `--permission-mode dontAsk` produces no interactive prompt and no fs writes outside Claude's session path (SP-05). |
+| `subprocess_teardown_smoke`    | deep     | `Bun.spawn` detached process-group kill completes within the grace + hard-kill budget (SP-07). |
+| `disk_free_ok`                 | deep     | Free bytes > configured threshold for SQLite + local storage; S3 degraded thresholds (DEC-018) not exceeded. |
+| `interrupted_jobs`             | deep     | Count of `status = interrupted` (informational; > 0 is a warn). |
+| `stale_pending_notifications`  | deep     | Count of `pending` older than `stale_threshold_ms` (warn). |
+| `stale_pending_storage_sync`   | deep     | Count of `pending`/`failed` `storage_objects` older than `stale_threshold_ms`. |
+| `orphan_processes`             | deep     | 0 orphan Claude process groups from `provider_runs`.         |
+
+If aggregate `/doctor` latency exceeds the Phase-10 budget, split
+into `/doctor deep`, `/doctor s3`, `/doctor claude` per DEC-017.
+Until then a single command runs both categories and reports the
+totals.
 
 ### 16.2 Output
 
 - Command version: a single Telegram message listing each check
-  with `ok`/`warn`/`fail` and, when failing, a short reason.
+  with `category`, `duration_ms`, and `ok`/`warn`/`fail`; a
+  short reason for any non-`ok` line.
 - Boot version: structured log, plus a rolled-up `boot_doctor`
   event used by the runbook.
 
