@@ -405,7 +405,9 @@ does not issue `INSERT` / `UPDATE` / `DELETE` on that table.
 | `storage_objects.status` (transitions) | `storage/sync` (`pending ↔ failed`, `→ uploaded`, `deletion_requested → deleted | delete_failed`), `startup/recovery`, `commands/forget_artifact` (`→ deletion_requested`) |
 | `memory_artifact_links`  | `memory/summary`, `commands/save_last_attachment`, `commands/forget_artifact` (delete) |
 | `outbound_notifications` (insert) | `queue/worker`, `commands/*`          |
-| `outbound_notifications.status` | `telegram/outbound`                    |
+| `outbound_notifications.status` | `telegram/outbound` (derived roll-up from `outbound_notification_chunks`) |
+| `outbound_notification_chunks` (insert) | `queue/worker`, `commands/*` (in the same txn that inserts the parent `outbound_notifications` row) |
+| `outbound_notification_chunks.status` | `telegram/outbound` |
 | `allowed_users`          | out-of-band (config); not written at runtime   |
 
 ### 5.2 Cross-table invariants
@@ -601,14 +603,32 @@ Invariants:
 
 States: `pending`, `sent`, `failed`.
 
-Transitions:
+`outbound_notifications.status` is a **roll-up** of the per-chunk
+ledger in `outbound_notification_chunks` (PRD Appendix D). Every
+logical notification has `chunk_count ≥ 1` chunk rows inserted
+atomically with the parent row; `telegram/outbound` operates on
+chunk rows, and the parent's `status` is derived:
+
+- parent `sent` iff every chunk row has `status = 'sent'`;
+- parent `failed` iff at least one chunk reached non-retryable
+  `failed` and no chunk is still `pending`;
+- parent `pending` otherwise.
+
+Retry semantics live at the chunk level: `notification_retry`
+selects chunk rows with `status IN ('pending', 'failed')` whose
+retry budget is not exhausted; a chunk with `status = 'sent'` is
+**never** resent. This is what makes mid-stream failure
+(e.g. chunks 1–2 sent, chunk 3 failed) safe to retry without
+re-sending the earlier chunks to the user (PRD §8.4, AC39).
+
+Transitions (parent row, derived):
 
 | From      | To        | Trigger                                            | Transaction                                    | Side effects                                                 | Retry                                                   | User-visible notification |
 | --------- | --------- | -------------------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------- | ------------------------- |
-| —         | `pending` | Row inserted (by worker on terminal transition, by command, by summary). | Atomic with whatever write triggers it.        | Payload computed, `payload_hash` set.                        | Duplicate `(job_id, notification_type, payload_hash)` → no new row. | N/A.                      |
-| `pending` | `sent`    | `telegram/outbound` successfully called `sendMessage`. | Single-row update.                           | `sent_at`, `telegram_message_ids_json` set.                  | Terminal.                                               | The message itself.       |
-| `pending` | `failed`  | `sendMessage` returned a non-retryable error, or retry budget exhausted. | Single-row update.                  | `error_json`, `attempt_count` updated.                        | Manual or next-restart requeue; doctor flags.           | Admin notice only.        |
-| `failed`  | `pending` | `notification_retry` job ran and decided this row should be reattempted. | Single-row update.                     | `attempt_count` incremented on the next send attempt.         | Bounded by `max_attempts`.                              | N/A.                      |
+| —         | `pending` | Row inserted (by worker on terminal transition, by command, by summary). | Atomic with the chunk-row inserts.             | Payload computed, `payload_hash` set; `chunk_count` chunk rows inserted with `status = 'pending'`. | Duplicate `(job_id, notification_type, payload_hash)` → no new row. | N/A.                      |
+| `pending` | `sent`    | Last remaining chunk row reached `sent`.           | Same txn as the last chunk transition.         | `sent_at` set; `telegram_message_ids_json` populated from chunk rows in order. | Terminal.                                               | The chunk messages themselves. |
+| `pending` | `failed`  | Retry budget exhausted on at least one chunk and no chunk is still `pending`. | Same txn as the last chunk transition. | `error_json` summarises the worst chunk failure; `attempt_count` reflects notification-level passes. | Manual / operator requeue; doctor flags.                | Admin notice only.        |
+| `failed`  | `pending` | `notification_retry` decided to reattempt at least one `failed` chunk. | Same txn as the chunk `failed → pending` flip. | Notification-level `attempt_count` incremented. Already-`sent` chunks are not touched. | Bounded by `max_attempts`.                              | N/A.                      |
 
 Invariants:
 
@@ -943,21 +963,34 @@ Failure modes:
 
 Happy path:
 
-1. `notification_retry` job scans `outbound_notifications` with
-   `status = pending` or `failed` that are within the retry
-   budget.
-2. For each, `telegram/outbound` attempts `sendMessage`.
-3. Success → `status = sent`. Non-retryable → `status = failed`
-   (terminal).
+1. `notification_retry` job scans `outbound_notification_chunks`
+   with `status IN ('pending', 'failed')` that are within the
+   per-chunk retry budget, ordered by parent
+   `outbound_notification_id` and `chunk_index`.
+2. For each eligible chunk, `telegram/outbound` attempts
+   `sendMessage` for that single chunk only.
+3. On success: chunk `status = sent`, `telegram_message_id`
+   recorded. In the same transaction, if this was the last
+   remaining chunk for its parent, flip the parent row to `sent`
+   and populate `telegram_message_ids_json`.
+4. On non-retryable error: chunk `status = failed` with
+   `error_json`. Parent row's `status` is re-derived (`failed`
+   iff no chunk is still `pending`, otherwise remains `pending`).
+
+Correctness rule: a chunk with `status = 'sent'` is **never**
+selected for retry. If chunks 1–2 are sent and chunk 3 fails, the
+retry loop sends only chunk 3; the user does not receive chunks 1–2
+again because of this retry path.
 
 Failure modes:
 
-- Telegram outage: rows stay `pending` / move to `failed`; next
+- Telegram outage: chunks stay `pending` / move to `failed`; next
   retry cycle picks them up; `storage_sync` and `provider_run`
   remain unaffected.
-- Message formatting issue (e.g. payload too large): split per
-  Telegram limits; treat oversize as a non-retryable error if
-  splitting is not possible; record in `error_json`.
+- Message formatting issue for a single chunk (e.g. payload too
+  large after a formatting bug): treat as non-retryable for that
+  chunk; record in `error_json`. Other chunks in the same
+  notification proceed independently.
 
 ### 7.8 Redaction boundary (flow view)
 

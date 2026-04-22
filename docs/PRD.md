@@ -1259,6 +1259,7 @@ test/
 ```
 telegram_updates
 outbound_notifications
+outbound_notification_chunks
 jobs
 sessions
 turns
@@ -1289,19 +1290,62 @@ settings
 
 **`outbound_notifications`**
 
+One row per **logical** notification (a single `job_completed`,
+`summary`, etc.). When the payload must be split across multiple
+Telegram messages, each physical chunk is tracked in
+`outbound_notification_chunks` (below); this row's `status` is
+the roll-up.
+
 | 컬럼 | 타입 | 설명 |
 |------|------|------|
 | `id` | TEXT | UUID |
 | `job_id` | TEXT | |
 | `chat_id` | TEXT | |
 | `notification_type` | TEXT | `job_accepted` \| `job_completed` \| `job_failed` \| `job_cancelled` \| `summary` \| `doctor` |
-| `payload_hash` | TEXT | |
-| `status` | TEXT | `pending` \| `sent` \| `failed` |
-| `telegram_message_ids_json` | TEXT | nullable |
-| `attempt_count` | INTEGER | |
-| `error_json` | TEXT | nullable |
+| `payload_hash` | TEXT | Hash of the full logical payload. |
+| `chunk_count` | INTEGER | ≥ 1. Number of physical messages this logical notification spans. |
+| `status` | TEXT | `pending` \| `sent` \| `failed`. Roll-up: `sent` ⇔ all chunks `sent`; `failed` iff at least one non-retryable chunk failure and no chunk is still `pending`; otherwise `pending`. |
+| `telegram_message_ids_json` | TEXT | nullable; denormalised list of successful chunk `telegram_message_id` values in chunk order. Authoritative source is `outbound_notification_chunks`. |
+| `attempt_count` | INTEGER | Number of notification-level retry passes (NOT the sum of per-chunk attempts). |
+| `error_json` | TEXT | nullable; summary of the last failure. |
 | `created_at` | DATETIME | |
-| `sent_at` | DATETIME | nullable |
+| `sent_at` | DATETIME | nullable; set when the last remaining chunk reaches `sent`. |
+
+**`outbound_notification_chunks`**
+
+One row per **physical** Telegram message within a logical
+notification. Required to make chunk retries correct: if chunks
+1–2 were sent and chunk 3 failed, the retry pass must resend
+chunk 3 only, never chunks 1–2. At-least-once delivery is still
+allowed, but per-chunk duplication caused solely by bad retry
+accounting is not.
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| `id` | TEXT | UUID |
+| `outbound_notification_id` | TEXT | FK → `outbound_notifications.id`. |
+| `chunk_index` | INTEGER | 1-based. Unique with `outbound_notification_id`. |
+| `chunk_count` | INTEGER | Denormalised copy of the parent row's `chunk_count` for ordering sanity checks. |
+| `payload_text_hash` | TEXT | Hash of the chunk's text content (for audit + debug; never the raw text). |
+| `status` | TEXT | `pending` \| `sent` \| `failed`. |
+| `telegram_message_id` | TEXT | nullable; populated on successful `sendMessage`. |
+| `attempt_count` | INTEGER | Per-chunk attempts. |
+| `error_json` | TEXT | nullable. |
+| `sent_at` | DATETIME | nullable. |
+| `created_at` | DATETIME | |
+
+Invariants:
+
+- Every `outbound_notifications` row has exactly `chunk_count`
+  `outbound_notification_chunks` rows, created atomically with the
+  parent row.
+- `notification_retry` only selects chunks with `status IN
+  ('pending', 'failed')` whose retry budget is not exhausted. A
+  chunk with `status = 'sent'` is **never** resent.
+- `outbound_notifications.status` is derived from the chunk roll-up
+  and is never mutated without a corresponding chunk transition.
+- `provider_runs.status` / `jobs.status` do not roll back when a
+  chunk fails (PRD AC12, AC26, AC39).
 
 **`jobs`**
 
