@@ -1327,12 +1327,57 @@ settings
 | `idempotency_key` | TEXT | |
 | `safe_retry` | BOOLEAN | |
 
+**`provider_runs`**
+
+Records a single provider subprocess execution. One `jobs` row of type
+`provider_run` may own one or more `provider_runs` rows over its
+lifetime (e.g. a failed resume attempt followed by a replay_mode
+retry — both are recorded, but only one `jobs` row exists).
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| `id` | TEXT | UUID. |
+| `job_id` | TEXT | FK → `jobs.id`. |
+| `session_id` | TEXT | FK → `sessions.id`. |
+| `provider` | TEXT | `claude` in P0; other values rejected. |
+| `provider_session_id` | TEXT | nullable; returned by Claude via `meta` event. |
+| `context_packing_mode` | TEXT | `resume_mode` \| `replay_mode`. |
+| `status` | TEXT | `started` \| `succeeded` \| `failed` \| `cancelled` \| `interrupted`. Records the **subprocess** outcome; independent of `jobs.status` (see invariants). |
+| `argv_json_redacted` | TEXT | Spawn argv with secrets redacted per §15; used for `/doctor` replay and audit. |
+| `cwd` | TEXT | Process working directory at spawn time. |
+| `process_id` | INTEGER | nullable; PID of the spawned subprocess. |
+| `process_group_id` | INTEGER | nullable; PGID used by `/cancel` (§14) and startup orphan sweep (§15). |
+| `provider_version` | TEXT | nullable; captured via `claude --version` or equivalent if available. |
+| `injected_snapshot_json` | TEXT | Redacted snapshot of the context packed for this run (identity + summary + recent turns in `replay_mode`, delta only in `resume_mode`). |
+| `usage_json` | TEXT | nullable; token counts etc. parsed from meta events. |
+| `parser_status` | TEXT | `parsed` \| `fallback_used` \| `parse_error`. Terminal parser outcome for the whole run. |
+| `error_type` | TEXT | nullable; e.g. `resume_failed`, `timeout`, `argv_too_long`, `permission_prompt`. |
+| `started_at` | DATETIME | |
+| `finished_at` | DATETIME | nullable until terminal. |
+
+Invariants:
+
+- `jobs.status` is the source of truth for orchestration state
+  (queued/running/succeeded/…). `provider_runs.status` is the source
+  of truth for subprocess execution and is what `/doctor` and
+  parser-fixture tests inspect.
+- A `provider_runs` row with `status = failed, error_type =
+  'resume_failed'` does **not** imply `jobs.status = failed`; the
+  owning job may be flipped back to `queued` in `replay_mode` per
+  HLD §8.2 / §6.2 resume-fallback transition.
+- `storage_sync` and `notification_retry` failures **never** mutate
+  `provider_runs.status`; provider subprocess success stands
+  independently of downstream delivery (PRD AC12, AC25, AC26).
+- Every `provider_raw_events` row has a `provider_run_id` pointing
+  at a `provider_runs` row; raw events are useless without the
+  enclosing run record.
+
 **`provider_raw_events`**
 
 | 컬럼 | 타입 | 설명 |
 |------|------|------|
 | `id` | TEXT | UUID |
-| `provider_run_id` | TEXT | |
+| `provider_run_id` | TEXT | FK → `provider_runs.id` |
 | `event_index` | INTEGER | |
 | `stream` | TEXT | `stdout` \| `stderr` |
 | `redacted_payload` | TEXT | |

@@ -433,6 +433,23 @@ one should have a ledger integration test (playbook §8.2).
 7. **Session scope**: `turns.session_id` and
    `memory_summaries.session_id` resolve to a real `sessions.id`
    from the same `chat_id`.
+8. **Status source-of-truth split**: `jobs.status` is the
+   orchestration source of truth (claimed, running, retried,
+   done). `provider_runs.status` is the subprocess-execution
+   source of truth (started, succeeded, failed, interrupted,
+   cancelled). The two are related but not equivalent:
+   - A single `jobs` row of type `provider_run` can own **multiple**
+     `provider_runs` rows over its lifetime (e.g. a failed
+     `resume_mode` attempt followed by a `replay_mode` retry on the
+     same `jobs.id`, per §6.2 resume-fallback transition).
+   - `jobs.status = succeeded` requires **at least one**
+     `provider_runs.status = succeeded` for the same `job_id`, in
+     addition to invariant 3 above.
+   - `provider_runs.status = failed` does **not** by itself imply
+     `jobs.status = failed`; the worker may re-queue the same job
+     in a different `context_packing_mode`.
+   - `storage_sync` and `notification_retry` outcomes **never**
+     mutate `provider_runs.status` (PRD AC12, AC25, AC26).
 
 ### 5.3 Idempotency keys
 
