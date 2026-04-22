@@ -448,6 +448,12 @@ A job `INSERT` on a duplicate `idempotency_key` is a no-op; the
 existing row is returned. This is the mechanism that makes retried
 Telegram updates, retried summaries, and retried syncs safe.
 
+The no-op rule applies to `INSERT` only. In-place mutations of an
+existing `jobs` row (e.g. `running → queued` resume-fallback
+in §8.2, `interrupted → queued` at boot) reuse the same row and
+the same `idempotency_key`; they are not inserts and therefore
+are not subject to this rule.
+
 ### 5.4 Time
 
 All timestamps are UTC, stored as SQLite `DATETIME` (ISO-8601 text in
@@ -541,6 +547,7 @@ Transitions:
 | `running`    | `interrupted` | Process restart detected a stale `running` row at boot (§15).   | Single txn at boot.                      | `finished_at` = now; note added.                                          | If `safe_retry`: transition `interrupted → queued` in same boot pass. | Admin notice; `job_failed` only if terminal. |
 | `queued`     | `cancelled`   | `/cancel` on a not-yet-running job.                             | Atomic single-row update.                | `finished_at` set.                                                        | N/A.                                            | `job_cancelled`.                |
 | `interrupted`| `queued`      | Recovery decided to re-queue (`safe_retry = true`).             | Same boot txn as the `running → interrupted` that preceded it. | `attempts` unchanged; may be rate-capped.                                 | Normal worker flow from here.                   | Optional admin notice.          |
+| `running`    | `queued`      | Resume-fallback: Claude `--resume` failed mid-run; worker flips the same job into `replay_mode` without inserting a new row (§8.2). | Single txn: update `status`, set `request_json.context_packing_mode = 'replay_mode'`, set `result_json.resume_failed = true`; the failed provider attempt is recorded in a separate `provider_runs` row with `status = failed, error_type = 'resume_failed'`. | `attempts` unchanged; `idempotency_key` unchanged (no new insert, so §5.3 no-op rule does not apply). | Next worker claim runs `replay_mode`; normal failure semantics apply from there. | None (user still waiting). |
 
 Invariants:
 
@@ -972,10 +979,22 @@ Rules:
    passed, and the resulting `provider_session_id` returned by
    Claude.
 2. A failed `--resume` (session not found on Claude's side) does
-   **not** silently fall back mid-call; the adapter exits and the
-   worker re-queues the job in `replay_mode` with the same
-   `idempotency_key`. This keeps replay/resume semantics testable
-   (playbook §6.1.6).
+   **not** silently fall back mid-call. The adapter exits,
+   records a `provider_runs` row with
+   `status = failed, error_type = 'resume_failed'`, and the worker
+   retries the **same** `jobs` row in `replay_mode`. Concretely, in
+   a single transaction:
+   - `jobs.status` transitions `running → queued` via the
+     resume-fallback path (§6.2 transition "resume fallback").
+   - `jobs.request_json.context_packing_mode` is set to
+     `replay_mode`; `jobs.result_json.resume_failed = true` for
+     observability.
+   - `attempts` is not incremented for the fallback; the next
+     worker claim increments it normally.
+   No new job is inserted and `idempotency_key` is unchanged —
+   the §5.3 duplicate-insert no-op rule is irrelevant because the
+   existing row is mutated in place. This keeps replay/resume
+   semantics testable (playbook §6.1.6).
 3. Resume must not double-answer: if the adapter detects the stream
    is replaying an already-persisted assistant turn, it treats it
    as an anomaly and logs it (spike §6.1.6 precondition).
