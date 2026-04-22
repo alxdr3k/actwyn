@@ -108,10 +108,10 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
   redaction. A CI grep check enforces the rule.
 - Alternatives considered: per-module helpers with shared
   constants; redact as middleware in the DB driver.
-- Impacted docs: PRD §15, AC10; HLD §13.
+- Impacted docs: PRD §15, AC-SEC-001; HLD §13.
 - Risks / mitigations: subtle bypass (e.g. a logger that prints
   raw objects) still possible; mitigated by a property test on
-  seeded patterns across every durable dump (AC10).
+  seeded patterns across every durable dump (AC-SEC-001).
 - Review trigger: switch to a logging library that serializes
   objects outside the redactor.
 - Supersedes / superseded by: —
@@ -150,7 +150,7 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
   entry.
 - Alternatives considered: ship the AWS SDK from the start
   (heavier dep tree); wait for a future Bun release.
-- Impacted docs: PRD §12.7; HLD §12; AC16.
+- Impacted docs: PRD §12.7; HLD §12; AC-OBS-001.
 - Risks / mitigations: Bun.S3Client surprises (range reads,
   multipart, error shapes) — SP-08 exercises the full CRUD
   matrix; fallback path is documented.
@@ -286,7 +286,7 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
   one-shot CLI subcommand printing IDs without starting the
   service.
 - Impacted docs: PRD §8.3; HLD §9.2, §16.1; 05_RUNBOOK §12;
-  AC01.
+  AC-TEL-001.
 - Risks / mitigations: operator forgets to turn it off —
   auto-expiry ensures the hole closes on its own.
 - Review trigger: Security review prior to P0 acceptance.
@@ -313,7 +313,7 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
   store.
 - Alternatives considered: general-purpose DLP; patterns only;
   manual review pre-release.
-- Impacted docs: PRD §15, AC10; HLD §13.2.
+- Impacted docs: PRD §15, AC-SEC-001; HLD §13.2.
 - Risks / mitigations: new secret types are not caught — the
   pattern list is extensible, and every failure surfaces via
   the Sev-A path in Runbook §8.
@@ -384,7 +384,7 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
   product's value hypothesis.
 - Decision: P0 is declared succeeded only when both gates
   pass:
-  1. Technical: all AC01..AC25+ green on the staging host
+  1. Technical: all AC-TEL-001..AC-STO-006+ green on the staging host
      (06_ACCEPTANCE_TESTS).
   2. Dogfood: 7 calendar days of daily use by the authorized
      user with ≥ 20 user turns, ≥ 5 read session summaries,
@@ -484,7 +484,7 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
     resume `notification_retry`; no extra notice.
 - Alternatives considered: always-silent; boot summary every
   time; opt-in verbosity.
-- Impacted docs: PRD §8.5, §13.3, AC06; HLD §6.2, §15;
+- Impacted docs: PRD §8.5, §13.3, AC-JOB-002; HLD §6.2, §15;
   05_RUNBOOK §4.
 - Risks / mitigations: user misses a silent partial state —
   `/status` surfaces the backlog.
@@ -509,7 +509,7 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
   budget set in Phase 10.
 - Alternatives considered: split now; quick-only in P0; CLI
   flag.
-- Impacted docs: PRD §8.7; HLD §16; AC16.
+- Impacted docs: PRD §8.7; HLD §16; AC-OBS-001.
 - Risks / mitigations: `/doctor` grows slow — budget is
   measured in Phase 10 and split triggered by DEC update.
 - Review trigger: `/doctor` p95 latency exceeds budget.
@@ -535,7 +535,7 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
   Values are configurable in `config/storage.json`.
 - Alternatives considered: percentage-only; absolute-only; no
   hard cap.
-- Impacted docs: PRD §8.7, AC08, AC16; HLD §12.5, §16.1;
+- Impacted docs: PRD §8.7, AC-STO-001, AC-OBS-001; HLD §12.5, §16.1;
   05_RUNBOOK §7.
 - Risks / mitigations: thresholds are wrong for real workload
   — configurable values with one-line override; runbook

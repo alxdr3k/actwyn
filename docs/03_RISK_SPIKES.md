@@ -53,7 +53,7 @@ Rules:
 | SP-05  | Claude Code permission lockdown                  | §8.1, §11.2             | pending |
 | SP-06  | Claude Code `--session-id` / `--resume`          | §8.2, §10.2             | pending |
 | SP-07  | `Bun.spawn` detached process-group teardown      | §14                     | pending |
-| SP-08  | `Bun.S3Client` against Hetzner Object Storage    | §12, §16.1 (AC16)       | pending |
+| SP-08  | `Bun.S3Client` against Hetzner Object Storage    | §12, §16.1 (AC-OBS-001)       | pending |
 
 All spikes must reach `passed` before the Risk Spike gate
 (playbook §5.3) is declared met.
@@ -65,7 +65,7 @@ All spikes must reach `passed` before the Risk Spike gate
 - **HLD / PRD assumptions**: HLD §5.1 (atomic writer map), §6.2
   (atomic `queued → running` claim), §7.1 (offset advance in the
   same txn as status transition); PRD §12.7 (WAL, short
-  transactions, `busy_timeout`); PRD AC19.
+  transactions, `busy_timeout`); PRD AC-JOB-003.
 - **Acceptance criteria (pass when)**:
   1. The Bun version we pin can open an SQLite DB with
      `PRAGMA journal_mode = WAL` and the mode persists across
@@ -111,7 +111,7 @@ All spikes must reach `passed` before the Risk Spike gate
 
 - **HLD / PRD assumptions**: HLD §9.1 (long-poll loop with
   `allowed_updates=["message"]`), §9.4 (outbound delivery); PRD
-  §13.1 (direct `fetch`, no bot framework dependency); AC17.
+  §13.1 (direct `fetch`, no bot framework dependency); AC-TEL-004.
 - **Acceptance criteria (pass when)**:
   1. Direct `fetch` against the Bot API performs `getMe`,
      `getUpdates` (long-poll), `sendMessage`, and `getFile`
@@ -158,7 +158,7 @@ All spikes must reach `passed` before the Risk Spike gate
 ### SP-03 — Telegram offset durability under crash
 
 - **HLD / PRD assumptions**: HLD §6.1 (offset advance rule), §7.1
-  (crash cases), §9.5 (invariant restated); PRD §13.2; AC05, AC06.
+  (crash cases), §9.5 (invariant restated); PRD §13.2; AC-TEL-003, AC-JOB-002.
 - **Acceptance criteria (pass when)**:
   1. A crash (SIGKILL) after `telegram_updates` insert but
      before offset advance results in the same updates being
@@ -201,7 +201,7 @@ All spikes must reach `passed` before the Risk Spike gate
 ### SP-04 — Claude Code `stream-json` event shape
 
 - **HLD / PRD assumptions**: HLD §7.3, §8.3, §8.6; PRD §11
-  (provider adapter), AC15 (parser fixture normalizes to
+  (provider adapter), AC-PROV-005 (parser fixture normalizes to
   `final_text`).
 - **Acceptance criteria (pass when)**:
   1. For a short, non-coding prompt under
@@ -251,7 +251,7 @@ All spikes must reach `passed` before the Risk Spike gate
 - **HLD / PRD assumptions**: HLD §8.1 (conversational +
   advisory profiles with `--tools ""` and
   `--permission-mode dontAsk`), §11.2 (summary runs under
-  lockdown); PRD §15, Appendix E (banned flags); AC11 (no
+  lockdown); PRD §15, Appendix E (banned flags); AC-PROV-003 (no
   interactive permission prompt).
 - **Acceptance criteria (pass when)**:
   1. Under `--tools ""` + `--permission-mode dontAsk`, Claude
@@ -345,7 +345,7 @@ All spikes must reach `passed` before the Risk Spike gate
 
 - **HLD / PRD assumptions**: HLD §14 (spawn/run/teardown),
   §7.4 (/cancel), §15 (startup orphan sweep); PRD §15, §16.2;
-  AC14, AC18.
+  AC-PROV-004, AC-PROV-006.
 - **Acceptance criteria (pass when)**:
   1. `Bun.spawn(..., { detached: true })` on Linux creates a
      process with a new process group whose PGID equals its
@@ -393,7 +393,7 @@ All spikes must reach `passed` before the Risk Spike gate
 - **HLD / PRD assumptions**: HLD §12 (storage sync), §16.1
   (/doctor S3 smoke); PRD §12.7 (Bun.S3Client,
   `virtualHostedStyle=false` preference, fallback policy),
-  §12.8 (artifact archive), AC08, AC16.
+  §12.8 (artifact archive), AC-STO-001, AC-OBS-001.
 - **Acceptance criteria (pass when)**:
   1. `put`, `get`, `stat` (HEAD), `list`, and `delete` all
      succeed against the Hetzner endpoint with
@@ -427,11 +427,11 @@ All spikes must reach `passed` before the Risk Spike gate
 - **Fail response**:
   - If `Bun.S3Client` misbehaves against Hetzner: switch to
     `@aws-sdk/client-s3` (allowed as P0.5/P1 fallback per PRD
-    §12.7) and update 08_DECISION_REGISTER.md. Mark AC16 still satisfiable
+    §12.7) and update 08_DECISION_REGISTER.md. Mark AC-OBS-001 still satisfiable
     but through the fallback driver.
 - **Status**: pending
 - **Owner**: Staff Eng + SRE
-- **Target gate**: Risk Spike gate + AC16 P0 acceptance.
+- **Target gate**: Risk Spike gate + AC-OBS-001 P0 acceptance.
 
 ---
 

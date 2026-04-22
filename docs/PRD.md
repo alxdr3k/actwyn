@@ -265,7 +265,7 @@ queued → running → succeeded
 
 | 항목 | 설명 |
 |------|------|
-| S3 smoke | put / get / stat / list / delete 왕복 (AC16) |
+| S3 smoke | put / get / stat / list / delete 왕복 (AC-OBS-001) |
 | Claude lockdown smoke | `--tools ""` + `--permission-mode dontAsk` 동작 검증 |
 | Subprocess teardown smoke | `Bun.spawn` detached PGID kill 검증 |
 | Disk free | free bytes > 설정 threshold (§16 degraded mode) |
@@ -275,7 +275,7 @@ queued → running → succeeded
 
 S3 smoke 실패 시 local-only degraded mode로 표시하고
 `storage_sync` job은 retryable 상태로 유지한다. P0 acceptance는
-S3 smoke test 성공을 요구한다 (AC16). 전체 출력 계약과 구현
+S3 smoke test 성공을 요구한다 (AC-OBS-001). 전체 출력 계약과 구현
 스펙은 HLD §16.
 
 ---
@@ -1410,7 +1410,7 @@ Invariants:
 - `outbound_notifications.status` is derived from the chunk roll-up
   and is never mutated without a corresponding chunk transition.
 - `provider_runs.status` / `jobs.status` do not roll back when a
-  chunk fails (PRD AC12, AC26, AC39).
+  chunk fails (PRD AC-STO-002, AC-NOTIF-001, AC-NOTIF-003).
 
 **`jobs`**
 
@@ -1476,7 +1476,7 @@ Invariants:
   HLD §8.2 / §6.2 resume-fallback transition.
 - `storage_sync` and `notification_retry` failures **never** mutate
   `provider_runs.status`; provider subprocess success stands
-  independently of downstream delivery (PRD AC12, AC25, AC26).
+  independently of downstream delivery (PRD AC-STO-002, AC-STO-006, AC-MEM-003).
 - Every `provider_raw_events` row has a `provider_run_id` pointing
   at a `provider_runs` row; raw events are useless without the
   enclosing run record.

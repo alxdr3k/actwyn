@@ -73,8 +73,11 @@ redactor) is support infrastructure for those four state machines.
 
 ## 2. P0 Scope Recap
 
-This HLD covers only what is required to satisfy PRD §17 acceptance
-criteria AC01–AC25 with a Claude-only provider on a single CX22 host.
+This HLD covers only what is required to satisfy the P0 acceptance
+criteria enumerated in PRD §17 and tested in
+[`docs/06_ACCEPTANCE_TESTS.md`](./06_ACCEPTANCE_TESTS.md), with a
+Claude-only provider on a single CX22 host. "P0 done" is defined by
+the acceptance-test file, not by a fixed numeric AC range.
 
 In scope for P0:
 
@@ -193,10 +196,10 @@ ledger integration test (playbook §8.1) asserts against.
 - **Invariants**:
   1. Unauthorized updates are resolved to `telegram_updates.status =
      skipped` with a non-null `skip_reason` and never produce a
-     `jobs` row (AC01).
+     `jobs` row (AC-TEL-001).
   2. Every `jobs` row created by the inbound path carries an
      `idempotency_key` derived from `telegram_updates.update_id`; a
-     replayed update does not produce a second job (AC05).
+     replayed update does not produce a second job (AC-TEL-003).
   3. An attachment is recorded in `storage_objects` *before* any
      `turns` or memory reference points to it; retention class
      defaults to `session` (PRD §12.8.3, §13.5).
@@ -246,7 +249,7 @@ ledger integration test (playbook §8.1) asserts against.
      persisted in P0 (PRD §13.4).
   3. A successful run produces at least one assistant `turns` row
      whose text has been normalized via the documented
-     `stream-json → final_text` path (AC15).
+     `stream-json → final_text` path (AC-PROV-005).
 
 ### 4.5 `telegram/outbound`
 
@@ -297,7 +300,7 @@ ledger integration test (playbook §8.1) asserts against.
 - **Invariants**:
   1. Summary generation runs under Claude's advisory/chat lockdown
      profile (`--tools ""`, `--permission-mode dontAsk`) — no file
-     edit, no shell, no interactive prompt (AC11, PRD §12.3).
+     edit, no shell, no interactive prompt (AC-PROV-003, PRD §12.3).
   2. Long-term personal preferences require `provenance ∈
      {user_stated, user_confirmed}` (PRD §12.2).
 
@@ -314,7 +317,7 @@ ledger integration test (playbook §8.1) asserts against.
   1. `storage_sync` is the only writer that advances
      `storage_objects.status` to `uploaded`.
   2. `storage_sync` failure does not roll back any `provider_run`
-     success; it only re-pends the row (PRD §16.4, AC12, AC25).
+     success; it only re-pends the row (PRD §16.4, AC-STO-002, AC-STO-006).
   3. S3 object keys follow the PRD §12.8.4 pattern and never carry
      user-facing semantics.
 
@@ -329,7 +332,7 @@ ledger integration test (playbook §8.1) asserts against.
 - **Owns**: the redaction boundary (§13 of this doc).
 - **Invariants**:
   1. No Telegram token, S3 key, provider auth token, or API-key
-     pattern appears in any post-redaction store (AC10, PRD §15).
+     pattern appears in any post-redaction store (AC-SEC-001, PRD §15).
   2. Redaction runs **before** persistence, not during retrieval.
 
 ### 4.10 `commands/*`
@@ -348,7 +351,7 @@ ledger integration test (playbook §8.1) asserts against.
      no-op with a user-visible acknowledgment.
   2. `/whoami` is the only command that produces any response for an
      unauthorized user, and only when `BOOTSTRAP_WHOAMI=true`
-     (AC01).
+     (AC-TEL-001).
 
 ### 4.11 `startup/recovery`
 
@@ -457,7 +460,7 @@ one should have a ledger integration test (playbook §8.2).
      `jobs.status = failed`; the worker may re-queue the same job
      in a different `context_packing_mode`.
    - `storage_sync` and `notification_retry` outcomes **never**
-     mutate `provider_runs.status` (PRD AC12, AC25, AC26).
+     mutate `provider_runs.status` (PRD AC-STO-002, AC-STO-006, AC-MEM-003).
 
 ### 5.3 Idempotency keys
 
@@ -619,7 +622,7 @@ selects chunk rows with `status IN ('pending', 'failed')` whose
 retry budget is not exhausted; a chunk with `status = 'sent'` is
 **never** resent. This is what makes mid-stream failure
 (e.g. chunks 1–2 sent, chunk 3 failed) safe to retry without
-re-sending the earlier chunks to the user (PRD §8.4, AC39).
+re-sending the earlier chunks to the user (PRD §8.4, AC-NOTIF-003).
 
 Transitions (parent row, derived):
 
@@ -955,7 +958,7 @@ Failure modes:
   `error_json`; retry scheduler eventually moves it back to
   `pending`.
 - Credential revoked for extended period: `/doctor` surfaces the
-  condition; runs continue to succeed (PRD AC08).
+  condition; runs continue to succeed (PRD AC-STO-001).
 - Local file missing (disk cleaned up, bug): record a permanent
   `failed`; do not retry; admin must resolve.
 
@@ -1110,7 +1113,7 @@ class. No code path may open a transaction not listed here.
   flip `storage_objects.status` (`pending → uploaded`,
   `deletion_requested → deleted`) and set timestamps.
 - Prohibited: S3 I/O inside the transaction; mutation of
-  `provider_runs` or `jobs` (PRD AC12, AC25).
+  `provider_runs` or `jobs` (PRD AC-STO-002, AC-STO-006).
 
 **T9 — Startup recovery** (§7.9 / §15):
 - Single boot transaction: `running → interrupted` for every
@@ -1354,7 +1357,7 @@ here because it is the one that state drift most often violates:
 > the associated `jobs` rows, if any) has committed.**
 
 This is the invariant spike §6.1.3 exists to verify and the
-invariant AC06 (recovery behavior) relies on.
+invariant AC-JOB-002 (recovery behavior) relies on.
 
 ---
 
@@ -1558,7 +1561,7 @@ their `error_json.reason`.
 ### 12.4 Independence from provider success
 
 Explicit: a `storage_sync` failure never rolls back a
-`provider_run` succeeded status (AC12), and never prevents
+`provider_run` succeeded status (AC-STO-002), and never prevents
 `job_completed` notifications. Users see their response even if
 the S3 mirror is degraded.
 
@@ -1832,7 +1835,7 @@ tagged as `quick` or `deep` in the output and every line reports
 | `claude_version_pinned`        | quick    | Version matches the value recorded in `03_RISK_SPIKES.md`.   |
 | `redaction_boundary_quick`     | quick    | A small self-test string containing a known pattern is redacted correctly. |
 | `bootstrap_whoami_guard`       | quick    | If `BOOTSTRAP_WHOAMI=true`, remaining auto-expiry time is reported; `warn` while on, `fail` past the 30-minute window (DEC-009). |
-| `s3_endpoint_smoke`            | deep     | `put` + `get` + `stat` + `list` + `delete` on a temp key per PRD §12.8. AC16. |
+| `s3_endpoint_smoke`            | deep     | `put` + `get` + `stat` + `list` + `delete` on a temp key per PRD §12.8. AC-OBS-001. |
 | `claude_lockdown_smoke`        | deep     | A short prompt under `--tools ""` + `--permission-mode dontAsk` produces no interactive prompt and no fs writes outside Claude's session path (SP-05). |
 | `subprocess_teardown_smoke`    | deep     | `Bun.spawn` detached process-group kill completes within the grace + hard-kill budget (SP-07). |
 | `disk_free_ok`                 | deep     | Free bytes > configured threshold for SQLite + local storage; S3 degraded thresholds (DEC-018) not exceeded. |
@@ -1856,7 +1859,7 @@ totals.
 
 ### 16.3 Relation to acceptance
 
-AC16 requires `s3_endpoint_smoke` to pass for the P0 acceptance
+AC-OBS-001 requires `s3_endpoint_smoke` to pass for the P0 acceptance
 gate. Failure puts the system into a documented degraded mode
 (local-only) rather than refusing to start.
 
@@ -1915,7 +1918,7 @@ the boundaries above; this matches the playbook §7.2 build order.
 9. `memory/summary` (§11).
 10. `storage/local` + `storage/sync` (§12).
 11. `commands/*` and `/doctor` (§16).
-12. `startup/recovery` (§15) — hardened to pass AC06.
+12. `startup/recovery` (§15) — hardened to pass AC-JOB-002.
 13. systemd unit + RUNBOOK (playbook §10).
 
 Each vertical slice ends with at least one ledger integration
