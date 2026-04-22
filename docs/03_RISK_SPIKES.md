@@ -99,7 +99,7 @@ All spikes must reach `passed` before the Risk Spike gate
 - **Fail response**:
   - If WAL semantics or `BEGIN IMMEDIATE` are unreliable in the
     pinned Bun version: pin to an earlier/later version
-    (record in DECISIONS) or switch to `better-sqlite3` as a
+    (record in 08_DECISION_REGISTER.md) or switch to `better-sqlite3` as a
     fallback (PRD dependency amendment required).
 - **Status**: pending
 - **Owner**: Staff Eng
@@ -148,7 +148,7 @@ All spikes must reach `passed` before the Risk Spike gate
 - **Fail response**:
   - If direct fetch hits blockers (e.g. unexpected header
     requirements): add a thin wrapper or re-scope to a minimal
-    vetted library; record in DECISIONS.
+    vetted library; record in 08_DECISION_REGISTER.md.
 - **Status**: pending
 - **Owner**: Staff Eng
 - **Target gate**: Risk Spike gate.
@@ -239,7 +239,7 @@ All spikes must reach `passed` before the Risk Spike gate
   - If event shape is unstable across runs: widen the parser
     with generous fallbacks and add more fixtures; if the
     instability is version-related, freeze the provider version
-    and record in DECISIONS.
+    and record in 08_DECISION_REGISTER.md.
 - **Status**: pending
 - **Owner**: Staff Eng
 - **Target gate**: Risk Spike gate.
@@ -286,7 +286,7 @@ All spikes must reach `passed` before the Risk Spike gate
   - `spikes/SP-05/flags_used.txt` — the exact argv used.
 - **Fail response**:
   - If lockdown cannot be achieved: P0 blocks. Reopen
-    provider-choice discussion (DECISIONS) or carve out a
+    provider-choice discussion (08_DECISION_REGISTER.md) or carve out a
     tighter sandbox (systemd namespacing, AppArmor).
 - **Status**: pending
 - **Owner**: Staff Eng + Security
@@ -381,7 +381,7 @@ All spikes must reach `passed` before the Risk Spike gate
 - **Fail response**:
   - If `detached` does not produce a fresh process group on the
     target kernel: fall back to `unshare` / `setsid` wrapper;
-    document in DECISIONS and update HLD §14.1.
+    document in 08_DECISION_REGISTER.md and update HLD §14.1.
 - **Status**: pending
 - **Owner**: Staff Eng
 - **Target gate**: Risk Spike gate.
@@ -427,7 +427,7 @@ All spikes must reach `passed` before the Risk Spike gate
 - **Fail response**:
   - If `Bun.S3Client` misbehaves against Hetzner: switch to
     `@aws-sdk/client-s3` (allowed as P0.5/P1 fallback per PRD
-    §12.7) and update DECISIONS. Mark AC16 still satisfiable
+    §12.7) and update 08_DECISION_REGISTER.md. Mark AC16 still satisfiable
     but through the fallback driver.
 - **Status**: pending
 - **Owner**: Staff Eng + SRE

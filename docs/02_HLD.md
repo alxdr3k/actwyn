@@ -1606,7 +1606,7 @@ test against the corresponding state machine transitions.
 ## 19. Open Questions
 
 These are questions the HLD deliberately leaves open. Each will
-resolve to a `DECISIONS.md` entry or a PRD amendment, not silent
+resolve to a `08_DECISION_REGISTER.md` entry or a PRD amendment, not silent
 drift.
 
 1. **`sessions.status` machine**: P0 may need `active | ended`

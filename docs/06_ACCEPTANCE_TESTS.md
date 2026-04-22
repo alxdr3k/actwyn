@@ -372,7 +372,7 @@ Each entry uses:
 - **Oracle**:
   - The comparison script prints a green line; any new
     dependency triggers a PR failure until listed in the
-    allowlist or DECISIONS.
+    allowlist or 08_DECISION_REGISTER.md.
 - **Status**: pending.
 
 ## AC21 — Telegram attachment is captured into `storage_objects`

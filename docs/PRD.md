@@ -539,7 +539,7 @@ personal information.
 | `conversation_transcript`    | Session-scoped redacted conversation snapshot.             |
 | `memory_snapshot`            | Markdown/JSONL snapshot of a memory summary.               |
 | `parser_fixture`             | Captured stream-json fixture used to validate the parser.  |
-| `other`                      | Reserved; requires `DECISIONS.md` entry before first use.  |
+| `other`                      | Reserved; requires `08_DECISION_REGISTER.md` entry before first use.  |
 
 #### 12.8.2 Retention classes
 

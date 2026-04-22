@@ -47,7 +47,7 @@
 
 - **Operator / on-call**: project lead in P0. Single person.
 - **Escalation**: none in P0; document any unresolved issue in
-  `docs/DECISIONS.md` with dated notes.
+  `docs/08_DECISION_REGISTER.md` with dated notes.
 - **Severity ladder**:
   - **Sev-A**: data exposure or loss (redaction leak, DB
     corruption, unauthorized access succeeded). Stop the service
@@ -197,7 +197,7 @@ fails.
 | `migrations_applied`             | Code version mismatched with DB version.                 | Deploy the expected version or run the documented migration path.          |
 | `telegram_api_reachable`         | DNS/network or expired bot token.                        | Curl `api.telegram.org`; rotate token if needed (§9).                      |
 | `claude_binary_present`          | Path moved or binary uninstalled.                        | Install pinned Claude; update `config.json`.                               |
-| `claude_version_pinned`          | Newer/older Claude than pinned.                          | Rerun SP-04..SP-06 against the new version; update DECISIONS; then deploy. |
+| `claude_version_pinned`          | Newer/older Claude than pinned.                          | Rerun SP-04..SP-06 against the new version; update the decision register; then deploy. |
 | `s3_endpoint_smoke`              | Credentials or endpoint broken.                          | Rotate keys (§9) or verify endpoint; degraded mode policy in §7.           |
 | `disk_free_ok`                   | Local disk pressure.                                     | Prune old transcripts/attachments per retention; escalate if S3 is down.   |
 | `interrupted_jobs`               | Normal after a restart. Non-zero if many accumulate.     | Inspect with query in §5; re-queue or delete per policy.                   |
@@ -278,7 +278,7 @@ Order of operations — **do not skip**:
    - Add a failing test, then fix and re-run the redaction
      matrix.
    - Update HLD §13.1 / §13.2 if the pattern list expanded.
-   - Record the incident in `docs/DECISIONS.md` with dates and
+   - Record the incident in `docs/08_DECISION_REGISTER.md` with dates and
      actions.
 6. **Restart** the service after the fix lands and `/doctor`
    `redaction_boundary_quick` is green.
@@ -362,7 +362,7 @@ Process:
    with the new date.
 2. Update HLD sections called out in each spike's "Fail
    response".
-3. Record the dependency change in `docs/DECISIONS.md`.
+3. Record the dependency change in `docs/08_DECISION_REGISTER.md`.
 4. Deploy to the production host per §2 (rollback path
    intact).
 
@@ -389,7 +389,7 @@ the hole.
 
 ## 13. Incident notes template
 
-Copy into `docs/DECISIONS.md` when you handle something
+Copy into `docs/08_DECISION_REGISTER.md` when you handle something
 non-trivial.
 
 ```

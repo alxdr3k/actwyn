@@ -96,7 +96,7 @@ short on purpose — if they grow, they stop being principles.
    `Bun.spawn` detached kill semantics, we prove each one works in a 30-line
    script. The result lives in `docs/03_RISK_SPIKES.md`.
 10. **Write the rule down once.** If we made a decision twice, it becomes
-    a `docs/DECISIONS.md` entry or an ADR. We do not rediscover why Bun was
+    a `docs/08_DECISION_REGISTER.md` entry or an ADR. We do not rediscover why Bun was
     chosen in the middle of a Slack thread.
 
 ---
@@ -198,19 +198,18 @@ single canonical path; if it exists elsewhere, it is wrong.
 ```
 docs/
   00_PROJECT_DELIVERY_PLAYBOOK.md   ← this document
-  PRD.md                             ← 01, kept at legacy path until P0
+  PRD.md                             ← product requirements (kept at legacy path)
   02_HLD.md                          ← module boundaries, state machines, flows
   03_RISK_SPIKES.md                  ← spike list, results, follow-ups
   04_IMPLEMENTATION_PLAN.md          ← module-by-module build order
   05_RUNBOOK.md                      ← deploy, restart, recover, rotate
   06_ACCEPTANCE_TESTS.md             ← P0 acceptance run log
-  DECISIONS.md                       ← lightweight decision log
-  adr/                               ← optional long-form ADRs
-    0001-use-bun-typescript.md
-    0002-use-telegram-long-polling.md
-    0003-use-sqlite-job-ledger.md
-    0004-claude-first-provider.md
-    0005-use-s3-as-archive-layer.md
+  07_QUESTIONS_REGISTER.md           ← question ledger (Q-###)
+  08_DECISION_REGISTER.md            ← small decisions ledger (DEC-###)
+  09_TRACEABILITY_MATRIX.md          ← Q- / DEC- / ADR- ↔ PRD / HLD / AC
+  adr/                               ← architecture decision records
+    README.md                        ← ADR index + template
+    0001-*.md                        ← one file per ADR
 spike/                               ← throwaway scripts for section 6 spikes
 ```
 
@@ -228,7 +227,7 @@ can pass):
 | 2. Risk Spikes            | `docs/03_RISK_SPIKES.md`, spike scripts under `spike/`     |
 | 3. Implementation Plan    | `docs/04_IMPLEMENTATION_PLAN.md`                           |
 | 4. Walking Skeleton       | running end-to-end fake-provider path; updated HLD deltas  |
-| 5. Claude Vertical Slice  | running Claude path; `DECISIONS.md` entries for surprises  |
+| 5. Claude Vertical Slice  | running Claude path; ADR / DEC entries for surprises       |
 | 6. P0 Acceptance          | `docs/06_ACCEPTANCE_TESTS.md` with pass/fail per criterion |
 | 7. Systemd Deploy         | `docs/05_RUNBOOK.md`, deployed and verified on CX22        |
 | 8. Ops Review             | issue list categorized as P1/P2/deferred                   |
@@ -242,15 +241,16 @@ Rules for these artifacts:
   not required to be production quality. They must be reproducible and
   their results captured in `03_RISK_SPIKES.md`.
 - **Runbook is written before deploy, not after.** Phase 7 does not pass
-  until `RUNBOOK.md` describes: cold start, crash recovery, secret
+  until `05_RUNBOOK.md` describes: cold start, crash recovery, secret
   rotation, S3 outage behavior, Telegram outage behavior, and `/doctor`
   interpretation.
 - **Acceptance tests are run, not read.** `06_ACCEPTANCE_TESTS.md` records
   the actual run: date, commit SHA, which criteria passed, which failed,
   and links to follow-up issues.
-- **DECISIONS.md is append-only within P0.** Existing entries are not
-  rewritten; they are superseded by new entries that reference the old
-  one's ID.
+- **08_DECISION_REGISTER.md and adr/ are append-only within P0.** Entries
+  are not rewritten; they are superseded by new entries that reference the
+  old id. See §12 for the Knowledge Promotion Pipeline that governs how
+  questions become decisions and how decisions reach PRD / HLD.
 
 ---
 
@@ -296,7 +296,7 @@ this phase?" is not a judgment call.
 All spikes in section 6 that are marked **blocking** must have a status of
 `passed` or `passed-with-caveats` in `03_RISK_SPIKES.md`. A
 `passed-with-caveats` result must link to either an HLD update or a
-`DECISIONS.md` entry.
+`08_DECISION_REGISTER.md` entry.
 
 - [ ] Bun exact version pinned; `bun:sqlite` WAL + transaction behavior
       verified.
@@ -374,7 +374,7 @@ All spikes in section 6 that are marked **blocking** must have a status of
       defined at the start of phase 8.
 - [ ] Every incident or surprise is an issue with a P1/P2/deferred
       label.
-- [ ] `DECISIONS.md` has been updated with any decisions taken during
+- [ ] `08_DECISION_REGISTER.md` has been updated with any decisions taken during
       live use.
 
 ---
@@ -452,7 +452,7 @@ a request shape), the procedure is:
 
 1. Stop spiking further areas that depend on the broken assumption.
 2. Update `docs/02_HLD.md` with the corrected design.
-3. Add a `DECISIONS.md` entry naming the assumption, the evidence, and
+3. Add a `08_DECISION_REGISTER.md` entry naming the assumption, the evidence, and
    the new direction.
 4. Re-check any already-green gates that depended on the old assumption.
 
@@ -717,7 +717,7 @@ observations" after checking the perspective-specific questions.
 - PRs that touch a state machine must cite the HLD section they are
   implementing or amending.
 - PRs that weaken a test or relax a gate must link to the
-  `DECISIONS.md` entry authorizing it.
+  `08_DECISION_REGISTER.md` entry authorizing it.
 - PRs that introduce a dependency not listed in the PRD or HLD
   require Staff + Security review.
 
@@ -848,7 +848,7 @@ post-redaction store) is **always Sev-A**, even if the secret is
 3. Redact or delete per the retention policy in the PRD.
 4. Fix the code path that produced the unredacted write.
 5. Add a ledger integration test that would have caught it.
-6. Record the incident and the fix in `DECISIONS.md`.
+6. Record the incident and the fix in `08_DECISION_REGISTER.md`.
 
 ### 11.5 After every incident
 
@@ -858,78 +858,112 @@ is the mechanism by which P0 operations feed back into the design.
 
 ---
 
-## 12. Decision Log Policy
+## 12. Knowledge Promotion Pipeline
 
-Decisions that shape the project live in `docs/DECISIONS.md` (a flat
-log) and, for more consequential choices, under `docs/adr/` (long-form
-ADRs). Both are append-only within P0.
+Questions, decisions, and requirements live in different files on
+purpose. This section defines the pipeline that moves knowledge from
+"something someone wondered about" to "something the system is built
+to".
 
-### 12.1 When to record a decision
+### 12.1 The pipeline
 
-Record a decision if **any** of the following is true:
-
-- It would be costly or embarrassing to rediscover later (e.g.
-  "why Bun, not Node?").
-- It closes a previously-open question in the PRD.
-- It narrows a HLD design space (e.g. "we chose replay-mode B").
-- It relaxes or amends a phase gate.
-- It locks in a third-party version we depend on for a spike result.
-
-If a decision is being argued twice, the second time is when it gets
-written down.
-
-### 12.2 Decision log format
-
-`docs/DECISIONS.md` contains lightweight entries. Each entry is small
-on purpose:
-
-```markdown
-## D-0007 — Store pre-redaction raw Telegram updates in a separate table
-
-- Date: 2026-04-22
-- Status: accepted
-- Context: the redaction boundary must be testable; we need a stable
-  place to assert "no secret in the post-redaction store".
-- Decision: keep raw `telegram_updates.raw_payload` encrypted-at-rest
-  in a separate table with stricter access; the default store reads
-  the redacted projection.
-- Alternatives: redact in place; redact at read time.
-- Risks: extra storage; a second table to keep in sync.
-- Mitigations: single writer; covered by ledger integration test
-  T-redaction-boundary.
-- Supersedes: —
-- Superseded by: —
+```
+Question  →  Proposed answer  →  Decision / Deferred / Open
+      ↓                                    ↓
+07_QUESTIONS_REGISTER.md         08_DECISION_REGISTER.md
+                                     or adr/####-*.md
+                                          ↓
+                           PRD / HLD / Runbook / Acceptance Tests
+                                          ↓
+                            09_TRACEABILITY_MATRIX.md
 ```
 
-Rules:
+The rule: **the Questions Register is where thinking happens; the
+PRD / HLD / Runbook / Acceptance Tests are where the system is
+defined.** Decisions link the two. The Traceability Matrix keeps
+the links visible.
 
-- IDs are monotonically assigned (`D-0001`, `D-0002`, …).
-- Entries are not edited once `accepted` except to add a
-  `Superseded by` pointer.
-- A superseding entry must reference the one it replaces.
+### 12.2 File-by-file role
 
-### 12.3 ADRs (optional, long-form)
+| File                              | Owns                                                              |
+| --------------------------------- | ----------------------------------------------------------------- |
+| `07_QUESTIONS_REGISTER.md`        | Open questions, proposed answers, reasoning history.              |
+| `08_DECISION_REGISTER.md`         | Small decisions (policy defaults, command sets, thresholds).      |
+| `adr/####-*.md`                   | Architecture-level decisions (runtime, storage, provider, trust). |
+| `PRD.md`                          | Product requirements, scope, non-goals, acceptance criteria.      |
+| `02_HLD.md`                       | System design: modules, state machines, flows, failure recovery.  |
+| `05_RUNBOOK.md`                   | Operator procedures, thresholds, incident response.               |
+| `06_ACCEPTANCE_TESTS.md`          | Testable consequences of decisions.                               |
+| `09_TRACEABILITY_MATRIX.md`       | Links across the above so nothing drifts silently.                |
 
-Use an ADR under `docs/adr/NNNN-kebab-title.md` when the decision
-benefits from a longer narrative: runtime choice, provider choice,
-storage architecture, auth model. Planned P0 ADRs:
+The Questions Register is **not** a source of truth. Once a question
+is decided, the binding answer lives in PRD / HLD / Runbook /
+Acceptance Tests; the Questions Register keeps the rationale and
+the promotion pointer.
 
-- `0001-use-bun-typescript.md`
-- `0002-use-telegram-long-polling.md`
-- `0003-use-sqlite-job-ledger.md`
-- `0004-claude-first-provider.md`
-- `0005-use-s3-as-archive-layer.md`
+### 12.3 Lifecycle of a question
 
-ADRs do not replace `DECISIONS.md`; each ADR has a corresponding
-short entry in `DECISIONS.md` that links to the ADR file. The
-log remains the index.
+- **Open question**: new `Q-###` entry with `Status: open`.
+- **Proposed answer** (not yet accepted): same entry moves to
+  `Status: proposed` with the draft answer.
+- **Small decision** (policy, default, threshold): creates a `DEC-###`
+  entry in `08_DECISION_REGISTER.md`; the `Q-###` entry links to it.
+- **Architecture decision** (runtime choice, storage model, provider,
+  trust boundary, protocol): creates a new `docs/adr/####-title.md`;
+  the `Q-###` entry links to it.
+- **Impact on what the system must do**: PRD is patched.
+- **Impact on how the system is built**: HLD is patched.
+- **Impact on how the system is operated**: Runbook is patched.
+- **Impact on what we must verify**: Acceptance Tests are patched.
+- Every promotion adds a row to `09_TRACEABILITY_MATRIX.md`.
 
-### 12.4 Decisions the playbook cares about
+### 12.4 ADR vs DEC — promotion criteria
 
-Some decisions directly change the playbook's own rules. Those
-require:
+A decision becomes an **ADR** when **all** of the following are true:
 
-- An entry in `DECISIONS.md`.
+1. It affects architecture (runtime, storage, protocol, trust
+   boundary, provider, deployment shape).
+2. Reversing it would require rewriting multiple modules or
+   migrating durable state.
+3. A future engineer reading only PRD / HLD could not infer the
+   rationale from those artifacts alone.
+
+If any of those is false, the decision lives in
+`08_DECISION_REGISTER.md` as a `DEC-###` entry.
+
+### 12.5 Entry formats (summary)
+
+All three registers use the same skeleton: short header, structured
+fields, explicit links. Full templates:
+
+- `07_QUESTIONS_REGISTER.md` — at the top of that file.
+- `08_DECISION_REGISTER.md` — at the top of that file.
+- `adr/README.md` — ADR template plus the index.
+
+Rules that hold across all three:
+
+- IDs are monotonic and never reused.
+- Entries are not edited after `accepted` / `decided` except to add
+  a `Superseded by` pointer.
+- A superseding entry must reference the id it replaces.
+
+### 12.6 What to do when an answer changes
+
+When reality diverges from a previous decision (spike result,
+incident, policy change):
+
+1. Open a new `Q-###` in `07_QUESTIONS_REGISTER.md` describing what
+   changed and why.
+2. Write the new decision as a fresh `DEC-###` or a new ADR.
+3. Mark the old `DEC-###` / ADR `Status: superseded` with a pointer.
+4. Patch PRD / HLD / Runbook / Acceptance Tests in the same commit.
+5. Update `09_TRACEABILITY_MATRIX.md` to reflect the new links.
+
+### 12.7 Decisions the playbook itself cares about
+
+Some decisions change the playbook's own rules. Those require:
+
+- An ADR (architecture-level) or a `DEC-###` (policy-level).
 - A PR that updates this playbook in the same commit.
 - A Staff-Engineer review signoff.
 
@@ -966,7 +1000,7 @@ meaning are **not** changes and do not need the process below.
    HLD/PRD changes always include Staff Engineer. Security and
    recovery-related changes always include Security and SRE.
 3. **Decide**: accept, reject, or defer. The outcome is a
-   `DECISIONS.md` entry, not just a merged PR.
+   `08_DECISION_REGISTER.md` entry, not just a merged PR.
 4. **Propagate**: in the same PR (or an immediately following one),
    update any dependent artifact:
    - PRD change → HLD affected sections → implementation plan →
@@ -1029,7 +1063,7 @@ partially checked at the time of declaring P0 complete.
       - Modules described in the HLD are the modules that exist.
       - Any mid-implementation drift has been reconciled either by
         updating the HLD or by updating the code.
-- [ ] Every `DECISIONS.md` entry referenced by the HLD exists and is
+- [ ] Every `08_DECISION_REGISTER.md` entry referenced by the HLD exists and is
       in `accepted` status.
 
 ### 14.3 Durability and recovery
@@ -1130,7 +1164,7 @@ Use when creating a new top-level doc under `docs/`:
 - [ ] Minimal reproducible script under `spike/`.
 - [ ] Observed behavior captured (raw output where useful).
 - [ ] Conclusion: `passed`, `passed-with-caveats`, or `failed`.
-- [ ] Follow-up: HLD update or `DECISIONS.md` entry if behavior
+- [ ] Follow-up: HLD update or `08_DECISION_REGISTER.md` entry if behavior
       diverged from the assumption.
 
 ### 15.4 PR checklist
@@ -1143,7 +1177,7 @@ Use when creating a new top-level doc under `docs/`:
       assertion if a status column is touched.
 - [ ] No new dependencies without Staff + Security sign-off.
 - [ ] No suppressed or skipped tests; any exception has a
-      `DECISIONS.md` entry.
+      `08_DECISION_REGISTER.md` entry.
 
 ### 15.5 Deploy checklist
 

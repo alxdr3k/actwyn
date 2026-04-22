@@ -233,7 +233,7 @@ is exercised end-to-end with a fake provider on a staging host.
     log or row.
   - All ledger tests introduced in Phases 3–5 pass on CI.
 - **Output**: a short "walking skeleton report" in
-  `docs/DECISIONS.md` if any deviation from PRD/HLD was
+  `docs/08_DECISION_REGISTER.md` if any deviation from PRD/HLD was
   discovered; otherwise a one-line note.
 
 ---
@@ -309,7 +309,7 @@ is exercised end-to-end with a fake provider on a staging host.
   - `src/storage/local.ts` — filesystem writer with the layout
     from PRD Appendix A and HLD §12.
   - `src/storage/s3.ts` — Bun.S3Client wrapper (or
-    `@aws-sdk/client-s3` fallback per DECISIONS).
+    `@aws-sdk/client-s3` fallback per 08_DECISION_REGISTER.md).
   - `src/storage/sync.ts` — sync loop; error classification per
     HLD §12.3; retries with bounded attempts.
   - `src/storage/objects.ts` — `storage_objects` row authoring
@@ -413,16 +413,16 @@ to a single phase.
 - **Docs sync** (every phase):
   - If implementation diverges from HLD/PRD, amend the doc
     before closing the phase (playbook §7.4).
-- **DECISIONS.md updates** (as needed):
+- **08_DECISION_REGISTER.md updates** (as needed):
   - Any spike deviation, dependency change, or policy tweak
-    triggers a `DECISIONS.md` entry.
+    triggers a `08_DECISION_REGISTER.md` entry.
 
 ## Risk register (rolled up)
 
 | Risk                                          | Mitigation                                                 |
 | --------------------------------------------- | ---------------------------------------------------------- |
 | Claude CLI output shape changes mid-P0        | Spike fixtures + parser fallback; re-run SP-04 on bump.    |
-| Hetzner S3 quirks block Bun.S3Client          | Fallback to `@aws-sdk/client-s3` documented in DECISIONS.  |
+| Hetzner S3 quirks block Bun.S3Client          | Fallback to `@aws-sdk/client-s3` documented in 08_DECISION_REGISTER.md.  |
 | Subprocess survives cancel / restart          | SP-07 proves process-group teardown; systemd `KillMode=control-group` as last resort. |
 | Secret leaks into durable row                 | Single-writer redactor + grep CI + Sev-A runbook entry.    |
 | Retention drift (local disk fills up)         | Q10 durations + `/doctor` disk check + Q23 thresholds.     |

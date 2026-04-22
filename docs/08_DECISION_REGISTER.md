@@ -24,7 +24,7 @@ Every decision uses this shape:
 - Risks: what this exposes us to
 - Mitigations: how we contain those risks
 - Review trigger: what would cause us to revisit
-- Refs: PRD §, HLD §, Q## in 07_OPEN_QUESTIONS, SP-## in 03_RISK_SPIKES
+- Refs: PRD §, HLD §, Q## in 07_QUESTIONS_REGISTER, SP-## in 03_RISK_SPIKES
 ```
 
 Rules:
@@ -186,7 +186,7 @@ Rules:
 - **Review trigger**: moving active memory retrieval into P1+
   may blur this again.
 - **Refs**: PRD §12.8, Appendix D; HLD §12; Q08 in
-  `07_OPEN_QUESTIONS.md`.
+  `07_QUESTIONS_REGISTER.md`.
 
 ## D06 — Single worker, one `provider_run` at a time
 

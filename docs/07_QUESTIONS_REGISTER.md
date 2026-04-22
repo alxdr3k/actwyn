@@ -5,7 +5,7 @@
 > This ledger records design-level questions that span PRD and HLD but
 > have not yet been answered in either. Questions arrive here from
 > reviews, implementation discoveries, and user feedback. They leave
-> here only via (a) a `DECISIONS.md` / ADR entry, (b) a PRD amendment,
+> here only via (a) a `08_DECISION_REGISTER.md` / ADR entry, (b) a PRD amendment,
 > or (c) an explicit deferral to P1+.
 >
 > If a question stops appearing actionable during P0, move it to
@@ -28,7 +28,7 @@ Each question uses this skeleton:
   - b) …
 - Current leaning: …
 - Risk if unresolved: …
-- Refs: PRD §…, HLD §…, DECISIONS.md §…
+- Refs: PRD §…, HLD §…, 08_DECISION_REGISTER.md §…
 ```
 
 Rules:
