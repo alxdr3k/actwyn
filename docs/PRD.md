@@ -1049,7 +1049,7 @@ last issue: <short redacted string>   # optional
 | AC22 | An attachment without an explicit user save intent is never promoted to `retention_class = long_term`; it remains `session` (or `ephemeral`) and is not written to S3 unless the session-level sync rule applies. |
 | AC23 | A `long_term` artifact is durably stored in S3 (`status = uploaded`) and linked to a memory via `memory_artifact_links` with `provenance ∈ {user_stated, user_confirmed}` before it is considered part of long-term memory. |
 | AC24 | S3 object keys follow `objects/{yyyy}/{mm}/{dd}/{object_id}/{sha256}.{safe_ext}` and contain no original filenames, user names, chat IDs, or project names. |
-| AC25 | `storage_sync` failures leave `storage_objects.status = pending` with an `error_json` entry and do not roll back the owning `provider_run` or delete the local copy; retry eventually transitions the row to `uploaded`. |
+| AC25 | `storage_sync` failures leave `storage_objects.status = failed` with an `error_json` entry and do not roll back the owning `provider_run` or delete the local copy. A retry scheduler may later move the row `failed → pending` and, on the next successful `PUT`, `pending → uploaded`. `pending` means "upload attempt scheduled"; `failed` means "last attempt failed". |
 | AC26 | `/forget_memory <id>` moves the target `memory_items` row to `status = revoked` and excludes it from subsequent context packing; the row is **not** hard-deleted. `/forget_artifact <id>` sets `storage_objects.status = deletion_requested` and a later sync pass reaches `deleted` or `delete_failed`. |
 | AC27 | A user correction (`/correct` or the natural-language form "정정: X가 아니라 Y") inserts a new `memory_items` row with `supersedes_memory_id` pointing at the prior row; the prior row transitions from `active` to `superseded` in the same transaction; context packing skips superseded items. |
 | AC28 | Only notification types listed in §13.3 minimal set are pushed to Telegram. Silent types (`job_started`, `storage_sync_succeeded`, `notification_retry_succeeded`, etc.) never produce a Telegram message; they appear in structured logs and `/status` counts only. |
@@ -1395,8 +1395,13 @@ Invariants:
   `storage_backend = s3` and `status = uploaded` before any
   `memory_artifact_links` row may reference them.
 - `storage_sync` is the only writer that advances `status` into
-  `uploaded`. A failed sync moves the row back to `pending` (with
-  `error_json`), never to `deleted`.
+  `uploaded`. A failed sync sets `status = failed` with
+  `error_json`; a later retry scheduler may move `failed → pending`
+  before the next `PUT` attempt. Neither failure nor retry ever
+  transitions to `deleted`.
+- `pending` means "upload attempt scheduled"; `failed` means "last
+  attempt failed and awaiting retry decision". Callers that only
+  need "not yet durable" should treat both as non-terminal.
 - `deletion_requested` is set by `/forget_artifact <id>` (or a
   revoked long-term promotion). A later sync pass issues the S3
   `DELETE` and transitions the row to `deleted` or
