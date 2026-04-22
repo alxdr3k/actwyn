@@ -1023,65 +1023,81 @@ last issue: <short redacted string>   # optional
 
 ## 17. Acceptance Criteria
 
-| # | Criteria |
-|---|----------|
-| AC01 | Unauthorized Telegram user가 메시지를 보내면 job이 생성되지 않고 응답하지 않는다. 단, `BOOTSTRAP_WHOAMI=true`인 경우 `/whoami`만 예외적으로 `user_id`/`chat_id`를 반환할 수 있다. |
-| AC02 | Authorized user가 DM을 보내면 하나의 job이 생성되고 status가 `queued → running → succeeded`로 전이된다. |
-| AC03 | Claude subprocess stdout/stderr/redacted raw stream-json line이 `provider_raw_events`에 저장된다. |
-| AC04 | final response가 Telegram으로 전송되고 `turns` 테이블에 assistant turn으로 저장된다. |
-| AC05 | 동일 Telegram `update_id`가 중복 수신되어도 job은 한 번만 생성된다. |
-| AC06 | app 재시작 시 running job은 `interrupted`로 전이되고, `safe_retry=true`인 경우만 `queued`로 복구된다. |
-| AC07 | `/end` 또는 `/summary` 실행 시 session summary가 SQLite, local file에 저장되고 `storage_sync` job이 enqueue된다. |
-| AC08 | S3 장애가 있어도 Telegram response delivery는 실패하지 않고 `storage_sync` job으로 별도 기록된다. |
-| AC09 | max runtime/output/prompt limit 초과 시 provider subprocess가 종료되고 사용자에게 에러 요약이 전송된다. |
-| AC10 | logs/raw events에 Telegram token, S3 secret, provider auth token이 저장되지 않는다. |
-| AC11 | P0 Claude Code provider call은 interactive permission prompt를 요구하지 않는다. |
-| AC12 | `storage_sync` job 실패는 `provider_run` job의 `succeeded` 상태를 되돌리지 않는다. |
-| AC13 | memory summary 항목은 provenance와 confidence를 포함한다. |
-| AC14 | running provider job `/cancel` 시 subprocess process group 전체가 종료된다. |
-| AC15 | Claude stream-json parser fixture가 sample raw event를 `final_text`로 정상 정규화한다. |
-| AC16 | `/doctor` 실행 시 S3 smoke test(put/get/stat/list/delete)가 성공해야 P0 acceptance를 통과한다. 실패 시 local-only degraded mode로 표시하고 `storage_sync` job은 retryable 상태로 남긴다. |
-| AC17 | Telegram long polling은 direct fetch로 동작하고 bot framework dependency가 없다. |
-| AC18 | `Bun.spawn` provider subprocess는 timeout/AbortSignal로 종료 가능하다. |
-| AC19 | `bun:sqlite` WAL mode에서 job claim transaction이 재시작 후 일관성을 유지한다. |
-| AC20 | P0 build/runtime dependency 목록은 PRD에 명시된 allowlist를 초과하지 않는다. |
-| AC21 | When a Telegram attachment arrives, a `storage_objects` row is created with `source_channel='telegram'`, a detected MIME type, and a SHA-256 hash; the runtime holds its own copy and does not depend on the Telegram file link for retrieval. |
-| AC22 | An attachment without an explicit user save intent is never promoted to `retention_class = long_term`; it remains `session` (or `ephemeral`) and is not written to S3 unless the session-level sync rule applies. |
-| AC23 | A `long_term` artifact is durably stored in S3 (`status = uploaded`) and linked to a memory via `memory_artifact_links` with `provenance ∈ {user_stated, user_confirmed}` before it is considered part of long-term memory. |
-| AC24 | S3 object keys follow `objects/{yyyy}/{mm}/{dd}/{object_id}/{sha256}.{safe_ext}` and contain no original filenames, user names, chat IDs, or project names. |
-| AC25 | `storage_sync` failures leave `storage_objects.status = failed` with an `error_json` entry and do not roll back the owning `provider_run` or delete the local copy. A retry scheduler may later move the row `failed → pending` and, on the next successful `PUT`, `pending → uploaded`. `pending` means "upload attempt scheduled"; `failed` means "last attempt failed". |
-| AC26 | `/forget_memory <id>` moves the target `memory_items` row to `status = revoked` and excludes it from subsequent context packing; the row is **not** hard-deleted. `/forget_artifact <id>` sets `storage_objects.status = deletion_requested` and a later sync pass reaches `deleted` or `delete_failed`. |
-| AC27 | A user correction (`/correct` or the natural-language form "정정: X가 아니라 Y") inserts a new `memory_items` row with `supersedes_memory_id` pointing at the prior row; the prior row transitions from `active` to `superseded` in the same transaction; context packing skips superseded items. |
-| AC28 | Only notification types listed in §13.3 minimal set are pushed to Telegram. Silent types (`job_started`, `storage_sync_succeeded`, `notification_retry_succeeded`, etc.) never produce a Telegram message; they appear in structured logs and `/status` counts only. |
-| AC29 | `/status` output includes every field listed in the §14.1 contract (session_id short, provider, packing_mode, queue counts, post-processing counts, S3 health, last completed time) in the fixed order, and runs as a read-only query (no state mutation). |
-| AC30 | A summary is generated automatically only when the §12.3 trigger conditions **and** the throttle (≥ 8 new user turns since the last summary) are both satisfied. Explicit `/summary` / `/end` always fire regardless of the throttle. |
-| AC21 | `/doctor`는 exact Bun version을 표시하고, `required_bun_version`과 다르면 warning을 출력한다. |
-| AC22 | Telegram `next_offset`은 update 처리 결과가 SQLite에 commit된 후에만 advance된다. |
-| AC23 | app이 Telegram update 수신 후 job insert commit 전에 crash되어도, 해당 update는 재시작 후 다시 처리된다. |
-| AC24 | Claude resume_mode에서는 full recent turns를 매 요청마다 재전송하지 않는다. |
-| AC25 | Claude resume 실패 시 replay_mode로 fallback하고, 그 사실이 `provider_run`에 기록된다. |
-| AC26 | Telegram sendMessage 실패는 `provider_run succeeded` 상태를 되돌리지 않고 `notification_retry` job으로 기록된다. |
-| AC27 | `notification_retry` 실패와 `storage_sync` 실패는 서로 독립적으로 재시도된다. |
-| AC28 | P0에서 `/provider gemini\|codex\|ollama` 요청은 provider를 전환하지 않고 `not_enabled` 메시지를 반환한다. |
-| AC29 | `telegram_updates` 테이블은 received/enqueued/skipped/failed update를 기록한다. |
-| AC30 | skipped update도 SQLite에 기록된 후에만 `telegram_next_offset`이 advance된다. |
-| AC31 | `getUpdates`는 P0에서 `allowed_updates=["message"]`를 명시한다. |
-| AC32 | Provider subprocess는 기본적으로 `proc.unref()` 없이 `proc.exited`로 추적된다. |
-| AC33 | Claude advisory/chat mode smoke test는 Bash/Edit/Write/Read tool이 실행되지 않음을 검증한다. |
-| AC34 | Claude read-only repo review mode smoke test는 Read/Grep/Glob만 허용됨을 검증한다. |
-| AC35 | Claude 실행 중 interactive permission prompt가 발생하면 P0 acceptance 실패로 처리한다. |
-| AC36 | `BOOTSTRAP_WHOAMI=true` 상태는 `/doctor`에서 warning으로 표시된다. |
-| AC37 | bootstrap `/whoami`는 `user_id`/`chat_id` 외의 민감 정보를 반환하지 않는다. |
-| AC38 | final response가 Telegram sendMessage 한도를 초과하면 여러 메시지로 chunking되어 순서대로 전송된다. |
-| AC39 | chunk 전송 중 일부 실패 시 `provider_run succeeded` 상태는 유지되고 `notification_retry`로 복구된다. |
-| AC40 | Telegram outbound notification은 `outbound_notifications`에 상태와 `telegram_message_ids`를 기록한다. |
-| AC41 | `notification_retry`는 `outbound_notifications.status=failed` 또는 `pending` 상태만 재시도한다. |
-| AC42 | Claude command builder는 첫 요청에는 `--session-id`, 후속 요청에는 `--resume`을 사용한다. |
-| AC43 | `provider_session_id`가 존재하면 후속 resume에는 `provider_session_id`를 우선 사용한다. |
-| AC44 | prompt가 `max_prompt_bytes` 또는 안전한 argv 길이를 초과하면 provider 실행 전 실패 처리된다. |
-| AC45 | `summary_generation` job은 Claude advisory/chat lockdown profile로 실행된다. |
-| AC46 | `summary_generation` output은 `memory_summaries` schema에 맞게 구조화되어 저장된다. |
-| AC47 | P0에서 SQLite DB snapshot이 구현되는 경우 WAL mode에 안전한 backup 절차를 사용한다. |
+Criteria use the stable ID scheme `AC-<DOMAIN>-<###>`. The legacy
+numeric IDs (`AC01`…`AC47`, including the duplicated `AC21…AC30`)
+are retained as aliases in the last column for cross-reference with
+older revisions; **all new cross-refs MUST use the `AC-<DOMAIN>-###`
+form**. Domains:
+
+- `TEL` Telegram poller / inbound ledger / offset
+- `NOTIF` Outbound notification + chunk retry
+- `JOB` Job queue + worker + interrupted/recovery
+- `PROV` Provider adapter (Claude) + resume/replay + subprocess
+- `MEM` Memory / summary / correction / forget
+- `STO` Storage objects / S3 sync / retention class
+- `SEC` Security / redaction / lockdown / bootstrap
+- `OBS` Observability / `/status` / `/doctor` / notification minimal set
+- `OPS` Operational (dependency allowlist, Bun version, backup, retry independence)
+
+| ID | Criteria | Legacy |
+|----|----------|--------|
+| AC-TEL-001 | Unauthorized Telegram user가 메시지를 보내면 job이 생성되지 않고 응답하지 않는다. 단, `BOOTSTRAP_WHOAMI=true`인 경우 `/whoami`만 예외적으로 `user_id`/`chat_id`를 반환할 수 있다. | AC01 |
+| AC-JOB-001 | Authorized user가 DM을 보내면 하나의 job이 생성되고 status가 `queued → running → succeeded`로 전이된다. | AC02 |
+| AC-PROV-001 | Claude subprocess stdout/stderr/redacted raw stream-json line이 `provider_raw_events`에 저장된다. | AC03 |
+| AC-TEL-002 | final response가 Telegram으로 전송되고 `turns` 테이블에 assistant turn으로 저장된다. | AC04 |
+| AC-TEL-003 | 동일 Telegram `update_id`가 중복 수신되어도 job은 한 번만 생성된다. | AC05 |
+| AC-JOB-002 | app 재시작 시 running job은 `interrupted`로 전이되고, `safe_retry=true`인 경우만 `queued`로 복구된다. | AC06 |
+| AC-MEM-001 | `/end` 또는 `/summary` 실행 시 session summary가 SQLite, local file에 저장되고 `storage_sync` job이 enqueue된다. | AC07 |
+| AC-STO-001 | S3 장애가 있어도 Telegram response delivery는 실패하지 않고 `storage_sync` job으로 별도 기록된다. | AC08 |
+| AC-PROV-002 | max runtime/output/prompt limit 초과 시 provider subprocess가 종료되고 사용자에게 에러 요약이 전송된다. | AC09 |
+| AC-SEC-001 | logs/raw events에 Telegram token, S3 secret, provider auth token이 저장되지 않는다. | AC10 |
+| AC-PROV-003 | P0 Claude Code provider call은 interactive permission prompt를 요구하지 않는다. | AC11 |
+| AC-STO-002 | `storage_sync` job 실패는 `provider_run` job의 `succeeded` 상태를 되돌리지 않는다. | AC12 |
+| AC-MEM-002 | memory summary 항목은 provenance와 confidence를 포함한다. | AC13 |
+| AC-PROV-004 | running provider job `/cancel` 시 subprocess process group 전체가 종료된다. | AC14 |
+| AC-PROV-005 | Claude stream-json parser fixture가 sample raw event를 `final_text`로 정상 정규화한다. | AC15 |
+| AC-OBS-001 | `/doctor` 실행 시 S3 smoke test(put/get/stat/list/delete)가 성공해야 P0 acceptance를 통과한다. 실패 시 local-only degraded mode로 표시하고 `storage_sync` job은 retryable 상태로 남긴다. | AC16 |
+| AC-TEL-004 | Telegram long polling은 direct fetch로 동작하고 bot framework dependency가 없다. | AC17 |
+| AC-PROV-006 | `Bun.spawn` provider subprocess는 timeout/AbortSignal로 종료 가능하다. | AC18 |
+| AC-JOB-003 | `bun:sqlite` WAL mode에서 job claim transaction이 재시작 후 일관성을 유지한다. | AC19 |
+| AC-OPS-001 | P0 build/runtime dependency 목록은 PRD에 명시된 allowlist를 초과하지 않는다. | AC20 |
+| AC-STO-003 | When a Telegram attachment arrives, a `storage_objects` row is created with `source_channel='telegram'`, a detected MIME type, and a SHA-256 hash; the runtime holds its own copy and does not depend on the Telegram file link for retrieval. | AC21 (artifact) |
+| AC-STO-004 | An attachment without an explicit user save intent is never promoted to `retention_class = long_term`; it remains `session` (or `ephemeral`) and is not written to S3 unless the session-level sync rule applies. | AC22 (artifact) |
+| AC-STO-005 | A `long_term` artifact is durably stored in S3 (`status = uploaded`) and linked to a memory via `memory_artifact_links` with `provenance ∈ {user_stated, user_confirmed}` before it is considered part of long-term memory. | AC23 (artifact) |
+| AC-SEC-002 | S3 object keys follow `objects/{yyyy}/{mm}/{dd}/{object_id}/{sha256}.{safe_ext}` and contain no original filenames, user names, chat IDs, or project names. | AC24 (artifact) |
+| AC-STO-006 | `storage_sync` failures leave `storage_objects.status = failed` with an `error_json` entry and do not roll back the owning `provider_run` or delete the local copy. A retry scheduler may later move the row `failed → pending` and, on the next successful `PUT`, `pending → uploaded`. `pending` means "upload attempt scheduled"; `failed` means "last attempt failed". | AC25 (artifact) |
+| AC-MEM-003 | `/forget_memory <id>` moves the target `memory_items` row to `status = revoked` and excludes it from subsequent context packing; the row is **not** hard-deleted. `/forget_artifact <id>` sets `storage_objects.status = deletion_requested` and a later sync pass reaches `deleted` or `delete_failed`. | AC26 (artifact) |
+| AC-MEM-004 | A user correction (`/correct` or the natural-language form "정정: X가 아니라 Y") inserts a new `memory_items` row with `supersedes_memory_id` pointing at the prior row; the prior row transitions from `active` to `superseded` in the same transaction; context packing skips superseded items. | AC27 (artifact) |
+| AC-OBS-002 | Only notification types listed in §13.3 minimal set are pushed to Telegram. Silent types (`job_started`, `storage_sync_succeeded`, `notification_retry_succeeded`, etc.) never produce a Telegram message; they appear in structured logs and `/status` counts only. | AC28 (artifact) |
+| AC-OBS-003 | `/status` output includes every field listed in the §14.1 contract (session_id short, provider, packing_mode, queue counts, post-processing counts, S3 health, last completed time) in the fixed order, and runs as a read-only query (no state mutation). | AC29 (artifact) |
+| AC-MEM-005 | A summary is generated automatically only when the §12.3 trigger conditions **and** the throttle (≥ 8 new user turns since the last summary) are both satisfied. Explicit `/summary` / `/end` always fire regardless of the throttle. | AC30 (artifact) |
+| AC-OPS-002 | `/doctor`는 exact Bun version을 표시하고, `required_bun_version`과 다르면 warning을 출력한다. | AC21 (restart) |
+| AC-TEL-005 | Telegram `next_offset`은 update 처리 결과가 SQLite에 commit된 후에만 advance된다. | AC22 (restart) |
+| AC-TEL-006 | app이 Telegram update 수신 후 job insert commit 전에 crash되어도, 해당 update는 재시작 후 다시 처리된다. | AC23 (restart) |
+| AC-PROV-007 | Claude resume_mode에서는 full recent turns를 매 요청마다 재전송하지 않는다. | AC24 (restart) |
+| AC-PROV-008 | Claude resume 실패 시 replay_mode로 fallback하고, 그 사실이 `provider_run`에 기록된다. | AC25 (restart) |
+| AC-NOTIF-001 | Telegram sendMessage 실패는 `provider_run succeeded` 상태를 되돌리지 않고 `notification_retry` job으로 기록된다. | AC26 (restart) |
+| AC-OPS-003 | `notification_retry` 실패와 `storage_sync` 실패는 서로 독립적으로 재시도된다. | AC27 (restart) |
+| AC-PROV-009 | P0에서 `/provider gemini\|codex\|ollama` 요청은 provider를 전환하지 않고 `not_enabled` 메시지를 반환한다. | AC28 (restart) |
+| AC-TEL-007 | `telegram_updates` 테이블은 received/enqueued/skipped/failed update를 기록한다. | AC29 (restart) |
+| AC-TEL-008 | skipped update도 SQLite에 기록된 후에만 `telegram_next_offset`이 advance된다. | AC30 (restart) |
+| AC-TEL-009 | `getUpdates`는 P0에서 `allowed_updates=["message"]`를 명시한다. | AC31 |
+| AC-PROV-010 | Provider subprocess는 기본적으로 `proc.unref()` 없이 `proc.exited`로 추적된다. | AC32 |
+| AC-SEC-003 | Claude advisory/chat mode smoke test는 Bash/Edit/Write/Read tool이 실행되지 않음을 검증한다. | AC33 |
+| AC-SEC-004 | Claude read-only repo review mode smoke test는 Read/Grep/Glob만 허용됨을 검증한다. | AC34 |
+| AC-SEC-005 | Claude 실행 중 interactive permission prompt가 발생하면 P0 acceptance 실패로 처리한다. | AC35 |
+| AC-SEC-006 | `BOOTSTRAP_WHOAMI=true` 상태는 `/doctor`에서 warning으로 표시된다. | AC36 |
+| AC-SEC-007 | bootstrap `/whoami`는 `user_id`/`chat_id` 외의 민감 정보를 반환하지 않는다. | AC37 |
+| AC-NOTIF-002 | final response가 Telegram sendMessage 한도를 초과하면 여러 메시지로 chunking되어 순서대로 전송된다. | AC38 |
+| AC-NOTIF-003 | chunk 전송 중 일부 실패 시 `provider_run succeeded` 상태는 유지되고 `notification_retry`로 복구된다. 이미 `sent` 상태인 chunk는 재전송하지 않는다 (see `outbound_notification_chunks`, Appendix D). | AC39 |
+| AC-NOTIF-004 | Telegram outbound notification은 `outbound_notifications` + `outbound_notification_chunks`에 상태와 `telegram_message_id` per chunk를 기록한다. | AC40 |
+| AC-NOTIF-005 | `notification_retry`는 `outbound_notification_chunks.status = 'pending' | 'failed'` 상태만 재시도한다. | AC41 |
+| AC-PROV-011 | Claude command builder는 첫 요청에는 `--session-id`, 후속 요청에는 `--resume`을 사용한다. | AC42 |
+| AC-PROV-012 | `provider_session_id`가 존재하면 후속 resume에는 `provider_session_id`를 우선 사용한다. | AC43 |
+| AC-PROV-013 | prompt가 `max_prompt_bytes` 또는 안전한 argv 길이를 초과하면 provider 실행 전 실패 처리된다. | AC44 |
+| AC-PROV-014 | `summary_generation` job은 Claude advisory/chat lockdown profile로 실행된다. | AC45 |
+| AC-MEM-006 | `summary_generation` output은 `memory_summaries` schema에 맞게 구조화되어 저장된다. | AC46 |
+| AC-OPS-004 | P0에서 SQLite DB snapshot이 구현되는 경우 WAL mode에 안전한 backup 절차를 사용한다. | AC47 |
 
 ---
 
