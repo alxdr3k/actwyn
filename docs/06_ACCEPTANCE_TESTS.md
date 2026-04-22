@@ -461,6 +461,114 @@ Each entry uses:
     loss.
 - **Status**: pending.
 
+## AC26 — `/forget_*` uses tombstones, never hard-deletes
+
+- **Maps to**: PRD AC26; HLD §6.4, §6.5; DEC-006.
+- **Test type**: state-machine.
+- **Fixture**: Session with at least one `active` `memory_items`
+  row and at least one `uploaded` `storage_objects` row.
+- **Procedure**:
+  1. `/forget_memory <id>` on the memory row.
+  2. `/forget_artifact <id>` on the artifact row.
+  3. Wait for the next `storage/sync` pass.
+- **Oracle**:
+  - After (1): `memory_items.status = revoked`; context
+    packer no longer injects the item.
+  - After (2): `storage_objects.status = deletion_requested`.
+  - After (3): row reaches `deleted` (S3 object gone) or
+    `delete_failed` (S3 error surfaced via `/doctor`).
+  - No rows are physically deleted from SQLite in any case.
+- **Status**: pending.
+
+## AC27 — User correction inserts a new item and supersedes the prior one atomically
+
+- **Maps to**: PRD AC27; HLD §6.5; DEC-007.
+- **Test type**: state-machine.
+- **Fixture**: A session with one `active` `memory_items` row
+  (`id = M_old`) capturing a fact.
+- **Procedure**:
+  1. Issue `/correct M_old` (or send the natural-language
+     correction "정정: not X but Y").
+  2. Inspect `memory_items` immediately after the txn commits.
+- **Oracle**:
+  - A new row `M_new` exists with `status = active`,
+    `supersedes_memory_id = M_old`, and
+    `provenance = user_stated`.
+  - `M_old` has `status = superseded` with
+    `status_changed_at` matching the new row's timestamp.
+  - Both transitions committed in a **single transaction**
+    (observable by a point-in-time read showing neither
+    intermediate state).
+  - Next provider_run's `injected_context_ids` excludes
+    `M_old` and includes `M_new` when relevant.
+- **Status**: pending.
+
+## AC28 — Only the notification minimal set is pushed
+
+- **Maps to**: PRD AC28; HLD §6.3, §9.4; DEC-012.
+- **Test type**: end-to-end.
+- **Fixture**: A session that exercises each `notification_type`
+  (both pushed and silent categories).
+- **Procedure**:
+  1. Drive a `provider_run` to `succeeded` (triggers
+     `job_accepted`, `job_completed`).
+  2. Drive a `provider_run` to `failed` (triggers
+     `job_failed`).
+  3. Issue `/cancel` on a `running` job (triggers
+     `job_cancelled`).
+  4. Run `/summary` and `/doctor`.
+  5. Trigger at least one successful `storage_sync` and one
+     successful `notification_retry`.
+- **Oracle**:
+  - Telegram receives messages for every pushed type listed
+    in PRD §13.3 and nothing else.
+  - Silent types (`job_started`, `storage_sync_succeeded`,
+    `notification_retry_succeeded`, `interrupted_then_requeued`)
+    produce no Telegram traffic and no
+    `outbound_notifications` rows.
+- **Status**: pending.
+
+## AC29 — `/status` output matches the §14.1 contract
+
+- **Maps to**: PRD AC29; HLD §16.5; DEC-015.
+- **Test type**: end-to-end (golden).
+- **Fixture**: A controlled session state with known counts:
+  1 `queued`, 1 `running`, N `pending` notifications, M
+  `pending` / failed storage_sync.
+- **Procedure**:
+  1. Run `/status`.
+  2. Capture the returned Telegram text.
+  3. Compare line-by-line to the §14.1 template.
+- **Oracle**:
+  - Every field in §14.1 appears in the fixed order.
+  - No additional fields appear.
+  - Running `/status` twice back-to-back does not mutate any
+    DB row (read-only verification via before/after snapshot).
+- **Status**: pending.
+
+## AC30 — Summary auto-trigger respects conditions and throttle
+
+- **Maps to**: PRD AC30; HLD §11.1; DEC-019.
+- **Test type**: state-machine + chaos.
+- **Fixture**: A session with controllable
+  `turn_count` / `transcript_estimated_tokens` / `session_age`.
+- **Procedure**:
+  1. Manipulate each trigger independently to its threshold
+     with fewer than 8 new user turns since the last summary;
+     confirm **no** automatic summary fires.
+  2. Push past 8 new user turns with the same trigger
+     conditions; confirm a `summary_generation` job enqueues.
+  3. While a summary is pending, issue another trigger; confirm
+     the throttle prevents a second enqueue.
+  4. Issue `/summary` explicitly; confirm it always runs
+     regardless of throttle.
+- **Oracle**:
+  - The `memory_summaries` rows written match expectations
+    per sub-case (none / one / one / explicit-one).
+  - Each automatic trigger logs the triggering condition and
+    the throttle window in structured logs for later audit.
+- **Status**: pending.
+
 ---
 
 ## Status matrix
@@ -494,6 +602,11 @@ Rolled-up view for the P0 Acceptance gate.
 | AC23 | pending | SP-02, SP-08        |                                                |
 | AC24 | pending | SP-08               | Key hygiene.                                   |
 | AC25 | pending | SP-08               |                                                |
+| AC26 | pending | SP-08               | Tombstone semantics; DEC-006.                  |
+| AC27 | pending | SP-01               | Atomic supersede txn; DEC-007.                 |
+| AC28 | pending | SP-02               | Minimal-set push; DEC-012.                     |
+| AC29 | pending | —                   | Golden-output `/status`; DEC-015.              |
+| AC30 | pending | —                   | Trigger + throttle; DEC-019.                   |
 
 ## Entry / exit criteria for the gate
 

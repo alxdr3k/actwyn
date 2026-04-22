@@ -228,15 +228,21 @@ Procedure:
    - Verify credentials still valid against the Hetzner
      console.
    - If credentials rotated externally, see §9.
-   - Check disk pressure: `df -h /var/lib/actwyn/data`. Apply
-     thresholds from Q23 (warn / hard limit).
-4. At the hard limit:
-   - Refuse new `long_term` writes (the runtime surfaces an
-     explicit error to the user).
-   - Attachments keep flowing as `ephemeral` / `session`.
+   - Check disk pressure: `df -h /var/lib/actwyn/data`.
+4. Apply the **DEC-018 thresholds** (configurable in
+   `config/storage.json`):
+   - `artifact_dir > 1 GB` **or** `disk_free < 20%` →
+     warning in `/status` / `/doctor`; `S3: degraded`.
+   - `artifact_dir > 2 GB` **or** `disk_free < 15%` →
+     degraded warning; `storage/sync` runs smaller backlog
+     batches to reduce local-disk pressure.
+   - `artifact_dir > 3 GB` **or** `disk_free < 10%` →
+     the runtime refuses new `long_term` writes. New
+     attachments still flow as `ephemeral` / `session` with
+     a user-visible message explaining the degradation.
 5. Resolution: once the endpoint is healthy again, the sync
    loop drains backlog on its normal cadence; record the
-   event.
+   event in the incident log.
 
 Do **not**:
 

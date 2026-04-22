@@ -281,14 +281,25 @@ is exercised end-to-end with a fake provider on a staging host.
     snapshot_json`.
   - `src/context/token_estimator.ts` — PRD §12.6 heuristic.
   - `src/memory/summary.ts` — summary generation under advisory
-    profile; provenance + confidence per PRD §12.2–12.3.
+    profile; provenance + confidence per PRD §12.2–12.3. Auto-
+    trigger gating from DEC-019 (turn / token / age + 8-turn
+    throttle) lands here.
   - `src/memory/provenance.ts` — provenance helpers.
+  - `src/memory/items.ts` — `memory_items` writer. Inserts
+    candidates from summary output; applies supersede semantics
+    from `commands/correct` (HLD §6.5: old row → `superseded`
+    in the **same txn** as the new row's insert).
   - `test/context/packer.test.ts` — budget overflow triggers the
-    documented drop order and records the result.
+    documented drop order and records the result; `superseded`
+    and `revoked` `memory_items` are never injected (AC27).
   - `test/memory/summary.test.ts` — `/summary` on a sample
     session produces a schema-valid `memory_summaries` row and
     a local markdown/jsonl file; long-term items respect
     provenance gate.
+  - `test/memory/correction.test.ts` — `/correct` inserts a new
+    `memory_items` row with `supersedes_memory_id` set and
+    flips the prior row to `superseded` in the same transaction
+    (AC27).
 - **Exit criteria**:
   - `resume_mode` vs `replay_mode` recorded on every
     `provider_runs` row (AC test per HLD §10.2).
@@ -338,36 +349,60 @@ is exercised end-to-end with a fake provider on a staging host.
 - **Entry criteria**:
   - Phase 9 done.
 - **Deliverables**:
-  - `src/commands/status.ts` — `/status` per Q19 leaning.
+  - `src/commands/status.ts` — `/status` per PRD §14.1 output
+    contract (DEC-015).
   - `src/commands/cancel.ts` — `/cancel` per HLD §7.4.
-  - `src/commands/summary.ts`, `src/commands/end.ts` — per Q24 /
-    HLD §11.1.
+  - `src/commands/summary.ts`, `src/commands/end.ts` — per
+    DEC-019 + HLD §11.1.
   - `src/commands/provider.ts` — `/provider` (claude only; stub
     for gemini/codex/ollama).
-  - `src/commands/doctor.ts` — checks from HLD §16.1 including
-    the AC16 S3 smoke; surfaces BOOTSTRAP_WHOAMI warning per
-    Q11.
-  - `src/commands/whoami.ts` — respects BOOTSTRAP_WHOAMI.
+  - `src/commands/doctor.ts` — checks from HLD §16.1 with the
+    `quick` / `deep` category tag per DEC-017; includes
+    `bootstrap_whoami_guard` (DEC-009) and the S3 smoke (AC16).
+  - `src/commands/whoami.ts` — respects BOOTSTRAP_WHOAMI and
+    writes the 30-minute expiry timestamp on enablement.
+  - `src/commands/save.ts` — `/save_last_attachment` + natural-
+    language synonyms (ADR-0006). Promotes `retention_class`
+    to `long_term`; creates `memory_artifact_links` with
+    `provenance = user_stated`.
   - `src/commands/forget.ts` — `/forget_last`,
-    `/forget_session`, `/forget_artifact` per Q05.
-  - `src/commands/save.ts` — attachment promotion per Q07 / Q13.
+    `/forget_session`, `/forget_artifact <id>`, `/forget_memory
+    <id>` (DEC-006). Tombstone semantics per HLD §6.4 / §6.5;
+    never hard-deletes rows.
+  - `src/commands/correct.ts` — `/correct <id>` and the
+    natural-language path ("정정:" / "not X but Y"). Inserts a
+    new `memory_items` row with `supersedes_memory_id` pointing
+    at the prior row; flips the prior row to `superseded` in
+    the same transaction (AC27).
   - `src/startup/recovery.ts` — HLD §15 boot sequence:
     `running → interrupted`, `safe_retry` re-queue, orphan
-    sweep, boot doctor.
-  - `test/commands/*` — per-command tests.
-  - `test/startup/recovery.test.ts` — reproduces mid-run crash
-    and asserts HLD §15 guarantees (AC06).
-  - `test/doctor.test.ts` — every check reports `ok`/`warn`/
-    `fail` with deterministic output; AC16 path exercised
-    against the SP-08 dev bucket when credentials available.
+    sweep, boot doctor. Emits user-visible Telegram restart
+    messages per DEC-016 / PRD §8.4.
+  - `test/commands/*` — per-command tests, including:
+    - `save.test.ts` — command + natural-language match +
+      negative (no save intent → no promotion).
+    - `forget.test.ts` — each scope; verifies tombstone
+      transitions and that `storage/sync` issues the S3
+      `DELETE` for `deletion_requested` (AC26).
+    - `correct.test.ts` — atomic supersede invariant (AC27).
+  - `test/startup/recovery.test.ts` — reproduces mid-run crash,
+    asserts HLD §15 guarantees (AC06), and checks the DEC-016
+    messaging policy (silent when there is no user-visible
+    impact; user-visible notice otherwise).
+  - `test/doctor.test.ts` — every check reports `category`,
+    `duration_ms`, `ok`/`warn`/`fail` deterministically; AC16
+    S3 smoke passes against SP-08's dev bucket.
 - **Exit criteria**:
   - All commands listed in PRD §8.1 function (AC01, AC06, AC11,
-    AC14, AC16, AC21–AC25 touched here).
+    AC14, AC16, AC21–AC30 touched here).
   - Startup recovery does not double-charge attempts on
-    interruption.
-  - `/doctor` passes every check against the staging host.
+    interruption and matches DEC-016 messaging.
+  - `/doctor` passes every `quick` and `deep` check against the
+    staging host.
 - **Ledger tests introduced**: adds `interrupted` to
-  `jobs.status` coverage; exercises `storage_objects` soft-delete.
+  `jobs.status` coverage; exercises `storage_objects` soft-delete
+  (`deletion_requested → deleted`) and `memory_items`
+  (`active → superseded`, `active → revoked`).
 
 ---
 
