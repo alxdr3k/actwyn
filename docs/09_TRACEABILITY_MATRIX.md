@@ -75,7 +75,7 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | ADR-0001 | Use Bun + TypeScript for P0                              | Appendix F, §9.4  | —                       | SP-01, SP-07, SP-08            |
 | ADR-0002 | Use Telegram long polling                                | §13.1, §8.2       | §9.1, §9.4, §9.5        | SP-02; AC-TEL-004                    |
 | ADR-0003 | Use SQLite (WAL) as active state SoT                     | §12.7, Appendix D | §3.1, §5, §6            | SP-01; AC-JOB-003                    |
-| ADR-0004 | Use S3 as an artifact archive                            | §12.7, §12.8      | §6.4, §9.3, §12         | SP-08; AC-STO-001, AC-STO-002, AC-OBS-001, AC-STO-003–AC-STO-006 |
+| ADR-0004 | Use S3 as an artifact archive                            | §12.7, §12.8      | §6.4, §9.3, §12         | SP-08; AC-STO-001, AC-STO-002, AC-OBS-001, AC-STO-003a, AC-STO-003b, AC-STO-004–AC-STO-006 |
 | ADR-0005 | Ship Claude as the only P0 provider                      | §5, §11           | §8                      | SP-04, SP-05, SP-06; AC-PROV-003      |
 | ADR-0006 | Explicit memory + attachment promotion                   | §12.2, §12.8      | §6.4, §9.3, §11.3       | AC-STO-004, AC-STO-005                     |
 | ADR-0007 | Provider session as cache, internal session as truth     | §12.4             | §8.2, §10.2             | SP-06                          |
@@ -131,7 +131,8 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | AC-PROV-006 | Provider subprocess terminates by timeout / abort                   | —                          | SP-07                  |
 | AC-JOB-003 | WAL + atomic claim holds across restart                             | ADR-0003                   | SP-01                  |
 | AC-OPS-001 | Dependency list within allowlist                                    | ADR-0001                   | —                      |
-| AC-STO-003 | Telegram attachment captured into `storage_objects`                 | ADR-0004                   | SP-02, SP-08           |
+| AC-STO-003a | Telegram attachment inbound metadata (Phase 1, no network I/O)     | ADR-0004, ADR-0008         | SP-02, SP-03           |
+| AC-STO-003b | Worker capture pass populates bytes / hash / MIME (Phase 2)        | ADR-0004                   | SP-02, SP-08           |
 | AC-STO-004 | Attachment stays `session` without save intent                      | ADR-0006                   | SP-02                  |
 | AC-STO-005 | Explicit save promotes to `long_term`                               | ADR-0006                   | SP-02, SP-08           |
 | AC-SEC-002 | S3 keys carry no user-facing semantics                              | ADR-0004                   | SP-08                  |

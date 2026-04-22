@@ -1669,6 +1669,16 @@ get/list/delete smoke), disk free, oldest pending
 `storage_sync`, oldest pending `outbound_notifications`,
 `interrupted` jobs count.
 
+`/status` and `/doctor` use the same predicate to count
+`storage_sync pending` / `failed`; see PRD §14.1
+"`storage_sync pending` / `failed` count contract". In particular,
+`storage_objects` rows with `retention_class = 'session'` whose
+`artifact_type` is not sync-eligible stay at `status = 'pending'`
+forever by design (§6.4) and must not be counted as backlog. Rows
+with `capture_status = 'failed'` are surfaced under a separate
+"attachment capture failures" line in `/doctor`, not folded into
+`storage_sync failed`.
+
 ---
 
 ## 14. Subprocess Lifecycle

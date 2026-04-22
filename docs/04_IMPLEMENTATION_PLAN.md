@@ -77,6 +77,15 @@ Gates (playbook §5):
   checks. This gate is defined by the test file, not by a fixed
   numeric range.
 
+Acceptance-test plan backlog rule: each phase also closes out the
+test-plan rows it owns in the "Pending-to-add (backlog)" section of
+[`docs/06_ACCEPTANCE_TESTS.md`](./06_ACCEPTANCE_TESTS.md) before
+its gate passes, per the phase-gate escalation schedule in that
+file. Reinforcement tests (TEST-TEL-ATTACH-001,
+TEST-NOTIF-CHUNK-001, TEST-PROV-RESUME-001, TEST-STO-STATE-001) are
+promoted on the same schedule as the AC they reinforce, not
+deferred to P1.
+
 ## Definition of "done" for a phase
 
 A phase is done when:
@@ -159,16 +168,32 @@ A phase is done when:
     same txn.
   - `src/telegram/inbound.ts` — classify update (auth / type /
     command / attachment / text) → insert `jobs` row or mark
-    `skipped`.
-  - `src/telegram/attachment.ts` — `getFile` → local temp →
-    sha256/mime/size → `storage_objects` insert (retention
-    `session`, status `pending`).
+    `skipped`. For each attachment in the update, insert a
+    `storage_objects` row with `capture_status = 'pending'`,
+    `status = 'pending'`, `retention_class = 'session'`,
+    `source_external_id = file_id`, `source_message_id` set, and
+    `sha256` / `mime_type` / `size_bytes` left NULL — **inside the
+    same inbound txn as the `jobs` insert** (PRD §13.5 Phase 1,
+    HLD §7.1, §7.10).
+  - `src/telegram/attachment_metadata.ts` — pure inbound-side
+    helpers for metadata-only insert: classification, oversize
+    check against `document.file_size` already present in the
+    update payload (no network), and row construction. **Must not
+    call `getFile`, download bytes, or probe MIME.** Byte capture
+    lives in Phase 4 (`src/queue/worker.ts` pre-step); see
+    `src/storage/objects.ts` in Phase 9 for the durable-sync side.
   - `test/telegram/poller.test.ts` — harness against a stub
     Telegram server; offset invariant (HLD §9.5, PRD §13.2)
     asserted.
   - `test/telegram/inbound.test.ts` — authorized text, authorized
     command, unauthorized sender, unsupported type, attachment,
-    oversize attachment.
+    oversize attachment. **New oracle**: when the update contains
+    a photo/document, the stub Telegram `getFile` / download /
+    MIME-probe surface records **zero calls** during the inbound
+    txn, the `storage_objects` row exists with
+    `capture_status = 'pending'` and NULL `sha256` / `mime_type`
+    / `size_bytes`, and `source_external_id` matches the Telegram
+    `file_id` (AC-STO-003a).
   - `test/telegram/offset_durability.test.ts` — reproduces SP-03
     crash points deterministically against the stub.
 - **Exit criteria**:
@@ -191,7 +216,25 @@ A phase is done when:
 - **Deliverables**:
   - `src/queue/worker.ts` — single worker loop; atomic claim
     (`BEGIN IMMEDIATE` → `UPDATE ... WHERE status='queued'`);
-    dispatch by `job_type`.
+    dispatch by `job_type`. **Attachment capture pre-step** (PRD
+    §13.5 Phase 2, HLD §7.2 step 3): before invoking the provider
+    adapter, for every `storage_objects` row associated with the
+    job where `capture_status = 'pending'`, call Telegram
+    `getFile`, download bytes to the local store, compute
+    `sha256`, detect `mime_type`, measure `size_bytes`, and in a
+    single post-capture transaction set
+    `capture_status = 'captured'`, populate those fields, and set
+    `captured_at`. A `storage_sync` job is enqueued only for rows
+    whose retention class is S3-eligible per PRD §14.1 storage_sync
+    query contract. On capture failure, set
+    `capture_status = 'failed'` with `capture_error_json`; no
+    `storage_sync` job is enqueued for that row, and the
+    provider_run continues so the user turn still commits with a
+    capture-failure note.
+  - `src/telegram/attachment_capture.ts` — pure capture helpers
+    (no SQL writes except the single capture txn above); unit
+    tests for success, getFile failure, download failure, MIME
+    probe failure, and oversize-at-download.
   - `src/providers/types.ts` — `AgentRequest` / `AgentResponse`
     per PRD Appendix B plus adapter interface.
   - `src/providers/fake.ts` — deterministic test adapter that
@@ -202,14 +245,27 @@ A phase is done when:
   - `test/queue/state_machine.test.ts` — drives
     `queued → running → succeeded | failed | cancelled` via the
     fake adapter and asserts each transition against HLD §6.2.
+  - `test/queue/attachment_capture.test.ts` — AC-STO-003b:
+    success fills `sha256` / `mime_type` / `size_bytes` and flips
+    `capture_status = 'captured'`; injected `getFile` error leaves
+    `capture_status = 'failed'` with redacted `capture_error_json`
+    and **no** `storage_sync` job; provider_run still reaches a
+    terminal state in both cases.
 - **Exit criteria**:
   - A seeded job flows from `queued` to `succeeded` via the fake
     provider and produces a `turns` row with `role='assistant'`.
   - `cancelled` and `failed` paths exercise the expected
     transitions.
   - Only one job is `running` at a time.
+  - For a job that owns a `storage_objects` row inserted in
+    Phase 3, the worker's capture pre-step produces either
+    `capture_status = 'captured'` with populated bytes/hash/MIME
+    or `capture_status = 'failed'` with `capture_error_json`;
+    neither path mutates `jobs.status` back to `queued`.
 - **Ledger tests introduced**: `jobs.status` machine (HLD §6.2)
-  except `interrupted` (added in Phase 10).
+  except `interrupted` (added in Phase 10); `storage_objects`
+  capture sub-machine (`pending → captured | failed`, independent
+  of the sync `status` column).
 
 ---
 
@@ -218,30 +274,69 @@ A phase is done when:
 - **Entry criteria**:
   - Phase 4 done.
 - **Deliverables**:
-  - `src/telegram/outbound.ts` — `sendMessage` executor; message
-    chunking per Telegram limits; 429 `retry_after` handling.
-  - `src/queue/notification_retry.ts` — loop that re-sends
-    `pending` / `failed` rows within budget.
+  - `src/telegram/outbound.ts` — `sendMessage` executor; splits
+    payload into chunks per Telegram limits; 429 `retry_after`
+    handling; creates the `outbound_notifications` row **and** its
+    `chunk_count` `outbound_notification_chunks` rows atomically
+    in the same SQLite transaction (PRD Appendix D invariants;
+    HLD §6.3, §7.10); sends only chunks with
+    `status IN ('pending', 'failed')` and records the resulting
+    `telegram_message_id` on each chunk row; **never** resends a
+    chunk whose `status = 'sent'`.
+  - `src/queue/notification_retry.ts` — retry loop that selects
+    `outbound_notification_chunks` where
+    `status IN ('pending', 'failed')` and retry budget is not
+    exhausted; rolls up `outbound_notifications.status` from the
+    chunk-row state only (derived, never mutated independently);
+    does not touch `provider_runs.status` or `jobs.status`
+    (AC-NOTIF-001, AC-STO-002).
   - Notification creation wired into `src/queue/worker.ts`:
-    terminal job transitions insert the corresponding
-    `outbound_notifications` row with a deterministic
-    `payload_hash`.
+    terminal job transitions insert the parent
+    `outbound_notifications` row **and** the per-chunk ledger in
+    the same txn, with a deterministic `payload_hash`.
   - `test/notifications/state_machine.test.ts` — full
     `pending → sent` and `pending → failed → pending → sent`
-    paths; duplicate `(job_id, notification_type, payload_hash)`
-    returns existing row.
+    paths at the parent level; duplicate
+    `(job_id, notification_type, payload_hash)` returns the
+    existing parent row (and its existing chunk rows).
+  - `test/notifications/chunk_ledger.test.ts` — **per-chunk ledger
+    coverage** (TEST-NOTIF-CHUNK-001, AC-NOTIF-003, AC-NOTIF-004,
+    AC-NOTIF-005):
+    - Parent `outbound_notifications` row and its N
+      `outbound_notification_chunks` rows are inserted
+      atomically; rolling back the txn removes all N+1 rows.
+    - With a 4-chunk response, chunks 1–2 send successfully and
+      chunk 3 fails: retry **only** re-sends chunk 3 (and any
+      later `pending`/`failed` chunks) — chunks 1–2 are not
+      re-sent, and the stub Telegram server records no duplicate
+      `sendMessage` for them.
+    - `outbound_notifications.status` flips to `sent` **only
+      after** every chunk row reaches `status = 'sent'`; while
+      any chunk is `pending` or `failed` the parent remains
+      non-terminal.
+    - `provider_runs.status` / `jobs.status` do not move off
+      `succeeded` when a chunk is `failed`.
   - `test/notifications/splitting.test.ts` — long responses are
-    split across multiple `sendMessage` calls and every
-    `telegram_message_ids_json` entry is recorded.
+    split across multiple `sendMessage` calls; each call
+    populates the corresponding chunk row's
+    `telegram_message_id`, and the parent row's
+    `telegram_message_ids_json` is derived from the chunk roll-up.
 - **Exit criteria**:
-  - A fake-provider job `succeeds` and the user receives a
-    `job_completed` message via the stub Telegram server.
+  - A fake-provider job `succeeds` and the user receives one or
+    more chunks via the stub Telegram server; each chunk has a
+    matching `outbound_notification_chunks` row.
   - Duplicate notifications are prevented by the idempotency
-    triple.
-  - Telegram outage simulation leaves rows in `pending` /
-    `failed` and the next cycle sends them successfully.
-- **Ledger tests introduced**: `outbound_notifications.status`
-  machine (HLD §6.3).
+    triple at the parent level; chunk re-sends for an already
+    `sent` chunk are impossible by construction.
+  - Telegram outage simulation leaves only the affected chunk
+    rows in `pending` / `failed`; the next cycle re-sends only
+    those chunks and the parent roll-up advances to `sent`.
+- **Ledger tests introduced**:
+  - `outbound_notifications.status` derived roll-up (HLD §6.3).
+  - `outbound_notification_chunks.status` per-chunk machine
+    (`pending → sent`, `pending → failed → pending → sent`).
+  - `provider_runs.status` / `jobs.status` independence from
+    chunk failure (AC-STO-002, AC-NOTIF-001).
 
 ---
 
@@ -262,7 +357,15 @@ is exercised end-to-end with a fake provider on a staging host.
      acceptable even though the full recovery logic lands in
      Phase 10 (running jobs may fail loudly; that is fine
      here).
-  5. Send an attachment; confirm `storage_objects` row appears.
+  5. Send an attachment; confirm a `storage_objects` row appears
+     immediately with `capture_status = 'pending'` and NULL
+     `sha256` / `mime_type` / `size_bytes` (AC-STO-003a), and
+     that after the worker capture pre-step the same row
+     transitions to `capture_status = 'captured'` with those
+     fields populated (AC-STO-003b). Also run the simulated
+     capture-failure path and confirm the row ends at
+     `capture_status = 'failed'` without enqueuing a
+     `storage_sync` job.
 - **Exit criteria** (gate pass):
   - Steps 2–5 observed; no panic; no unredacted payload in any
     log or row.

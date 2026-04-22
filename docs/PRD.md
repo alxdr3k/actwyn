@@ -852,39 +852,79 @@ size limit. The runtime must never rely on Telegram as the storage
 layer. Every user-uploaded attachment is copied into our own storage
 before it is referenced by a memory, turn, or session summary.
 
-The canonical inbound flow is:
+Attachment handling is split into **two phases** so that the Telegram
+inbound SQLite transaction stays short and performs no network or
+file I/O (HLD §7.1, §7.2, §7.10, §9.3; Appendix D capture
+invariants). `telegram/inbound` **must never** call Telegram
+`getFile`, download bytes, or probe MIME type inside the inbound
+transaction.
+
+**Phase 1 — inbound metadata (inside the Telegram inbound txn):**
 
 ```
 Telegram update with file_id
-  → `telegram_updates` row (redacted raw payload)
-  → getFile → temporary download URL
-  → download to a local temp path
-  → compute sha256, MIME type, size
-  → apply secret/PII detection to metadata
-  → insert `storage_objects` row
-      (retention_class defaults to `session`, status=`pending`)
-  → upload to S3 only when retention is `session` + sync-enabled
-    or when promotion to `long_term` has occurred (see §12.8.3)
-  → link to `turns` / `memory_summaries` via
-    `memory_artifact_links`
+  → redact raw update
+  → insert `telegram_updates` row (redacted payload)
+  → insert `storage_objects` row (metadata only):
+      source_channel         = 'telegram'
+      source_external_id     = Telegram file_id
+      source_message_id      = Telegram message_id
+      retention_class        = 'session'     (default, §12.8.3)
+      capture_status         = 'pending'
+      status                 = 'pending'     (sync status)
+      sha256 / mime_type / size_bytes = NULL
+  → insert `jobs` row (provider_run)
+  → commit
+  → advance `telegram_next_offset` only after commit (§13.1, §13.6)
+```
+
+**Phase 2 — byte capture (worker pre-step, outside the inbound txn):**
+
+```
+worker picks up provider_run job
+  → Telegram getFile → temporary download URL
+  → download to local store
+  → compute sha256, detected MIME type, size
+  → apply secret/PII-safe metadata handling (§15)
+success:
+  → in a single capture transaction, update `storage_objects`:
+      capture_status         = 'captured'
+      sha256 / mime_type / size_bytes / captured_at populated
+  → enqueue `storage_sync` only when retention policy makes the
+    row S3-eligible (§12.8.3, §14.1 storage_sync query contract)
+failure:
+  → in a single transaction, update `storage_objects`:
+      capture_status         = 'failed'
+      capture_error_json     = <redacted error>
+  → no `storage_sync` job is enqueued while
+    `capture_status != 'captured'`
+  → the owning `provider_run` continues; the user turn is still
+    committed with a note that the attachment was not captured.
 ```
 
 Rules:
 
-- The Telegram file path is never persisted as a primary reference;
-  only our `storage_objects.id` is durable.
-- Download errors, MIME detection failures, and oversize rejections
-  are recorded in `storage_objects.error_json`; the corresponding
-  `turns` row is still created (user message is not silently dropped)
-  with a note indicating the attachment was not captured.
-- `ephemeral` attachments are deleted from the local temp path at the
+- The Telegram file path and `file_id` are never persisted as the
+  primary reference; only our `storage_objects.id` is durable.
+  `source_external_id` is retained **only** so the capture pass can
+  fetch the bytes, and it is redacted when it appears in logs.
+- The inbound transaction inserts metadata only. Download errors,
+  MIME probe failures, and capture-time oversize rejections are
+  recorded by the capture pass in
+  `storage_objects.capture_error_json`; the corresponding `turns`
+  row (for the user message) is still created so the user message is
+  not silently dropped.
+- Oversize rejections that are detectable **from the Telegram update
+  payload alone** (e.g. `document.file_size` already above our
+  configured cap) may be handled at the inbound boundary with
+  `capture_status = 'failed'` and `capture_error_json = {reason:
+  'oversize_inbound'}`, plus an explicit Telegram reply. The inbound
+  txn still performs no network I/O.
+- `ephemeral` attachments are deleted from the local store at the
   end of the owning run; no S3 upload is performed.
-- Oversize attachments (beyond the bot download limit or our
-  configured cap) are rejected at the inbound boundary with an
-  explicit Telegram reply; no partial object is stored.
 - Attachment metadata (caption, detected type, size) flows into
-  `turns` context so the provider can reason about the attachment
-  without requiring the bytes directly.
+  `turns` context only for rows with `capture_status = 'captured'`
+  so the provider does not reason about bytes we do not hold.
 
 ---
 
@@ -917,6 +957,44 @@ last issue: <short redacted string>   # optional
   반드시 redactor를 거쳐 출력.
 - `/status`는 부작용이 없어야 한다 (단순 read-only 쿼리).
 - `/status deep`는 P1+.
+
+**`storage_sync pending` / `failed` count contract** — the
+`post-processing` line reports S3 sync backlog, not every non-terminal
+`storage_objects` row. Session-scoped artifacts whose retention and
+`artifact_type` make them S3-ineligible may legitimately sit at
+`status = 'pending'` forever (HLD §6.4); those rows **must not** be
+surfaced as a backlog in `/status` or `/doctor`.
+
+A row contributes to `storage_sync pending` / `failed` iff **all** of:
+
+1. `capture_status = 'captured'` (not `pending` / `failed`), **and**
+2. `status IN ('pending', 'failed')`, **and**
+3. the row is sync-eligible, which in P0 is defined as
+   `retention_class IN ('long_term', 'archive')` **or**
+   `artifact_type IN ('redacted_provider_transcript',
+   'conversation_transcript', 'memory_snapshot', 'parser_fixture',
+   'generated_artifact')`, **and**
+4. either a `storage_sync` job exists for the row in
+   (`queued`, `running`, `failed`) or the configured storage policy
+   classifies the row as sync-required.
+
+The count **must not** include:
+
+- rows with `capture_status != 'captured'` (they have no bytes yet;
+  AC-STO-003b failures are surfaced separately via `/doctor`);
+- `retention_class = 'ephemeral'` rows (deleted at end of run);
+- `retention_class = 'session'` rows that no policy marks
+  sync-eligible (these stay `status = 'pending'` by design and are
+  not backlog — this is the "expected pending" rule from HLD §6.4).
+
+The same predicate is reused by `/doctor` storage checks so operator
+views stay consistent. Post-P0, a dedicated `sync_policy` column
+(`none | optional | required`) may replace the rule-based predicate;
+P0 implements the predicate above directly.
+
+`capture_status = 'failed'` rows are surfaced by `/doctor` under a
+separate "attachment capture failures" line (AC-STO-003b); they are
+not added to `storage_sync failed` because they have no sync job.
 
 ### 14.2 디지털 트윈 원천 데이터 (풍부하게, 접근 통제 필수)
 
@@ -1061,7 +1139,8 @@ form**. Domains:
 | AC-PROV-006 | `Bun.spawn` provider subprocess는 timeout/AbortSignal로 종료 가능하다. | AC18 |
 | AC-JOB-003 | `bun:sqlite` WAL mode에서 job claim transaction이 재시작 후 일관성을 유지한다. | AC19 |
 | AC-OPS-001 | P0 build/runtime dependency 목록은 PRD에 명시된 allowlist를 초과하지 않는다. | AC20 |
-| AC-STO-003 | When a Telegram attachment arrives, a `storage_objects` row is created with `source_channel='telegram'`, a detected MIME type, and a SHA-256 hash; the runtime holds its own copy and does not depend on the Telegram file link for retrieval. | AC21 (artifact) |
+| AC-STO-003a | When a Telegram attachment arrives, an inbound metadata row is created in `storage_objects` with `source_channel='telegram'`, `source_external_id=<telegram file_id>`, `capture_status='pending'`, `status='pending'`, and nullable `sha256` / `mime_type` / `size_bytes`. The inbound transaction performs no Telegram `getFile` call, no download, and no MIME probe (PRD §13.5 Phase 1, HLD §7.1, §7.10). | AC21 (artifact); was AC-STO-003 |
+| AC-STO-003b | After the worker capture pass (PRD §13.5 Phase 2) succeeds, the same `storage_objects` row has `capture_status='captured'`, populated `sha256` / `mime_type` / `size_bytes` / `captured_at`, and the runtime holds its own local copy that does not depend on the Telegram file link. On capture failure, `capture_status='failed'` and `capture_error_json` is populated, and no `storage_sync` job is enqueued. | AC21 (artifact); was AC-STO-003 |
 | AC-STO-004 | An attachment without an explicit user save intent is never promoted to `retention_class = long_term`; it remains `session` (or `ephemeral`) and is not written to S3 unless the session-level sync rule applies. | AC22 (artifact) |
 | AC-STO-005 | A `long_term` artifact is durably stored in S3 (`status = uploaded`) and linked to a memory via `memory_artifact_links` with `provenance ∈ {user_stated, user_confirmed}` before it is considered part of long-term memory. | AC23 (artifact) |
 | AC-SEC-002 | S3 object keys follow `objects/{yyyy}/{mm}/{dd}/{object_id}/{sha256}.{safe_ext}` and contain no original filenames, user names, chat IDs, or project names. | AC24 (artifact) |
