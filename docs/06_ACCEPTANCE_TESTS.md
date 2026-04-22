@@ -2,11 +2,25 @@
 
 > Status: draft · Owner: Staff Eng (test) · Last updated: 2026-04-22
 >
-> One test plan per PRD §17 acceptance criterion (AC01–AC25). Each
-> entry specifies the fixture, the concrete steps, the oracle, and
-> the test type. The P0 Acceptance Test gate (playbook §5.7) is
-> met when every `Status: pending` below flips to `pass` on the
+> One test plan per PRD §17 acceptance criterion. Each entry
+> specifies the fixture, the concrete steps, the oracle, and the
+> test type. The P0 Acceptance Test gate (playbook §5.7) is met
+> when every P0 `Status: pending` below flips to `pass` on the
 > staging host against the pinned versions.
+>
+> IDs use the canonical `AC-<DOMAIN>-<###>` scheme from PRD §17.
+> Legacy numeric IDs (`AC01`…`AC30`) from earlier revisions are
+> retained as parenthetical aliases in the `Maps to` line to ease
+> transition. Only the canonical IDs are authoritative.
+>
+> Coverage note: this file currently enumerates the first 30 PRD
+> criteria (everything through `AC-MEM-005` / legacy `AC30
+> artifact`). The remaining P0 criteria introduced by the restart-
+> block and the Issue 7 chunk ledger (`AC-OPS-002`, `AC-TEL-005..009`,
+> `AC-PROV-007..014`, `AC-NOTIF-001..005`, `AC-SEC-003..007`,
+> `AC-MEM-006`, `AC-OPS-003..004`) are tracked as **pending-to-add**
+> in the backlog at the end of this file and will be written up in
+> the same format before the P0 Acceptance gate.
 >
 > These are **acceptance** tests: each AC must be exercised end-
 > to-end against a realistic environment. Unit tests for the same
@@ -24,7 +38,7 @@
 - Hetzner Object Storage: a dedicated test bucket; keys loaded
   from an env file not committed.
 - A second, **unauthorized** Telegram account is configured for
-  AC01.
+  AC-TEL-001.
 - A harness repository exists under `test/acceptance/` with a
   small CLI and per-AC scenario scripts.
 
@@ -33,9 +47,9 @@
 Each entry uses:
 
 ```
-### AC## — Title
+### AC-<DOMAIN>-<###> — Title
 
-- Maps to: PRD §N, HLD §M
+- Maps to: PRD §N, HLD §M   (legacy AC## where applicable)
 - Test type: end-to-end | state-machine | smoke | chaos
 - Fixture: what is loaded before the test
 - Procedure: what we do
@@ -45,9 +59,9 @@ Each entry uses:
 
 ---
 
-## AC01 — Unauthorized Telegram user never produces a job
+## AC-TEL-001 — Unauthorized Telegram user never produces a job
 
-- **Maps to**: PRD AC01; HLD §4.2, §9.2.
+- **Maps to**: PRD AC-TEL-001 (legacy AC01); HLD §4.2, §9.2.
 - **Test type**: end-to-end.
 - **Fixture**: A clean DB, `allowed_user_ids = [U_primary]`,
   `BOOTSTRAP_WHOAMI = false`.
@@ -66,9 +80,9 @@ Each entry uses:
     still skipped.
 - **Status**: pending.
 
-## AC02 — Authorized DM creates exactly one job and transitions correctly
+## AC-JOB-001 — Authorized DM creates exactly one job and transitions correctly
 
-- **Maps to**: PRD AC02; HLD §6.2, §7.2.
+- **Maps to**: PRD AC-JOB-001 (legacy AC02); HLD §6.2, §7.2.
 - **Test type**: end-to-end + state-machine.
 - **Fixture**: Clean DB.
 - **Procedure**:
@@ -82,9 +96,9 @@ Each entry uses:
     same `session_id` as the inbound.
 - **Status**: pending.
 
-## AC03 — Claude raw stream is persisted as redacted events
+## AC-PROV-001 — Claude raw stream is persisted as redacted events
 
-- **Maps to**: PRD AC03, AC10; HLD §8.3, §13.
+- **Maps to**: PRD AC-PROV-001 (legacy AC03), AC-SEC-001; HLD §8.3, §13.
 - **Test type**: end-to-end.
 - **Fixture**: Clean DB; include a deliberate `Bearer abcd1234…`
   string in the prompt.
@@ -98,9 +112,9 @@ Each entry uses:
   - `stdout` and `stderr` streams each have at least one row.
 - **Status**: pending.
 
-## AC04 — Final response is sent to Telegram and saved as a turn
+## AC-TEL-002 — Final response is sent to Telegram and saved as a turn
 
-- **Maps to**: PRD AC04; HLD §6.3, §7.2.
+- **Maps to**: PRD AC-TEL-002 (legacy AC04); HLD §6.3, §7.2.
 - **Test type**: end-to-end.
 - **Fixture**: Clean DB.
 - **Procedure**:
@@ -114,9 +128,9 @@ Each entry uses:
     `telegram_message_ids_json` is populated.
 - **Status**: pending.
 
-## AC05 — Duplicate `update_id` produces only one job
+## AC-TEL-003 — Duplicate `update_id` produces only one job
 
-- **Maps to**: PRD AC05; HLD §4.2, §5.3, §6.1.
+- **Maps to**: PRD AC-TEL-003 (legacy AC05); HLD §4.2, §5.3, §6.1.
 - **Test type**: state-machine.
 - **Fixture**: Clean DB; stub Telegram server so we can replay
   the same `update_id` intentionally.
@@ -128,9 +142,9 @@ Each entry uses:
   - `jobs` has exactly one row.
 - **Status**: pending.
 
-## AC06 — Restart reconciles running jobs to `interrupted` or `queued`
+## AC-JOB-002 — Restart reconciles running jobs to `interrupted` or `queued`
 
-- **Maps to**: PRD AC06; HLD §15.
+- **Maps to**: PRD AC-JOB-002 (legacy AC06); HLD §15.
 - **Test type**: chaos.
 - **Fixture**: Clean DB; a long-running `provider_run` (use a
   slow fake provider for determinism, then also verify with the
@@ -150,9 +164,9 @@ Each entry uses:
     the event.
 - **Status**: pending.
 
-## AC07 — `/summary` and `/end` persist summary and enqueue storage sync
+## AC-MEM-001 — `/summary` and `/end` persist summary and enqueue storage sync
 
-- **Maps to**: PRD AC07; HLD §7.5, §11.
+- **Maps to**: PRD AC-MEM-001 (legacy AC07); HLD §7.5, §11.
 - **Test type**: end-to-end.
 - **Fixture**: A session with at least three turns.
 - **Procedure**:
@@ -170,9 +184,9 @@ Each entry uses:
     fields per PRD §12.2–12.3.
 - **Status**: pending.
 
-## AC08 — S3 outage does not block Telegram delivery
+## AC-STO-001 — S3 outage does not block Telegram delivery
 
-- **Maps to**: PRD AC08; HLD §12.4, §12.5.
+- **Maps to**: PRD AC-STO-001 (legacy AC08); HLD §12.4, §12.5.
 - **Test type**: chaos.
 - **Fixture**: Valid Telegram config; S3 endpoint pointed at a
   bad URL (or credentials bad).
@@ -186,9 +200,9 @@ Each entry uses:
     `pending` or `failed` (not rolled back either).
 - **Status**: pending.
 
-## AC09 — Runtime / output / prompt limits terminate the subprocess
+## AC-PROV-002 — Runtime / output / prompt limits terminate the subprocess
 
-- **Maps to**: PRD AC09; HLD §14.2, §14.3.
+- **Maps to**: PRD AC-PROV-002 (legacy AC09); HLD §14.2, §14.3.
 - **Test type**: chaos.
 - **Fixture**: `max_runtime`, `max_output_bytes`, and
   `max_prompt_bytes` set to low values for the test session.
@@ -203,9 +217,9 @@ Each entry uses:
   - `/doctor` reports no orphan processes afterwards.
 - **Status**: pending.
 
-## AC10 — Secrets never appear in persisted rows
+## AC-SEC-001 — Secrets never appear in persisted rows
 
-- **Maps to**: PRD AC10; HLD §13.
+- **Maps to**: PRD AC-SEC-001 (legacy AC10); HLD §13.
 - **Test type**: end-to-end + grep.
 - **Fixture**: Plant known patterns in the user prompt
   (Telegram token shape, bearer token, S3 key shape).
@@ -219,9 +233,9 @@ Each entry uses:
     actual dumps in addition to its own fixtures.
 - **Status**: pending.
 
-## AC11 — Claude runs without interactive permission prompts
+## AC-PROV-003 — Claude runs without interactive permission prompts
 
-- **Maps to**: PRD AC11; HLD §8.1.
+- **Maps to**: PRD AC-PROV-003 (legacy AC11); HLD §8.1.
 - **Test type**: smoke (piggy-backs on SP-05 once in prod).
 - **Fixture**: Conversational profile flags locked in config.
 - **Procedure**:
@@ -233,9 +247,9 @@ Each entry uses:
     writes during the runs.
 - **Status**: pending.
 
-## AC12 — `storage_sync` failure does not roll back `provider_run`
+## AC-STO-002 — `storage_sync` failure does not roll back `provider_run`
 
-- **Maps to**: PRD AC12; HLD §6.4, §12.4.
+- **Maps to**: PRD AC-STO-002 (legacy AC12); HLD §6.4, §12.4.
 - **Test type**: chaos.
 - **Fixture**: Valid configuration; credentials tampered to
   force sync failures.
@@ -251,9 +265,9 @@ Each entry uses:
     without any extra handholding.
 - **Status**: pending.
 
-## AC13 — Memory summary items carry provenance and confidence
+## AC-MEM-002 — Memory summary items carry provenance and confidence
 
-- **Maps to**: PRD AC13; HLD §11.3.
+- **Maps to**: PRD AC-MEM-002 (legacy AC13); HLD §11.3.
 - **Test type**: end-to-end.
 - **Fixture**: A session with a mix of user-stated and
   agent-inferred items.
@@ -267,9 +281,9 @@ Each entry uses:
     preference candidate.
 - **Status**: pending.
 
-## AC14 — `/cancel` terminates the whole subprocess group
+## AC-PROV-004 — `/cancel` terminates the whole subprocess group
 
-- **Maps to**: PRD AC14; HLD §7.4, §14.
+- **Maps to**: PRD AC-PROV-004 (legacy AC14); HLD §7.4, §14.
 - **Test type**: chaos.
 - **Fixture**: A running `provider_run` using a subject that
   forks a child (via the fake provider's "stubborn" mode).
@@ -281,9 +295,9 @@ Each entry uses:
   - Any child processes are also gone.
 - **Status**: pending.
 
-## AC15 — Parser fixture normalizes a sample to `final_text`
+## AC-PROV-005 — Parser fixture normalizes a sample to `final_text`
 
-- **Maps to**: PRD AC15; HLD §8.3.
+- **Maps to**: PRD AC-PROV-005 (legacy AC15); HLD §8.3.
 - **Test type**: state-machine (runs in unit + acceptance).
 - **Fixture**: A sample stream-json file from SP-04 plus a
   forcibly-truncated variant.
@@ -296,9 +310,9 @@ Each entry uses:
     `final_text` and marks `parser_status = fallback_used`.
 - **Status**: pending.
 
-## AC16 — `/doctor` S3 smoke passes before P0 acceptance
+## AC-OBS-001 — `/doctor` S3 smoke passes before P0 acceptance
 
-- **Maps to**: PRD AC16; HLD §12, §16.1.
+- **Maps to**: PRD AC-OBS-001 (legacy AC16); HLD §12, §16.1.
 - **Test type**: smoke.
 - **Fixture**: Configured Hetzner endpoint + credentials.
 - **Procedure**:
@@ -307,13 +321,13 @@ Each entry uses:
   - `s3_endpoint_smoke = ok` (put/get/stat/list/delete all
     succeed on a temp key that is cleaned up).
   - If the smoke fails, the service still starts and responds
-    to DMs in degraded mode; AC16 P0 acceptance gate is not
+    to DMs in degraded mode; AC-OBS-001 P0 acceptance gate is not
     met until this flips to `ok`.
 - **Status**: pending.
 
-## AC17 — Long polling works without a bot framework
+## AC-TEL-004 — Long polling works without a bot framework
 
-- **Maps to**: PRD AC17; HLD §9.1.
+- **Maps to**: PRD AC-TEL-004 (legacy AC17); HLD §9.1.
 - **Test type**: smoke.
 - **Fixture**: Run the service under strict dependency
   restriction (allowlist enforced by build).
@@ -326,9 +340,9 @@ Each entry uses:
   - `getUpdates` and `sendMessage` work via direct `fetch`.
 - **Status**: pending.
 
-## AC18 — Provider subprocess can be terminated by timeout / AbortSignal
+## AC-PROV-006 — Provider subprocess can be terminated by timeout / AbortSignal
 
-- **Maps to**: PRD AC18; HLD §14.
+- **Maps to**: PRD AC-PROV-006 (legacy AC18); HLD §14.
 - **Test type**: chaos.
 - **Fixture**: A fake provider configured to hang.
 - **Procedure**:
@@ -344,9 +358,9 @@ Each entry uses:
     effects occurred.
 - **Status**: pending.
 
-## AC19 — WAL + atomic job claim stays consistent after restart
+## AC-JOB-003 — WAL + atomic job claim stays consistent after restart
 
-- **Maps to**: PRD AC19; HLD §5.1, §6.2.
+- **Maps to**: PRD AC-JOB-003 (legacy AC19); HLD §5.1, §6.2.
 - **Test type**: chaos.
 - **Fixture**: Clean DB; a claim loop running under a second
   process for contention.
@@ -360,9 +374,9 @@ Each entry uses:
     recovery runs; after recovery, no such row remains.
 - **Status**: pending.
 
-## AC20 — Dependency list stays within allowlist
+## AC-OPS-001 — Dependency list stays within allowlist
 
-- **Maps to**: PRD AC20.
+- **Maps to**: PRD AC-OPS-001 (legacy AC20).
 - **Test type**: smoke.
 - **Fixture**: PRD-declared allowlist (Appendix A / F).
 - **Procedure**:
@@ -375,9 +389,9 @@ Each entry uses:
     allowlist or 08_DECISION_REGISTER.md.
 - **Status**: pending.
 
-## AC21 — Telegram attachment is captured into `storage_objects`
+## AC-STO-003 — Telegram attachment is captured into `storage_objects`
 
-- **Maps to**: PRD AC21; HLD §9.3.
+- **Maps to**: PRD AC-STO-003 (legacy AC21 (artifact)); HLD §9.3.
 - **Test type**: end-to-end.
 - **Fixture**: Clean DB; Telegram + Hetzner available.
 - **Procedure**:
@@ -393,11 +407,11 @@ Each entry uses:
     durable reference.
 - **Status**: pending.
 
-## AC22 — Attachment stays `session` without explicit save intent
+## AC-STO-004 — Attachment stays `session` without explicit save intent
 
-- **Maps to**: PRD AC22; HLD §6.4, §9.3.
+- **Maps to**: PRD AC-STO-004 (legacy AC22 (artifact)); HLD §6.4, §9.3.
 - **Test type**: end-to-end.
-- **Fixture**: As AC21.
+- **Fixture**: As AC-STO-003.
 - **Procedure**:
   1. Send an attachment with a neutral caption ("here's a
      photo").
@@ -413,11 +427,11 @@ Each entry uses:
     rule).
 - **Status**: pending.
 
-## AC23 — Explicit save promotes attachment to `long_term`
+## AC-STO-005 — Explicit save promotes attachment to `long_term`
 
-- **Maps to**: PRD AC23; HLD §6.4, §11.4.
+- **Maps to**: PRD AC-STO-005 (legacy AC23 (artifact)); HLD §6.4, §11.4.
 - **Test type**: end-to-end.
-- **Fixture**: As AC21.
+- **Fixture**: As AC-STO-003.
 - **Procedure**:
   1. Send an attachment.
   2. Run `/save_last_attachment` (or a natural-language "save
@@ -430,12 +444,12 @@ Each entry uses:
   - The S3 object exists at a key that matches PRD §12.8.4.
 - **Status**: pending.
 
-## AC24 — S3 object keys carry no user-facing semantics
+## AC-SEC-002 — S3 object keys carry no user-facing semantics
 
-- **Maps to**: PRD AC24; HLD §5.2.
+- **Maps to**: PRD AC-SEC-002 (legacy AC24 (artifact)); HLD §5.2.
 - **Test type**: smoke.
-- **Fixture**: A handful of uploaded artifacts from AC21 /
-  AC23.
+- **Fixture**: A handful of uploaded artifacts from AC-STO-003 /
+  AC-STO-005.
 - **Procedure**:
   1. List the bucket under `objects/` and inspect keys.
 - **Oracle**:
@@ -445,9 +459,9 @@ Each entry uses:
     project name.
 - **Status**: pending.
 
-## AC25 — `storage_sync` failures retain state cleanly
+## AC-STO-006 — `storage_sync` failures retain state cleanly
 
-- **Maps to**: PRD AC25; HLD §6.4, §12.3.
+- **Maps to**: PRD AC-STO-006 (legacy AC25 (artifact)); HLD §6.4, §12.3.
 - **Test type**: chaos.
 - **Fixture**: Pending `storage_objects` row; credentials
   broken.
@@ -461,9 +475,9 @@ Each entry uses:
     loss.
 - **Status**: pending.
 
-## AC26 — `/forget_*` uses tombstones, never hard-deletes
+## AC-MEM-003 — `/forget_*` uses tombstones, never hard-deletes
 
-- **Maps to**: PRD AC26; HLD §6.4, §6.5; DEC-006.
+- **Maps to**: PRD AC-MEM-003 (legacy AC26 (artifact)); HLD §6.4, §6.5; DEC-006.
 - **Test type**: state-machine.
 - **Fixture**: Session with at least one `active` `memory_items`
   row and at least one `uploaded` `storage_objects` row.
@@ -480,9 +494,9 @@ Each entry uses:
   - No rows are physically deleted from SQLite in any case.
 - **Status**: pending.
 
-## AC27 — User correction inserts a new item and supersedes the prior one atomically
+## AC-MEM-004 — User correction inserts a new item and supersedes the prior one atomically
 
-- **Maps to**: PRD AC27; HLD §6.5; DEC-007.
+- **Maps to**: PRD AC-MEM-004 (legacy AC27 (artifact)); HLD §6.5; DEC-007.
 - **Test type**: state-machine.
 - **Fixture**: A session with one `active` `memory_items` row
   (`id = M_old`) capturing a fact.
@@ -503,9 +517,9 @@ Each entry uses:
     `M_old` and includes `M_new` when relevant.
 - **Status**: pending.
 
-## AC28 — Only the notification minimal set is pushed
+## AC-OBS-002 — Only the notification minimal set is pushed
 
-- **Maps to**: PRD AC28; HLD §6.3, §9.4; DEC-012.
+- **Maps to**: PRD AC-OBS-002 (legacy AC28 (artifact)); HLD §6.3, §9.4; DEC-012.
 - **Test type**: end-to-end.
 - **Fixture**: A session that exercises each `notification_type`
   (both pushed and silent categories).
@@ -528,9 +542,9 @@ Each entry uses:
     `outbound_notifications` rows.
 - **Status**: pending.
 
-## AC29 — `/status` output matches the §14.1 contract
+## AC-OBS-003 — `/status` output matches the §14.1 contract
 
-- **Maps to**: PRD AC29; HLD §16.5; DEC-015.
+- **Maps to**: PRD AC-OBS-003 (legacy AC29 (artifact)); HLD §16.5; DEC-015.
 - **Test type**: end-to-end (golden).
 - **Fixture**: A controlled session state with known counts:
   1 `queued`, 1 `running`, N `pending` notifications, M
@@ -546,9 +560,9 @@ Each entry uses:
     DB row (read-only verification via before/after snapshot).
 - **Status**: pending.
 
-## AC30 — Summary auto-trigger respects conditions and throttle
+## AC-MEM-005 — Summary auto-trigger respects conditions and throttle
 
-- **Maps to**: PRD AC30; HLD §11.1; DEC-019.
+- **Maps to**: PRD AC-MEM-005 (legacy AC30 (artifact)); HLD §11.1; DEC-019.
 - **Test type**: state-machine + chaos.
 - **Fixture**: A session with controllable
   `turn_count` / `transcript_estimated_tokens` / `session_age`.
@@ -571,42 +585,102 @@ Each entry uses:
 
 ---
 
+## Pending-to-add (backlog)
+
+The criteria below are enumerated in PRD §17 but do not yet have a
+filled-in test plan in this file. They are tracked here explicitly
+so the P0 Acceptance gate is unambiguous: **each P0 AC below must
+have a plan written before the gate can be called.** Plans will
+follow the same template as the sections above.
+
+| ID            | Legacy | Area                                         |
+| ------------- | ------ | -------------------------------------------- |
+| AC-OPS-002    | AC21 (restart) | `/doctor` shows Bun version + warning      |
+| AC-TEL-005    | AC22 (restart) | Offset advance only after commit          |
+| AC-TEL-006    | AC23 (restart) | Crash-before-commit re-processes update   |
+| AC-PROV-007   | AC24 (restart) | `resume_mode` does not replay turns       |
+| AC-PROV-008   | AC25 (restart) | Resume failure → `replay_mode` fallback   |
+| AC-NOTIF-001  | AC26 (restart) | `sendMessage` failure does not roll back `provider_run` |
+| AC-OPS-003    | AC27 (restart) | `notification_retry` and `storage_sync` retry independently |
+| AC-PROV-009   | AC28 (restart) | `/provider` returns `not_enabled` in P0   |
+| AC-TEL-007    | AC29 (restart) | `telegram_updates` records received/enqueued/skipped/failed |
+| AC-TEL-008    | AC30 (restart) | Skipped updates advance offset only after commit |
+| AC-TEL-009    | AC31           | `allowed_updates=["message"]`             |
+| AC-PROV-010   | AC32           | `proc.exited` tracking, no `proc.unref()` |
+| AC-SEC-003    | AC33           | Claude advisory lockdown smoke test       |
+| AC-SEC-004    | AC34           | Claude read-only lockdown smoke test      |
+| AC-SEC-005    | AC35           | Interactive permission prompt = fail      |
+| AC-SEC-006    | AC36           | `BOOTSTRAP_WHOAMI=true` → `/doctor` warning |
+| AC-SEC-007    | AC37           | Bootstrap `/whoami` scope                 |
+| AC-NOTIF-002  | AC38           | Long response chunking                    |
+| AC-NOTIF-003  | AC39           | Chunk failure does not roll back + sent chunks not resent (new test: TEST-NOTIF-CHUNK-001) |
+| AC-NOTIF-004  | AC40           | `outbound_notifications` + `outbound_notification_chunks` ledger |
+| AC-NOTIF-005  | AC41           | `notification_retry` chunk selection      |
+| AC-PROV-011   | AC42           | Command builder `--session-id` / `--resume` |
+| AC-PROV-012   | AC43           | `provider_session_id` priority            |
+| AC-PROV-013   | AC44           | Prompt size / argv length guard           |
+| AC-PROV-014   | AC45           | `summary_generation` uses advisory profile |
+| AC-MEM-006    | AC46           | `summary_generation` output schema         |
+| AC-OPS-004    | AC47           | WAL-safe DB backup                        |
+
+Suggested additional test plans to write alongside the backlog:
+
+- **TEST-TEL-ATTACH-001** (AC-STO-003 reinforcement): attachment
+  download failure during the worker capture pass leaves the user
+  turn committed and the `storage_objects` row at
+  `capture_status = 'failed'` with `capture_error_json`; no corrupt
+  artifact is enqueued for sync.
+- **TEST-NOTIF-CHUNK-001** (AC-NOTIF-003 reinforcement): with a 4-
+  chunk response, force chunk 3 to fail while chunks 1–2 succeed.
+  Retry must resend only chunk 3; the user does not receive chunks
+  1–2 a second time.
+- **TEST-PROV-RESUME-001** (AC-PROV-008 reinforcement): resume
+  failure reuses the same `jobs.id` (no duplicate insert); a second
+  `provider_runs` row appears for the `replay_mode` retry; no
+  duplicate assistant `turns` rows exist for the session.
+- **TEST-STO-STATE-001** (AC-STO-006 reinforcement): `pending`,
+  `failed`, and `uploaded` semantics match PRD §17 /
+  Appendix D / HLD §6.4 exactly; `capture_status` vs `status`
+  columns are independent and never conflated in queries.
+
+---
+
 ## Status matrix
 
 Rolled-up view for the P0 Acceptance gate.
 
 | AC   | Status  | Depends on spike(s) | Notes                                          |
 | ---- | ------- | ------------------- | ---------------------------------------------- |
-| AC01 | pending | SP-02               | Needs second Telegram account for unauth path. |
-| AC02 | pending | SP-01, SP-04, SP-06 |                                                |
-| AC03 | pending | SP-04               | Redactor must be in place.                     |
-| AC04 | pending | SP-02, SP-04        | Covers message chunking if long.               |
-| AC05 | pending | SP-03               |                                                |
-| AC06 | pending | SP-01, SP-07        | Exercise recovery twice: safe_retry and not.   |
-| AC07 | pending | SP-06, SP-08        | Summary profile + S3 sync.                     |
-| AC08 | pending | SP-08               | Negative case.                                 |
-| AC09 | pending | SP-07               | Three sub-cases.                               |
-| AC10 | pending | SP-04, SP-05        | Combine DB / local / S3 grep.                  |
-| AC11 | pending | SP-05               |                                                |
-| AC12 | pending | SP-08               |                                                |
-| AC13 | pending | SP-06               |                                                |
-| AC14 | pending | SP-07               |                                                |
-| AC15 | pending | SP-04               | Shared fixture.                                |
-| AC16 | pending | SP-08               | Also a P0 gate item.                           |
-| AC17 | pending | SP-02               | Dependency allowlist enforcement.              |
-| AC18 | pending | SP-07               | Three sub-cases.                               |
-| AC19 | pending | SP-01               |                                                |
-| AC20 | pending | —                   | CI script.                                     |
-| AC21 | pending | SP-02, SP-08        | Attachment capture.                            |
-| AC22 | pending | SP-02               | Negative: no promotion.                        |
-| AC23 | pending | SP-02, SP-08        |                                                |
-| AC24 | pending | SP-08               | Key hygiene.                                   |
-| AC25 | pending | SP-08               |                                                |
-| AC26 | pending | SP-08               | Tombstone semantics; DEC-006.                  |
-| AC27 | pending | SP-01               | Atomic supersede txn; DEC-007.                 |
-| AC28 | pending | SP-02               | Minimal-set push; DEC-012.                     |
-| AC29 | pending | —                   | Golden-output `/status`; DEC-015.              |
-| AC30 | pending | —                   | Trigger + throttle; DEC-019.                   |
+| AC-TEL-001 | pending | SP-02               | Needs second Telegram account for unauth path. |
+| AC-JOB-001 | pending | SP-01, SP-04, SP-06 |                                                |
+| AC-PROV-001 | pending | SP-04               | Redactor must be in place.                     |
+| AC-TEL-002 | pending | SP-02, SP-04        | Covers message chunking if long.               |
+| AC-TEL-003 | pending | SP-03               |                                                |
+| AC-JOB-002 | pending | SP-01, SP-07        | Exercise recovery twice: safe_retry and not.   |
+| AC-MEM-001 | pending | SP-06, SP-08        | Summary profile + S3 sync.                     |
+| AC-STO-001 | pending | SP-08               | Negative case.                                 |
+| AC-PROV-002 | pending | SP-07               | Three sub-cases.                               |
+| AC-SEC-001 | pending | SP-04, SP-05        | Combine DB / local / S3 grep.                  |
+| AC-PROV-003 | pending | SP-05               |                                                |
+| AC-STO-002 | pending | SP-08               |                                                |
+| AC-MEM-002 | pending | SP-06               |                                                |
+| AC-PROV-004 | pending | SP-07               |                                                |
+| AC-PROV-005 | pending | SP-04               | Shared fixture.                                |
+| AC-OBS-001 | pending | SP-08               | Also a P0 gate item.                           |
+| AC-TEL-004 | pending | SP-02               | Dependency allowlist enforcement.              |
+| AC-PROV-006 | pending | SP-07               | Three sub-cases.                               |
+| AC-JOB-003 | pending | SP-01               |                                                |
+| AC-OPS-001 | pending | —                   | CI script.                                     |
+| AC-STO-003 | pending | SP-02, SP-08        | Attachment capture.                            |
+| AC-STO-004 | pending | SP-02               | Negative: no promotion.                        |
+| AC-STO-005 | pending | SP-02, SP-08        |                                                |
+| AC-SEC-002 | pending | SP-08               | Key hygiene.                                   |
+| AC-STO-006 | pending | SP-08               |                                                |
+| AC-MEM-003 | pending | SP-08               | Tombstone semantics; DEC-006.                  |
+| AC-MEM-004 | pending | SP-01               | Atomic supersede txn; DEC-007.                 |
+| AC-OBS-002 | pending | SP-02               | Minimal-set push; DEC-012.                     |
+| AC-OBS-003 | pending | —                   | Golden-output `/status`; DEC-015.              |
+| AC-MEM-005 | pending | —                   | Trigger + throttle; DEC-019.                   |
 
 ## Entry / exit criteria for the gate
 
