@@ -32,15 +32,50 @@ Phase 10 → Commands + /doctor + startup recovery
 Phase 11 → systemd unit + RUNBOOK handoff
 ```
 
+## Milestones
+
+P0 groups the phases above into five user-visible milestones. This
+is the level at which scope, "is it useful yet?", and go/no-go
+decisions are made. Phase numbers are fixed; milestone boundaries
+are the product lens on the same build order.
+
+| Milestone | Name                               | Phases            | What the user/operator gets                                                                                     |
+| --------- | ---------------------------------- | ----------------- | --------------------------------------------------------------------------------------------------------------- |
+| **M0**    | Docs + spikes                      | pre-Phase 1       | PRD / HLD / Risk Spikes closed; no runtime yet. Exit: Risk Spike gate passed for the spikes Phase 1 depends on. |
+| **M1**    | Walking skeleton (fake provider)   | Phase 1 → Phase 6 | Telegram inbound durable, job ledger, outbound retry, fake provider end-to-end. Exit: Walking Skeleton gate ✦. |
+| **M2**    | Claude vertical slice              | Phase 7           | Real Claude subprocess replaces the fake provider; stream-json parsed; permission lockdown enforced.            |
+| **M3**    | Memory + summary                   | Phase 8           | Context builder/packer, `/end` + `/summary`, `memory_summaries`, `memory_items` with provenance.                 |
+| **M4**    | Attachment + S3                    | Phase 9           | Attachment capture (two-phase, HLD §9.3) + S3 sync; `storage_objects` fully live; `/doctor` S3 smoke passes.    |
+| **M5**    | Operate-and-polish                 | Phase 10 → 11     | `/forget_*`, `/correct`, `/status`, `/doctor`, startup recovery, systemd + runbook. Exit: P0 Acceptance gate.   |
+
+Milestone rules:
+
+- A milestone cannot begin until all of its component phases'
+  entry criteria are met (in particular, the risk-spike gate
+  listed below).
+- "P0 done" means M5 has passed the P0 Acceptance gate. Earlier
+  milestones are not "P0 done" even if they are releasable
+  internally.
+- Any re-scoping decision (e.g. cut forget/correct to P1) moves
+  work between milestones, not between phases. Phase numbers
+  stay stable so that cross-doc references (HLD §18, runbook,
+  traceability) do not drift.
+
 Gates (playbook §5):
 
-- Before Phase 1: Risk Spike gate must be met (SP-01, SP-02, SP-03
-  in particular; others can land in parallel but must pass before
-  the phase that depends on them).
-- Before Phase 7: SP-04, SP-05, SP-06, SP-07 must be passed.
-- Before Phase 9: SP-08 must be passed.
-- After Phase 6: Walking Skeleton gate.
-- After Phase 10: P0 Acceptance Test gate (AC01–AC25).
+- Before Phase 1 (entering M1): Risk Spike gate must be met
+  (SP-01, SP-02, SP-03 in particular; others can land in parallel
+  but must pass before the phase that depends on them).
+- Before Phase 7 (entering M2): SP-04, SP-05, SP-06, SP-07 must be
+  passed.
+- Before Phase 9 (entering M4): SP-08 must be passed.
+- After Phase 6 (end of M1): Walking Skeleton gate.
+- After Phase 10 (end of M5 code work, before Phase 11): P0
+  Acceptance Test gate — every `AC-*` in
+  [`docs/06_ACCEPTANCE_TESTS.md`](./06_ACCEPTANCE_TESTS.md) whose
+  priority is P0 must pass; `/doctor` returns `ok` for all P0
+  checks. This gate is defined by the test file, not by a fixed
+  numeric range.
 
 ## Definition of "done" for a phase
 
@@ -141,9 +176,9 @@ A phase is done when:
     `telegram_updates` rows → correct counts of `enqueued` /
     `skipped`; `telegram_next_offset` equals
     `max(update_id) + 1`.
-  - Unauthorized sender never creates a `jobs` row (AC01).
+  - Unauthorized sender never creates a `jobs` row (AC-TEL-001).
   - Duplicate `update_id` from retry never creates a second
-    `jobs` row (AC05).
+    `jobs` row (AC-TEL-003).
 - **Ledger tests introduced**: `telegram_updates.status` machine
   (HLD §6.1).
 
@@ -258,12 +293,12 @@ is exercised end-to-end with a fake provider on a staging host.
   - `test/providers/subprocess.test.ts` — exercises teardown
     scenarios using a bash subject (mirrors SP-07).
 - **Exit criteria**:
-  - A real Claude run produces a `turns` row (AC02, AC04).
+  - A real Claude run produces a `turns` row (AC-JOB-001, AC-TEL-002).
   - Raw stream lines land in `provider_raw_events` only after
-    redaction (AC03, AC10).
+    redaction (AC-PROV-001, AC-SEC-001).
   - Parser fallback produces `final_text` on a forcibly-truncated
-    fixture (AC15).
-  - Subprocess teardown always leaves no survivor (AC14, AC18).
+    fixture (AC-PROV-005).
+  - Subprocess teardown always leaves no survivor (AC-PROV-004, AC-PROV-006).
 - **Ledger tests introduced**: populates `provider_runs`,
   `provider_raw_events`, `turns`; no new state machine but
   exercises `jobs.status` end-to-end with the real provider.
@@ -291,7 +326,7 @@ is exercised end-to-end with a fake provider on a staging host.
     in the **same txn** as the new row's insert).
   - `test/context/packer.test.ts` — budget overflow triggers the
     documented drop order and records the result; `superseded`
-    and `revoked` `memory_items` are never injected (AC27).
+    and `revoked` `memory_items` are never injected (AC-MEM-004).
   - `test/memory/summary.test.ts` — `/summary` on a sample
     session produces a schema-valid `memory_summaries` row and
     a local markdown/jsonl file; long-term items respect
@@ -299,14 +334,14 @@ is exercised end-to-end with a fake provider on a staging host.
   - `test/memory/correction.test.ts` — `/correct` inserts a new
     `memory_items` row with `supersedes_memory_id` set and
     flips the prior row to `superseded` in the same transaction
-    (AC27).
+    (AC-MEM-004).
 - **Exit criteria**:
   - `resume_mode` vs `replay_mode` recorded on every
     `provider_runs` row (AC test per HLD §10.2).
   - `prompt_overflow` error surfaces when even the minimum
     prompt does not fit.
   - `/summary` works end-to-end with Claude under the advisory
-    profile (AC11, PRD §12.3).
+    profile (AC-PROV-003, PRD §12.3).
 - **Ledger tests introduced**: writes to `memory_summaries`.
 
 ---
@@ -335,10 +370,10 @@ is exercised end-to-end with a fake provider on a staging host.
     pre-conditions enforced.
 - **Exit criteria**:
   - A session memory snapshot is uploaded to S3 after
-    `/summary` (AC07).
+    `/summary` (AC-MEM-001).
   - `storage_sync` failure does not roll back an owning job
-    (AC08, AC12, AC25).
-  - Object keys match PRD §12.8.4 (AC24).
+    (AC-STO-001, AC-STO-002, AC-STO-006).
+  - Object keys match PRD §12.8.4 (AC-SEC-002).
 - **Ledger tests introduced**: `storage_objects.status` machine
   (HLD §6.4).
 
@@ -358,7 +393,7 @@ is exercised end-to-end with a fake provider on a staging host.
     for gemini/codex/ollama).
   - `src/commands/doctor.ts` — checks from HLD §16.1 with the
     `quick` / `deep` category tag per DEC-017; includes
-    `bootstrap_whoami_guard` (DEC-009) and the S3 smoke (AC16).
+    `bootstrap_whoami_guard` (DEC-009) and the S3 smoke (AC-OBS-001).
   - `src/commands/whoami.ts` — respects BOOTSTRAP_WHOAMI and
     writes the 30-minute expiry timestamp on enablement.
   - `src/commands/save.ts` — `/save_last_attachment` + natural-
@@ -373,7 +408,7 @@ is exercised end-to-end with a fake provider on a staging host.
     natural-language path ("정정:" / "not X but Y"). Inserts a
     new `memory_items` row with `supersedes_memory_id` pointing
     at the prior row; flips the prior row to `superseded` in
-    the same transaction (AC27).
+    the same transaction (AC-MEM-004).
   - `src/startup/recovery.ts` — HLD §15 boot sequence:
     `running → interrupted`, `safe_retry` re-queue, orphan
     sweep, boot doctor. Emits user-visible Telegram restart
@@ -383,18 +418,22 @@ is exercised end-to-end with a fake provider on a staging host.
       negative (no save intent → no promotion).
     - `forget.test.ts` — each scope; verifies tombstone
       transitions and that `storage/sync` issues the S3
-      `DELETE` for `deletion_requested` (AC26).
-    - `correct.test.ts` — atomic supersede invariant (AC27).
+      `DELETE` for `deletion_requested` (AC-MEM-003).
+    - `correct.test.ts` — atomic supersede invariant (AC-MEM-004).
   - `test/startup/recovery.test.ts` — reproduces mid-run crash,
-    asserts HLD §15 guarantees (AC06), and checks the DEC-016
+    asserts HLD §15 guarantees (AC-JOB-002), and checks the DEC-016
     messaging policy (silent when there is no user-visible
     impact; user-visible notice otherwise).
   - `test/doctor.test.ts` — every check reports `category`,
-    `duration_ms`, `ok`/`warn`/`fail` deterministically; AC16
+    `duration_ms`, `ok`/`warn`/`fail` deterministically; AC-OBS-001
     S3 smoke passes against SP-08's dev bucket.
 - **Exit criteria**:
-  - All commands listed in PRD §8.1 function (AC01, AC06, AC11,
-    AC14, AC16, AC21–AC30 touched here).
+  - All commands listed in PRD §8.1 function. Phase 10 exercises
+    the P0 acceptance criteria listed in
+    [`docs/06_ACCEPTANCE_TESTS.md`](./06_ACCEPTANCE_TESTS.md)
+    under the `TEL`, `JOB`, `PROV`, `MEM`, `STO`, and `OBS`
+    domains; exhaustive coverage is validated by the P0
+    Acceptance Test gate at phase end.
   - Startup recovery does not double-charge attempts on
     interruption and matches DEC-016 messaging.
   - `/doctor` passes every `quick` and `deep` check against the

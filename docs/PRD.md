@@ -265,7 +265,7 @@ queued → running → succeeded
 
 | 항목 | 설명 |
 |------|------|
-| S3 smoke | put / get / stat / list / delete 왕복 (AC16) |
+| S3 smoke | put / get / stat / list / delete 왕복 (AC-OBS-001) |
 | Claude lockdown smoke | `--tools ""` + `--permission-mode dontAsk` 동작 검증 |
 | Subprocess teardown smoke | `Bun.spawn` detached PGID kill 검증 |
 | Disk free | free bytes > 설정 threshold (§16 degraded mode) |
@@ -275,7 +275,7 @@ queued → running → succeeded
 
 S3 smoke 실패 시 local-only degraded mode로 표시하고
 `storage_sync` job은 retryable 상태로 유지한다. P0 acceptance는
-S3 smoke test 성공을 요구한다 (AC16). 전체 출력 계약과 구현
+S3 smoke test 성공을 요구한다 (AC-OBS-001). 전체 출력 계약과 구현
 스펙은 HLD §16.
 
 ---
@@ -1023,86 +1023,152 @@ last issue: <short redacted string>   # optional
 
 ## 17. Acceptance Criteria
 
-| # | Criteria |
-|---|----------|
-| AC01 | Unauthorized Telegram user가 메시지를 보내면 job이 생성되지 않고 응답하지 않는다. 단, `BOOTSTRAP_WHOAMI=true`인 경우 `/whoami`만 예외적으로 `user_id`/`chat_id`를 반환할 수 있다. |
-| AC02 | Authorized user가 DM을 보내면 하나의 job이 생성되고 status가 `queued → running → succeeded`로 전이된다. |
-| AC03 | Claude subprocess stdout/stderr/redacted raw stream-json line이 `provider_raw_events`에 저장된다. |
-| AC04 | final response가 Telegram으로 전송되고 `turns` 테이블에 assistant turn으로 저장된다. |
-| AC05 | 동일 Telegram `update_id`가 중복 수신되어도 job은 한 번만 생성된다. |
-| AC06 | app 재시작 시 running job은 `interrupted`로 전이되고, `safe_retry=true`인 경우만 `queued`로 복구된다. |
-| AC07 | `/end` 또는 `/summary` 실행 시 session summary가 SQLite, local file에 저장되고 `storage_sync` job이 enqueue된다. |
-| AC08 | S3 장애가 있어도 Telegram response delivery는 실패하지 않고 `storage_sync` job으로 별도 기록된다. |
-| AC09 | max runtime/output/prompt limit 초과 시 provider subprocess가 종료되고 사용자에게 에러 요약이 전송된다. |
-| AC10 | logs/raw events에 Telegram token, S3 secret, provider auth token이 저장되지 않는다. |
-| AC11 | P0 Claude Code provider call은 interactive permission prompt를 요구하지 않는다. |
-| AC12 | `storage_sync` job 실패는 `provider_run` job의 `succeeded` 상태를 되돌리지 않는다. |
-| AC13 | memory summary 항목은 provenance와 confidence를 포함한다. |
-| AC14 | running provider job `/cancel` 시 subprocess process group 전체가 종료된다. |
-| AC15 | Claude stream-json parser fixture가 sample raw event를 `final_text`로 정상 정규화한다. |
-| AC16 | `/doctor` 실행 시 S3 smoke test(put/get/stat/list/delete)가 성공해야 P0 acceptance를 통과한다. 실패 시 local-only degraded mode로 표시하고 `storage_sync` job은 retryable 상태로 남긴다. |
-| AC17 | Telegram long polling은 direct fetch로 동작하고 bot framework dependency가 없다. |
-| AC18 | `Bun.spawn` provider subprocess는 timeout/AbortSignal로 종료 가능하다. |
-| AC19 | `bun:sqlite` WAL mode에서 job claim transaction이 재시작 후 일관성을 유지한다. |
-| AC20 | P0 build/runtime dependency 목록은 PRD에 명시된 allowlist를 초과하지 않는다. |
-| AC21 | When a Telegram attachment arrives, a `storage_objects` row is created with `source_channel='telegram'`, a detected MIME type, and a SHA-256 hash; the runtime holds its own copy and does not depend on the Telegram file link for retrieval. |
-| AC22 | An attachment without an explicit user save intent is never promoted to `retention_class = long_term`; it remains `session` (or `ephemeral`) and is not written to S3 unless the session-level sync rule applies. |
-| AC23 | A `long_term` artifact is durably stored in S3 (`status = uploaded`) and linked to a memory via `memory_artifact_links` with `provenance ∈ {user_stated, user_confirmed}` before it is considered part of long-term memory. |
-| AC24 | S3 object keys follow `objects/{yyyy}/{mm}/{dd}/{object_id}/{sha256}.{safe_ext}` and contain no original filenames, user names, chat IDs, or project names. |
-| AC25 | `storage_sync` failures leave `storage_objects.status = pending` with an `error_json` entry and do not roll back the owning `provider_run` or delete the local copy; retry eventually transitions the row to `uploaded`. |
-| AC26 | `/forget_memory <id>` moves the target `memory_items` row to `status = revoked` and excludes it from subsequent context packing; the row is **not** hard-deleted. `/forget_artifact <id>` sets `storage_objects.status = deletion_requested` and a later sync pass reaches `deleted` or `delete_failed`. |
-| AC27 | A user correction (`/correct` or the natural-language form "정정: X가 아니라 Y") inserts a new `memory_items` row with `supersedes_memory_id` pointing at the prior row; the prior row transitions from `active` to `superseded` in the same transaction; context packing skips superseded items. |
-| AC28 | Only notification types listed in §13.3 minimal set are pushed to Telegram. Silent types (`job_started`, `storage_sync_succeeded`, `notification_retry_succeeded`, etc.) never produce a Telegram message; they appear in structured logs and `/status` counts only. |
-| AC29 | `/status` output includes every field listed in the §14.1 contract (session_id short, provider, packing_mode, queue counts, post-processing counts, S3 health, last completed time) in the fixed order, and runs as a read-only query (no state mutation). |
-| AC30 | A summary is generated automatically only when the §12.3 trigger conditions **and** the throttle (≥ 8 new user turns since the last summary) are both satisfied. Explicit `/summary` / `/end` always fire regardless of the throttle. |
-| AC21 | `/doctor`는 exact Bun version을 표시하고, `required_bun_version`과 다르면 warning을 출력한다. |
-| AC22 | Telegram `next_offset`은 update 처리 결과가 SQLite에 commit된 후에만 advance된다. |
-| AC23 | app이 Telegram update 수신 후 job insert commit 전에 crash되어도, 해당 update는 재시작 후 다시 처리된다. |
-| AC24 | Claude resume_mode에서는 full recent turns를 매 요청마다 재전송하지 않는다. |
-| AC25 | Claude resume 실패 시 replay_mode로 fallback하고, 그 사실이 `provider_run`에 기록된다. |
-| AC26 | Telegram sendMessage 실패는 `provider_run succeeded` 상태를 되돌리지 않고 `notification_retry` job으로 기록된다. |
-| AC27 | `notification_retry` 실패와 `storage_sync` 실패는 서로 독립적으로 재시도된다. |
-| AC28 | P0에서 `/provider gemini\|codex\|ollama` 요청은 provider를 전환하지 않고 `not_enabled` 메시지를 반환한다. |
-| AC29 | `telegram_updates` 테이블은 received/enqueued/skipped/failed update를 기록한다. |
-| AC30 | skipped update도 SQLite에 기록된 후에만 `telegram_next_offset`이 advance된다. |
-| AC31 | `getUpdates`는 P0에서 `allowed_updates=["message"]`를 명시한다. |
-| AC32 | Provider subprocess는 기본적으로 `proc.unref()` 없이 `proc.exited`로 추적된다. |
-| AC33 | Claude advisory/chat mode smoke test는 Bash/Edit/Write/Read tool이 실행되지 않음을 검증한다. |
-| AC34 | Claude read-only repo review mode smoke test는 Read/Grep/Glob만 허용됨을 검증한다. |
-| AC35 | Claude 실행 중 interactive permission prompt가 발생하면 P0 acceptance 실패로 처리한다. |
-| AC36 | `BOOTSTRAP_WHOAMI=true` 상태는 `/doctor`에서 warning으로 표시된다. |
-| AC37 | bootstrap `/whoami`는 `user_id`/`chat_id` 외의 민감 정보를 반환하지 않는다. |
-| AC38 | final response가 Telegram sendMessage 한도를 초과하면 여러 메시지로 chunking되어 순서대로 전송된다. |
-| AC39 | chunk 전송 중 일부 실패 시 `provider_run succeeded` 상태는 유지되고 `notification_retry`로 복구된다. |
-| AC40 | Telegram outbound notification은 `outbound_notifications`에 상태와 `telegram_message_ids`를 기록한다. |
-| AC41 | `notification_retry`는 `outbound_notifications.status=failed` 또는 `pending` 상태만 재시도한다. |
-| AC42 | Claude command builder는 첫 요청에는 `--session-id`, 후속 요청에는 `--resume`을 사용한다. |
-| AC43 | `provider_session_id`가 존재하면 후속 resume에는 `provider_session_id`를 우선 사용한다. |
-| AC44 | prompt가 `max_prompt_bytes` 또는 안전한 argv 길이를 초과하면 provider 실행 전 실패 처리된다. |
-| AC45 | `summary_generation` job은 Claude advisory/chat lockdown profile로 실행된다. |
-| AC46 | `summary_generation` output은 `memory_summaries` schema에 맞게 구조화되어 저장된다. |
-| AC47 | P0에서 SQLite DB snapshot이 구현되는 경우 WAL mode에 안전한 backup 절차를 사용한다. |
+Criteria use the stable ID scheme `AC-<DOMAIN>-<###>`. The legacy
+numeric IDs (`AC01`…`AC47`, including the duplicated `AC21…AC30`)
+are retained as aliases in the last column for cross-reference with
+older revisions; **all new cross-refs MUST use the `AC-<DOMAIN>-###`
+form**. Domains:
+
+- `TEL` Telegram poller / inbound ledger / offset
+- `NOTIF` Outbound notification + chunk retry
+- `JOB` Job queue + worker + interrupted/recovery
+- `PROV` Provider adapter (Claude) + resume/replay + subprocess
+- `MEM` Memory / summary / correction / forget
+- `STO` Storage objects / S3 sync / retention class
+- `SEC` Security / redaction / lockdown / bootstrap
+- `OBS` Observability / `/status` / `/doctor` / notification minimal set
+- `OPS` Operational (dependency allowlist, Bun version, backup, retry independence)
+
+| ID | Criteria | Legacy |
+|----|----------|--------|
+| AC-TEL-001 | Unauthorized Telegram user가 메시지를 보내면 job이 생성되지 않고 응답하지 않는다. 단, `BOOTSTRAP_WHOAMI=true`인 경우 `/whoami`만 예외적으로 `user_id`/`chat_id`를 반환할 수 있다. | AC01 |
+| AC-JOB-001 | Authorized user가 DM을 보내면 하나의 job이 생성되고 status가 `queued → running → succeeded`로 전이된다. | AC02 |
+| AC-PROV-001 | Claude subprocess stdout/stderr/redacted raw stream-json line이 `provider_raw_events`에 저장된다. | AC03 |
+| AC-TEL-002 | final response가 Telegram으로 전송되고 `turns` 테이블에 assistant turn으로 저장된다. | AC04 |
+| AC-TEL-003 | 동일 Telegram `update_id`가 중복 수신되어도 job은 한 번만 생성된다. | AC05 |
+| AC-JOB-002 | app 재시작 시 running job은 `interrupted`로 전이되고, `safe_retry=true`인 경우만 `queued`로 복구된다. | AC06 |
+| AC-MEM-001 | `/end` 또는 `/summary` 실행 시 session summary가 SQLite, local file에 저장되고 `storage_sync` job이 enqueue된다. | AC07 |
+| AC-STO-001 | S3 장애가 있어도 Telegram response delivery는 실패하지 않고 `storage_sync` job으로 별도 기록된다. | AC08 |
+| AC-PROV-002 | max runtime/output/prompt limit 초과 시 provider subprocess가 종료되고 사용자에게 에러 요약이 전송된다. | AC09 |
+| AC-SEC-001 | logs/raw events에 Telegram token, S3 secret, provider auth token이 저장되지 않는다. | AC10 |
+| AC-PROV-003 | P0 Claude Code provider call은 interactive permission prompt를 요구하지 않는다. | AC11 |
+| AC-STO-002 | `storage_sync` job 실패는 `provider_run` job의 `succeeded` 상태를 되돌리지 않는다. | AC12 |
+| AC-MEM-002 | memory summary 항목은 provenance와 confidence를 포함한다. | AC13 |
+| AC-PROV-004 | running provider job `/cancel` 시 subprocess process group 전체가 종료된다. | AC14 |
+| AC-PROV-005 | Claude stream-json parser fixture가 sample raw event를 `final_text`로 정상 정규화한다. | AC15 |
+| AC-OBS-001 | `/doctor` 실행 시 S3 smoke test(put/get/stat/list/delete)가 성공해야 P0 acceptance를 통과한다. 실패 시 local-only degraded mode로 표시하고 `storage_sync` job은 retryable 상태로 남긴다. | AC16 |
+| AC-TEL-004 | Telegram long polling은 direct fetch로 동작하고 bot framework dependency가 없다. | AC17 |
+| AC-PROV-006 | `Bun.spawn` provider subprocess는 timeout/AbortSignal로 종료 가능하다. | AC18 |
+| AC-JOB-003 | `bun:sqlite` WAL mode에서 job claim transaction이 재시작 후 일관성을 유지한다. | AC19 |
+| AC-OPS-001 | P0 build/runtime dependency 목록은 PRD에 명시된 allowlist를 초과하지 않는다. | AC20 |
+| AC-STO-003 | When a Telegram attachment arrives, a `storage_objects` row is created with `source_channel='telegram'`, a detected MIME type, and a SHA-256 hash; the runtime holds its own copy and does not depend on the Telegram file link for retrieval. | AC21 (artifact) |
+| AC-STO-004 | An attachment without an explicit user save intent is never promoted to `retention_class = long_term`; it remains `session` (or `ephemeral`) and is not written to S3 unless the session-level sync rule applies. | AC22 (artifact) |
+| AC-STO-005 | A `long_term` artifact is durably stored in S3 (`status = uploaded`) and linked to a memory via `memory_artifact_links` with `provenance ∈ {user_stated, user_confirmed}` before it is considered part of long-term memory. | AC23 (artifact) |
+| AC-SEC-002 | S3 object keys follow `objects/{yyyy}/{mm}/{dd}/{object_id}/{sha256}.{safe_ext}` and contain no original filenames, user names, chat IDs, or project names. | AC24 (artifact) |
+| AC-STO-006 | `storage_sync` failures leave `storage_objects.status = failed` with an `error_json` entry and do not roll back the owning `provider_run` or delete the local copy. A retry scheduler may later move the row `failed → pending` and, on the next successful `PUT`, `pending → uploaded`. `pending` means "upload attempt scheduled"; `failed` means "last attempt failed". | AC25 (artifact) |
+| AC-MEM-003 | `/forget_memory <id>` moves the target `memory_items` row to `status = revoked` and excludes it from subsequent context packing; the row is **not** hard-deleted. `/forget_artifact <id>` sets `storage_objects.status = deletion_requested` and a later sync pass reaches `deleted` or `delete_failed`. | AC26 (artifact) |
+| AC-MEM-004 | A user correction (`/correct` or the natural-language form "정정: X가 아니라 Y") inserts a new `memory_items` row with `supersedes_memory_id` pointing at the prior row; the prior row transitions from `active` to `superseded` in the same transaction; context packing skips superseded items. | AC27 (artifact) |
+| AC-OBS-002 | Only notification types listed in §13.3 minimal set are pushed to Telegram. Silent types (`job_started`, `storage_sync_succeeded`, `notification_retry_succeeded`, etc.) never produce a Telegram message; they appear in structured logs and `/status` counts only. | AC28 (artifact) |
+| AC-OBS-003 | `/status` output includes every field listed in the §14.1 contract (session_id short, provider, packing_mode, queue counts, post-processing counts, S3 health, last completed time) in the fixed order, and runs as a read-only query (no state mutation). | AC29 (artifact) |
+| AC-MEM-005 | A summary is generated automatically only when the §12.3 trigger conditions **and** the throttle (≥ 8 new user turns since the last summary) are both satisfied. Explicit `/summary` / `/end` always fire regardless of the throttle. | AC30 (artifact) |
+| AC-OPS-002 | `/doctor`는 exact Bun version을 표시하고, `required_bun_version`과 다르면 warning을 출력한다. | AC21 (restart) |
+| AC-TEL-005 | Telegram `next_offset`은 update 처리 결과가 SQLite에 commit된 후에만 advance된다. | AC22 (restart) |
+| AC-TEL-006 | app이 Telegram update 수신 후 job insert commit 전에 crash되어도, 해당 update는 재시작 후 다시 처리된다. | AC23 (restart) |
+| AC-PROV-007 | Claude resume_mode에서는 full recent turns를 매 요청마다 재전송하지 않는다. | AC24 (restart) |
+| AC-PROV-008 | Claude resume 실패 시 replay_mode로 fallback하고, 그 사실이 `provider_run`에 기록된다. | AC25 (restart) |
+| AC-NOTIF-001 | Telegram sendMessage 실패는 `provider_run succeeded` 상태를 되돌리지 않고 `notification_retry` job으로 기록된다. | AC26 (restart) |
+| AC-OPS-003 | `notification_retry` 실패와 `storage_sync` 실패는 서로 독립적으로 재시도된다. | AC27 (restart) |
+| AC-PROV-009 | P0에서 `/provider gemini\|codex\|ollama` 요청은 provider를 전환하지 않고 `not_enabled` 메시지를 반환한다. | AC28 (restart) |
+| AC-TEL-007 | `telegram_updates` 테이블은 received/enqueued/skipped/failed update를 기록한다. | AC29 (restart) |
+| AC-TEL-008 | skipped update도 SQLite에 기록된 후에만 `telegram_next_offset`이 advance된다. | AC30 (restart) |
+| AC-TEL-009 | `getUpdates`는 P0에서 `allowed_updates=["message"]`를 명시한다. | AC31 |
+| AC-PROV-010 | Provider subprocess는 기본적으로 `proc.unref()` 없이 `proc.exited`로 추적된다. | AC32 |
+| AC-SEC-003 | Claude advisory/chat mode smoke test는 Bash/Edit/Write/Read tool이 실행되지 않음을 검증한다. | AC33 |
+| AC-SEC-004 | Claude read-only repo review mode smoke test는 Read/Grep/Glob만 허용됨을 검증한다. | AC34 |
+| AC-SEC-005 | Claude 실행 중 interactive permission prompt가 발생하면 P0 acceptance 실패로 처리한다. | AC35 |
+| AC-SEC-006 | `BOOTSTRAP_WHOAMI=true` 상태는 `/doctor`에서 warning으로 표시된다. | AC36 |
+| AC-SEC-007 | bootstrap `/whoami`는 `user_id`/`chat_id` 외의 민감 정보를 반환하지 않는다. | AC37 |
+| AC-NOTIF-002 | final response가 Telegram sendMessage 한도를 초과하면 여러 메시지로 chunking되어 순서대로 전송된다. | AC38 |
+| AC-NOTIF-003 | chunk 전송 중 일부 실패 시 `provider_run succeeded` 상태는 유지되고 `notification_retry`로 복구된다. 이미 `sent` 상태인 chunk는 재전송하지 않는다 (see `outbound_notification_chunks`, Appendix D). | AC39 |
+| AC-NOTIF-004 | Telegram outbound notification은 `outbound_notifications` + `outbound_notification_chunks`에 상태와 `telegram_message_id` per chunk를 기록한다. | AC40 |
+| AC-NOTIF-005 | `notification_retry`는 `outbound_notification_chunks.status = 'pending' | 'failed'` 상태만 재시도한다. | AC41 |
+| AC-PROV-011 | Claude command builder는 첫 요청에는 `--session-id`, 후속 요청에는 `--resume`을 사용한다. | AC42 |
+| AC-PROV-012 | `provider_session_id`가 존재하면 후속 resume에는 `provider_session_id`를 우선 사용한다. | AC43 |
+| AC-PROV-013 | prompt가 `max_prompt_bytes` 또는 안전한 argv 길이를 초과하면 provider 실행 전 실패 처리된다. | AC44 |
+| AC-PROV-014 | `summary_generation` job은 Claude advisory/chat lockdown profile로 실행된다. | AC45 |
+| AC-MEM-006 | `summary_generation` output은 `memory_summaries` schema에 맞게 구조화되어 저장된다. | AC46 |
+| AC-OPS-004 | P0에서 SQLite DB snapshot이 구현되는 경우 WAL mode에 안전한 backup 절차를 사용한다. | AC47 |
+| AC-SEC-ATTACH-001 | `storage_objects.original_filename_redacted`는 파일명이 §15 redaction patterns (email, phone, token-like strings, personal-name patterns, configured sensitive terms) 중 하나라도 포함하면 `NULL`로 저장된다. 안전하지 않은 값을 그대로 저장하는 기본 경로는 금지이고, CI의 redaction grep-check가 이를 샘플 fixture로 검증한다. | (new in this revision) |
 
 ---
 
 ## 18. Milestones
 
-### P0 — MVP (Claude Vertical Slice)
+P0 is divided into five milestones (M0–M5). The detailed phase map
+with entry / exit criteria and ledger tests lives in
+[`docs/04_IMPLEMENTATION_PLAN.md`](./04_IMPLEMENTATION_PLAN.md);
+this section is the product-lens summary. "P0 done" means M5 has
+passed the P0 Acceptance gate.
 
-- [ ] Claude Code adapter (session_args + permission_profile_args, lockdown smoke test 포함)
-- [ ] SQLite job ledger + `telegram_updates` + `outbound_notifications` + single worker (concurrency 1)
-- [ ] Telegram long polling (1:1 DM, direct fetch, `allowed_updates=["message"]`, offset durability, bootstrap whoami)
-- [ ] Telegram response chunking
-- [ ] Context Builder + Packer (resume_mode / replay_mode, conservative token estimator)
-- [ ] Context injection 최소 버전 (retrieved memory 슬롯 비활성)
-- [ ] 단기 memory + session summary 저장 (provenance 포함)
-- [ ] `summary_generation` job (Claude advisory lockdown profile)
-- [ ] S3 async sync (Bun.S3Client, driver abstraction, response delivery와 분리)
-- [ ] notification과 storage_sync를 독립 post-processing job으로 처리
-- [ ] 운영 로그 + redacted raw event 저장 (디지털 트윈 원천 데이터와 분리)
-- [ ] subprocess process group 관리 (Bun.spawn detached, proc.exited tracking, no unref)
-- [ ] systemd healthcheck + 재시작 복구
-- [ ] Claude stream-json parser fixture test
+### P0 — MVP (Reliable Personal Agent Runtime)
+
+**M0 — Docs + spikes** (pre-code)
+
+- [ ] PRD / HLD / Risk Spikes / Acceptance Tests / Runbook closed.
+- [ ] Risk Spike gate passed for SP-01..SP-03 (others land in
+      parallel before the phase that depends on them).
+
+**M1 — Walking skeleton with fake provider**
+
+- [ ] SQLite job ledger + `telegram_updates` + `outbound_notifications`
+      + `outbound_notification_chunks` + single worker (concurrency 1).
+- [ ] Telegram long polling (1:1 DM, direct fetch,
+      `allowed_updates=["message"]`, offset durability, bootstrap
+      whoami).
+- [ ] Outbound chunking + per-chunk retry ledger.
+- [ ] Fake provider produces end-to-end flow for CI + dev.
+- [ ] Redactor single-writer boundary live; grep-check in CI.
+- [ ] Exit: Walking Skeleton gate (04_IMPLEMENTATION_PLAN §Phase 6).
+
+**M2 — Claude vertical slice**
+
+- [ ] Claude Code adapter (`session_args` + `permission_profile_args`,
+      lockdown smoke test included).
+- [ ] Claude stream-json parser + fixture test.
+- [ ] `provider_runs` table live (schema per PRD Appendix D).
+- [ ] Subprocess process group management (`Bun.spawn` detached,
+      `proc.exited` tracking, no `unref`).
+
+**M3 — Memory + summary**
+
+- [ ] Context Builder + Packer (`resume_mode` / `replay_mode`,
+      conservative token estimator).
+- [ ] Context injection minimal version (retrieved memory slots
+      disabled in P0).
+- [ ] Short-term memory + session summary storage with provenance.
+- [ ] `summary_generation` job (Claude advisory lockdown profile).
+
+**M4 — Attachment + S3**
+
+- [ ] Two-phase attachment capture (PRD §13.5, HLD §9.3): inbound
+      metadata row with `capture_status = pending`, worker-driven
+      byte capture pass outside the inbound transaction.
+- [ ] S3 async sync (`Bun.S3Client`, driver abstraction, response
+      delivery 와 분리).
+- [ ] Notification and `storage_sync` as independent post-processing
+      jobs (neither rolls back `provider_runs.status`).
+
+**M5 — Operate-and-polish**
+
+- [ ] `/forget_memory`, `/forget_artifact`, `/forget_last`,
+      `/forget_session`, `/correct` + natural-language correction.
+- [ ] `/status`, `/doctor` (including S3 smoke), startup recovery.
+- [ ] Operational logs + redacted raw event retention (디지털 트윈
+      원천 데이터와 분리).
+- [ ] systemd healthcheck + restart recovery.
+- [ ] Exit: P0 Acceptance gate — every P0 `AC-*` entry in
+      `docs/06_ACCEPTANCE_TESTS.md` passes; `/doctor` returns `ok`
+      for all P0 checks.
 
 ### P1 — Claude 안정화 후
 
@@ -1259,6 +1325,7 @@ test/
 ```
 telegram_updates
 outbound_notifications
+outbound_notification_chunks
 jobs
 sessions
 turns
@@ -1289,19 +1356,62 @@ settings
 
 **`outbound_notifications`**
 
+One row per **logical** notification (a single `job_completed`,
+`summary`, etc.). When the payload must be split across multiple
+Telegram messages, each physical chunk is tracked in
+`outbound_notification_chunks` (below); this row's `status` is
+the roll-up.
+
 | 컬럼 | 타입 | 설명 |
 |------|------|------|
 | `id` | TEXT | UUID |
 | `job_id` | TEXT | |
 | `chat_id` | TEXT | |
 | `notification_type` | TEXT | `job_accepted` \| `job_completed` \| `job_failed` \| `job_cancelled` \| `summary` \| `doctor` |
-| `payload_hash` | TEXT | |
-| `status` | TEXT | `pending` \| `sent` \| `failed` |
-| `telegram_message_ids_json` | TEXT | nullable |
-| `attempt_count` | INTEGER | |
-| `error_json` | TEXT | nullable |
+| `payload_hash` | TEXT | Hash of the full logical payload. |
+| `chunk_count` | INTEGER | ≥ 1. Number of physical messages this logical notification spans. |
+| `status` | TEXT | `pending` \| `sent` \| `failed`. Roll-up: `sent` ⇔ all chunks `sent`; `failed` iff at least one non-retryable chunk failure and no chunk is still `pending`; otherwise `pending`. |
+| `telegram_message_ids_json` | TEXT | nullable; denormalised list of successful chunk `telegram_message_id` values in chunk order. Authoritative source is `outbound_notification_chunks`. |
+| `attempt_count` | INTEGER | Number of notification-level retry passes (NOT the sum of per-chunk attempts). |
+| `error_json` | TEXT | nullable; summary of the last failure. |
 | `created_at` | DATETIME | |
-| `sent_at` | DATETIME | nullable |
+| `sent_at` | DATETIME | nullable; set when the last remaining chunk reaches `sent`. |
+
+**`outbound_notification_chunks`**
+
+One row per **physical** Telegram message within a logical
+notification. Required to make chunk retries correct: if chunks
+1–2 were sent and chunk 3 failed, the retry pass must resend
+chunk 3 only, never chunks 1–2. At-least-once delivery is still
+allowed, but per-chunk duplication caused solely by bad retry
+accounting is not.
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| `id` | TEXT | UUID |
+| `outbound_notification_id` | TEXT | FK → `outbound_notifications.id`. |
+| `chunk_index` | INTEGER | 1-based. Unique with `outbound_notification_id`. |
+| `chunk_count` | INTEGER | Denormalised copy of the parent row's `chunk_count` for ordering sanity checks. |
+| `payload_text_hash` | TEXT | Hash of the chunk's text content (for audit + debug; never the raw text). |
+| `status` | TEXT | `pending` \| `sent` \| `failed`. |
+| `telegram_message_id` | TEXT | nullable; populated on successful `sendMessage`. |
+| `attempt_count` | INTEGER | Per-chunk attempts. |
+| `error_json` | TEXT | nullable. |
+| `sent_at` | DATETIME | nullable. |
+| `created_at` | DATETIME | |
+
+Invariants:
+
+- Every `outbound_notifications` row has exactly `chunk_count`
+  `outbound_notification_chunks` rows, created atomically with the
+  parent row.
+- `notification_retry` only selects chunks with `status IN
+  ('pending', 'failed')` whose retry budget is not exhausted. A
+  chunk with `status = 'sent'` is **never** resent.
+- `outbound_notifications.status` is derived from the chunk roll-up
+  and is never mutated without a corresponding chunk transition.
+- `provider_runs.status` / `jobs.status` do not roll back when a
+  chunk fails (PRD AC-STO-002, AC-NOTIF-001, AC-NOTIF-003).
 
 **`jobs`**
 
@@ -1327,12 +1437,57 @@ settings
 | `idempotency_key` | TEXT | |
 | `safe_retry` | BOOLEAN | |
 
+**`provider_runs`**
+
+Records a single provider subprocess execution. One `jobs` row of type
+`provider_run` may own one or more `provider_runs` rows over its
+lifetime (e.g. a failed resume attempt followed by a replay_mode
+retry — both are recorded, but only one `jobs` row exists).
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| `id` | TEXT | UUID. |
+| `job_id` | TEXT | FK → `jobs.id`. |
+| `session_id` | TEXT | FK → `sessions.id`. |
+| `provider` | TEXT | `claude` in P0; other values rejected. |
+| `provider_session_id` | TEXT | nullable; returned by Claude via `meta` event. |
+| `context_packing_mode` | TEXT | `resume_mode` \| `replay_mode`. |
+| `status` | TEXT | `started` \| `succeeded` \| `failed` \| `cancelled` \| `interrupted`. Records the **subprocess** outcome; independent of `jobs.status` (see invariants). |
+| `argv_json_redacted` | TEXT | Spawn argv with secrets redacted per §15; used for `/doctor` replay and audit. |
+| `cwd` | TEXT | Process working directory at spawn time. |
+| `process_id` | INTEGER | nullable; PID of the spawned subprocess. |
+| `process_group_id` | INTEGER | nullable; PGID used by `/cancel` (§14) and startup orphan sweep (§15). |
+| `provider_version` | TEXT | nullable; captured via `claude --version` or equivalent if available. |
+| `injected_snapshot_json` | TEXT | Redacted snapshot of the context packed for this run (identity + summary + recent turns in `replay_mode`, delta only in `resume_mode`). |
+| `usage_json` | TEXT | nullable; token counts etc. parsed from meta events. |
+| `parser_status` | TEXT | `parsed` \| `fallback_used` \| `parse_error`. Terminal parser outcome for the whole run. |
+| `error_type` | TEXT | nullable; e.g. `resume_failed`, `timeout`, `argv_too_long`, `permission_prompt`. |
+| `started_at` | DATETIME | |
+| `finished_at` | DATETIME | nullable until terminal. |
+
+Invariants:
+
+- `jobs.status` is the source of truth for orchestration state
+  (queued/running/succeeded/…). `provider_runs.status` is the source
+  of truth for subprocess execution and is what `/doctor` and
+  parser-fixture tests inspect.
+- A `provider_runs` row with `status = failed, error_type =
+  'resume_failed'` does **not** imply `jobs.status = failed`; the
+  owning job may be flipped back to `queued` in `replay_mode` per
+  HLD §8.2 / §6.2 resume-fallback transition.
+- `storage_sync` and `notification_retry` failures **never** mutate
+  `provider_runs.status`; provider subprocess success stands
+  independently of downstream delivery (PRD AC-STO-002, AC-STO-006, AC-MEM-003).
+- Every `provider_raw_events` row has a `provider_run_id` pointing
+  at a `provider_runs` row; raw events are useless without the
+  enclosing run record.
+
 **`provider_raw_events`**
 
 | 컬럼 | 타입 | 설명 |
 |------|------|------|
 | `id` | TEXT | UUID |
-| `provider_run_id` | TEXT | |
+| `provider_run_id` | TEXT | FK → `provider_runs.id` |
 | `event_index` | INTEGER | |
 | `stream` | TEXT | `stdout` \| `stderr` |
 | `redacted_payload` | TEXT | |
@@ -1370,21 +1525,25 @@ Owns artifact metadata for every durable or session-scoped binary. See
 | `storage_backend`             | TEXT     | `s3` \| `local`.                                                                                |
 | `bucket`                      | TEXT     | nullable when `storage_backend = local`.                                                        |
 | `storage_key`                 | TEXT     | Canonical key per §12.8.4. Unique within `(storage_backend, bucket)`.                           |
-| `original_filename_redacted`  | TEXT     | nullable; stored only if filename itself is not sensitive.                                      |
+| `original_filename_redacted`  | TEXT     | nullable; stored only if the filename is redaction-safe (no §15 pattern matches — email, phone, token-like string, personal-name pattern, configured sensitive terms). Otherwise `NULL`. See AC-SEC-ATTACH-001. |
 | `mime_type`                   | TEXT     | Detected MIME type (not user-claimed).                                                          |
-| `size_bytes`                  | INTEGER  |                                                                                                 |
-| `sha256`                      | TEXT     | Content hash; used for dedupe and integrity.                                                    |
+| `size_bytes`                  | INTEGER  | nullable until capture completes for channels that only learn size after download. |
+| `sha256`                      | TEXT     | nullable until capture completes; content hash for dedupe and integrity.           |
 | `source_channel`              | TEXT     | `telegram` \| `provider` \| `system`.                                                           |
 | `source_turn_id`              | TEXT     | nullable.                                                                                       |
 | `source_message_id`           | TEXT     | nullable; Telegram message id when `source_channel = telegram`.                                 |
 | `source_job_id`               | TEXT     | nullable.                                                                                       |
+| `source_external_id`          | TEXT     | nullable; e.g. Telegram `file_id` used by the capture pass to fetch bytes.                      |
 | `artifact_type`               | TEXT     | `user_upload` \| `generated_artifact` \| `redacted_provider_transcript` \| `conversation_transcript` \| `memory_snapshot` \| `parser_fixture` \| `other`. |
 | `retention_class`             | TEXT     | `ephemeral` \| `session` \| `long_term` \| `archive`.                                           |
 | `visibility`                  | TEXT     | `private` (only value in P0).                                                                   |
-| `status`                      | TEXT     | `pending` \| `uploaded` \| `failed` \| `deletion_requested` \| `deleted` \| `delete_failed`.    |
+| `capture_status`              | TEXT     | `pending` \| `captured` \| `failed`. Tracks "do we hold the bytes locally yet?". Orthogonal to `status`. See capture invariants below. |
+| `status`                      | TEXT     | Sync status: `pending` \| `uploaded` \| `failed` \| `deletion_requested` \| `deleted` \| `delete_failed`. Meaningful only when `capture_status = captured`. |
 | `created_at`                  | DATETIME |                                                                                                 |
+| `captured_at`                 | DATETIME | nullable; set when `capture_status` transitions to `captured`.                                  |
 | `uploaded_at`                 | DATETIME | nullable.                                                                                       |
 | `deleted_at`                  | DATETIME | nullable; set by soft-delete, not hard-delete.                                                  |
+| `capture_error_json`          | TEXT     | nullable; last capture error (e.g. Telegram `getFile` failure).                                 |
 | `error_json`                  | TEXT     | nullable; last sync error for operator visibility.                                              |
 
 Invariants:
@@ -1395,14 +1554,39 @@ Invariants:
   `storage_backend = s3` and `status = uploaded` before any
   `memory_artifact_links` row may reference them.
 - `storage_sync` is the only writer that advances `status` into
-  `uploaded`. A failed sync moves the row back to `pending` (with
-  `error_json`), never to `deleted`.
+  `uploaded`. A failed sync sets `status = failed` with
+  `error_json`; a later retry scheduler may move `failed → pending`
+  before the next `PUT` attempt. Neither failure nor retry ever
+  transitions to `deleted`.
+- `pending` means "upload attempt scheduled"; `failed` means "last
+  attempt failed and awaiting retry decision". Callers that only
+  need "not yet durable" should treat both as non-terminal.
 - `deletion_requested` is set by `/forget_artifact <id>` (or a
   revoked long-term promotion). A later sync pass issues the S3
   `DELETE` and transitions the row to `deleted` or
   `delete_failed`.
 - `delete_failed` is not automatically retried; it surfaces via
   `/doctor` for operator intervention.
+
+Capture invariants (separate from sync):
+
+- `capture_status = pending` is the only legal initial value for
+  rows inserted by `telegram/inbound` for attachments; bytes are
+  not yet on disk. The inbound SQLite transaction that created the
+  row must **not** perform any network I/O (Telegram `getFile`,
+  download, or MIME probe). The capture pass runs outside that
+  transaction (HLD §7.1, §9.3, §7.10 transaction boundaries).
+- `capture_status: pending → captured` requires the bytes to be on
+  the local disk, `sha256`/`mime_type`/`size_bytes` to be populated,
+  and `captured_at` to be set, all in a single post-capture
+  transaction.
+- `capture_status: pending → failed` sets `capture_error_json`; the
+  row is retained for audit and retry. No `storage_sync` job is
+  enqueued while `capture_status != captured`.
+- `status` transitions (sync) are only legal when `capture_status =
+  captured`. A row with `capture_status = failed` whose retention
+  class would otherwise eligible for S3 sync stays out of the
+  sync loop.
 
 **`memory_items`**
 

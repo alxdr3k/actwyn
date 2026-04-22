@@ -101,7 +101,7 @@ Steps:
    journalctl -u actwyn.service -f    # watch boot doctor
    ```
 8. In Telegram DM from the authorized user, run `/doctor`. Expect
-   all checks `ok`, including the S3 smoke (AC16).
+   all checks `ok`, including the S3 smoke (AC-OBS-001).
 
 Rollback: `systemctl stop actwyn.service`; re-point `/opt/actwyn`
 to the previous tag; `systemctl start`.
@@ -209,7 +209,7 @@ fails.
 ## 7. S3 degraded mode
 
 Goal: the user keeps getting responses; only the archive layer
-is affected (HLD §12.5, AC08, AC16).
+is affected (HLD §12.5, AC-STO-001, AC-OBS-001).
 
 Indicators:
 

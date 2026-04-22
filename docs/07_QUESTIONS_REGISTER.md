@@ -254,7 +254,7 @@ Ranked by "if we answer this wrong, how painful is it to unwind?"
   are not promoted.
 - **Decision**: ADR-0006.
 - **Impacted docs**: PRD §12.8.3, §13.5; HLD §9.3;
-  AC22, AC23.
+  AC-STO-004, AC-STO-005.
 - **Follow-up**: —
 - **History**: recorded 2026-04-22.
 
@@ -272,7 +272,7 @@ Ranked by "if we answer this wrong, how painful is it to unwind?"
   never carry user-readable identifiers.
 - **Decision**: ADR-0004.
 - **Impacted docs**: PRD §12.8, Appendix D; HLD §5.2, §6.4, §12;
-  AC24.
+  AC-SEC-002.
 - **Follow-up**: —
 - **History**: recorded 2026-04-22.
 
@@ -334,7 +334,7 @@ Ranked by "if we answer this wrong, how painful is it to unwind?"
   to a failure after a 30-minute auto-expiry window.
 - **Decision**: DEC-009.
 - **Impacted docs**: PRD §8.3; HLD §9.2, §16.1; 05_RUNBOOK §12;
-  AC01.
+  AC-TEL-001.
 - **Follow-up**: `/doctor` must report the expiry time when
   `BOOTSTRAP_WHOAMI=true`.
 - **History**: recorded 2026-04-22.
@@ -359,7 +359,7 @@ Ranked by "if we answer this wrong, how painful is it to unwind?"
   - Every pattern has a regression test that fails if the exact
     value leaks into a durable store.
 - **Decision**: DEC-010.
-- **Impacted docs**: PRD §15; HLD §13.2; AC10.
+- **Impacted docs**: PRD §15; HLD §13.2; AC-SEC-001.
 - **Follow-up**: `test/redaction.test.ts` matrix maintained by
   Security.
 - **History**: recorded 2026-04-22.
@@ -430,7 +430,7 @@ Ranked by "if we answer this wrong, how painful is it to unwind?"
   carries `result_json.parser_warning = true`.
 - **Decision**: —  (already codified in PRD §16.3 and HLD §8.3;
   kept here for audit).
-- **Impacted docs**: PRD §16.3; HLD §8.3, §7.3; AC15.
+- **Impacted docs**: PRD §16.3; HLD §8.3, §7.3; AC-PROV-005.
 - **Follow-up**: —
 - **History**: recorded 2026-04-22.
 
@@ -451,7 +451,7 @@ Ranked by "if we answer this wrong, how painful is it to unwind?"
 - **Decision**: ADR-0005 (provider selection) + ADR-0007
   (session semantics); SP-05 gates the implementation.
 - **Impacted docs**: PRD §11, §15; HLD §8.1, §8.4;
-  03_RISK_SPIKES SP-05; AC11.
+  03_RISK_SPIKES SP-05; AC-PROV-003.
 - **Follow-up**: SP-05 results referenced here when complete.
 - **History**: recorded 2026-04-22.
 
@@ -554,7 +554,7 @@ Ranked by "if we answer this wrong, how painful is it to unwind?"
   Infrastructure-only interruptions (no in-flight user jobs)
   are silent; they land in `/doctor` boot log.
 - **Decision**: DEC-016.
-- **Impacted docs**: PRD §8.5, §13.3, AC06; HLD §6.2, §15;
+- **Impacted docs**: PRD §8.5, §13.3, AC-JOB-002; HLD §6.2, §15;
   05_RUNBOOK §4.
 - **Follow-up**: —
 - **History**: recorded 2026-04-22.
@@ -577,7 +577,7 @@ Ranked by "if we answer this wrong, how painful is it to unwind?"
   Once total latency exceeds the budget, split the deep checks
   into `/doctor deep`, `/doctor s3`, `/doctor claude` (P1).
 - **Decision**: DEC-017.
-- **Impacted docs**: PRD §8.7; HLD §16; AC16.
+- **Impacted docs**: PRD §8.7; HLD §16; AC-OBS-001.
 - **Follow-up**: Define `budget_ms` threshold during Phase 10
   that triggers the split.
 - **History**: recorded 2026-04-22.
@@ -602,7 +602,7 @@ Ranked by "if we answer this wrong, how painful is it to unwind?"
   These numbers are starting values and are tuned at deploy
   time against CX22 disk capacity.
 - **Decision**: DEC-018.
-- **Impacted docs**: PRD §8.7, AC08, AC16; HLD §12.5, §16.1;
+- **Impacted docs**: PRD §8.7, AC-STO-001, AC-OBS-001; HLD §12.5, §16.1;
   05_RUNBOOK §7.
 - **Follow-up**: —
 - **History**: recorded 2026-04-22.

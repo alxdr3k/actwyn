@@ -73,8 +73,11 @@ redactor) is support infrastructure for those four state machines.
 
 ## 2. P0 Scope Recap
 
-This HLD covers only what is required to satisfy PRD §17 acceptance
-criteria AC01–AC25 with a Claude-only provider on a single CX22 host.
+This HLD covers only what is required to satisfy the P0 acceptance
+criteria enumerated in PRD §17 and tested in
+[`docs/06_ACCEPTANCE_TESTS.md`](./06_ACCEPTANCE_TESTS.md), with a
+Claude-only provider on a single CX22 host. "P0 done" is defined by
+the acceptance-test file, not by a fixed numeric AC range.
 
 In scope for P0:
 
@@ -193,13 +196,19 @@ ledger integration test (playbook §8.1) asserts against.
 - **Invariants**:
   1. Unauthorized updates are resolved to `telegram_updates.status =
      skipped` with a non-null `skip_reason` and never produce a
-     `jobs` row (AC01).
+     `jobs` row (AC-TEL-001).
   2. Every `jobs` row created by the inbound path carries an
      `idempotency_key` derived from `telegram_updates.update_id`; a
-     replayed update does not produce a second job (AC05).
+     replayed update does not produce a second job (AC-TEL-003).
   3. An attachment is recorded in `storage_objects` *before* any
      `turns` or memory reference points to it; retention class
      defaults to `session` (PRD §12.8.3, §13.5).
+  4. The inbound transaction inserts attachment metadata only
+     (`capture_status = 'pending'`, `source_external_id` = Telegram
+     `file_id`). It **never** performs Telegram `getFile`, a file
+     download, a MIME probe, or any other network / filesystem I/O.
+     Byte capture runs in a separate transaction after the inbound
+     commit (§7.2, §9.3, §7.10 transaction boundaries).
 
 ### 4.3 `queue/worker`
 
@@ -240,7 +249,7 @@ ledger integration test (playbook §8.1) asserts against.
      persisted in P0 (PRD §13.4).
   3. A successful run produces at least one assistant `turns` row
      whose text has been normalized via the documented
-     `stream-json → final_text` path (AC15).
+     `stream-json → final_text` path (AC-PROV-005).
 
 ### 4.5 `telegram/outbound`
 
@@ -291,7 +300,7 @@ ledger integration test (playbook §8.1) asserts against.
 - **Invariants**:
   1. Summary generation runs under Claude's advisory/chat lockdown
      profile (`--tools ""`, `--permission-mode dontAsk`) — no file
-     edit, no shell, no interactive prompt (AC11, PRD §12.3).
+     edit, no shell, no interactive prompt (AC-PROV-003, PRD §12.3).
   2. Long-term personal preferences require `provenance ∈
      {user_stated, user_confirmed}` (PRD §12.2).
 
@@ -308,7 +317,7 @@ ledger integration test (playbook §8.1) asserts against.
   1. `storage_sync` is the only writer that advances
      `storage_objects.status` to `uploaded`.
   2. `storage_sync` failure does not roll back any `provider_run`
-     success; it only re-pends the row (PRD §16.4, AC12, AC25).
+     success; it only re-pends the row (PRD §16.4, AC-STO-002, AC-STO-006).
   3. S3 object keys follow the PRD §12.8.4 pattern and never carry
      user-facing semantics.
 
@@ -323,7 +332,7 @@ ledger integration test (playbook §8.1) asserts against.
 - **Owns**: the redaction boundary (§13 of this doc).
 - **Invariants**:
   1. No Telegram token, S3 key, provider auth token, or API-key
-     pattern appears in any post-redaction store (AC10, PRD §15).
+     pattern appears in any post-redaction store (AC-SEC-001, PRD §15).
   2. Redaction runs **before** persistence, not during retrieval.
 
 ### 4.10 `commands/*`
@@ -342,7 +351,7 @@ ledger integration test (playbook §8.1) asserts against.
      no-op with a user-visible acknowledgment.
   2. `/whoami` is the only command that produces any response for an
      unauthorized user, and only when `BOOTSTRAP_WHOAMI=true`
-     (AC01).
+     (AC-TEL-001).
 
 ### 4.11 `startup/recovery`
 
@@ -399,7 +408,9 @@ does not issue `INSERT` / `UPDATE` / `DELETE` on that table.
 | `storage_objects.status` (transitions) | `storage/sync` (`pending ↔ failed`, `→ uploaded`, `deletion_requested → deleted | delete_failed`), `startup/recovery`, `commands/forget_artifact` (`→ deletion_requested`) |
 | `memory_artifact_links`  | `memory/summary`, `commands/save_last_attachment`, `commands/forget_artifact` (delete) |
 | `outbound_notifications` (insert) | `queue/worker`, `commands/*`          |
-| `outbound_notifications.status` | `telegram/outbound`                    |
+| `outbound_notifications.status` | `telegram/outbound` (derived roll-up from `outbound_notification_chunks`) |
+| `outbound_notification_chunks` (insert) | `queue/worker`, `commands/*` (in the same txn that inserts the parent `outbound_notifications` row) |
+| `outbound_notification_chunks.status` | `telegram/outbound` |
 | `allowed_users`          | out-of-band (config); not written at runtime   |
 
 ### 5.2 Cross-table invariants
@@ -433,6 +444,23 @@ one should have a ledger integration test (playbook §8.2).
 7. **Session scope**: `turns.session_id` and
    `memory_summaries.session_id` resolve to a real `sessions.id`
    from the same `chat_id`.
+8. **Status source-of-truth split**: `jobs.status` is the
+   orchestration source of truth (claimed, running, retried,
+   done). `provider_runs.status` is the subprocess-execution
+   source of truth (started, succeeded, failed, interrupted,
+   cancelled). The two are related but not equivalent:
+   - A single `jobs` row of type `provider_run` can own **multiple**
+     `provider_runs` rows over its lifetime (e.g. a failed
+     `resume_mode` attempt followed by a `replay_mode` retry on the
+     same `jobs.id`, per §6.2 resume-fallback transition).
+   - `jobs.status = succeeded` requires **at least one**
+     `provider_runs.status = succeeded` for the same `job_id`, in
+     addition to invariant 3 above.
+   - `provider_runs.status = failed` does **not** by itself imply
+     `jobs.status = failed`; the worker may re-queue the same job
+     in a different `context_packing_mode`.
+   - `storage_sync` and `notification_retry` outcomes **never**
+     mutate `provider_runs.status` (PRD AC-STO-002, AC-STO-006, AC-MEM-003).
 
 ### 5.3 Idempotency keys
 
@@ -447,6 +475,12 @@ one should have a ledger integration test (playbook §8.2).
 A job `INSERT` on a duplicate `idempotency_key` is a no-op; the
 existing row is returned. This is the mechanism that makes retried
 Telegram updates, retried summaries, and retried syncs safe.
+
+The no-op rule applies to `INSERT` only. In-place mutations of an
+existing `jobs` row (e.g. `running → queued` resume-fallback
+in §8.2, `interrupted → queued` at boot) reuse the same row and
+the same `idempotency_key`; they are not inserts and therefore
+are not subject to this rule.
 
 ### 5.4 Time
 
@@ -541,6 +575,7 @@ Transitions:
 | `running`    | `interrupted` | Process restart detected a stale `running` row at boot (§15).   | Single txn at boot.                      | `finished_at` = now; note added.                                          | If `safe_retry`: transition `interrupted → queued` in same boot pass. | Admin notice; `job_failed` only if terminal. |
 | `queued`     | `cancelled`   | `/cancel` on a not-yet-running job.                             | Atomic single-row update.                | `finished_at` set.                                                        | N/A.                                            | `job_cancelled`.                |
 | `interrupted`| `queued`      | Recovery decided to re-queue (`safe_retry = true`).             | Same boot txn as the `running → interrupted` that preceded it. | `attempts` unchanged; may be rate-capped.                                 | Normal worker flow from here.                   | Optional admin notice.          |
+| `running`    | `queued`      | Resume-fallback: Claude `--resume` failed mid-run; worker flips the same job into `replay_mode` without inserting a new row (§8.2). | Single txn: update `status`, set `request_json.context_packing_mode = 'replay_mode'`, set `result_json.resume_failed = true`; the failed provider attempt is recorded in a separate `provider_runs` row with `status = failed, error_type = 'resume_failed'`. | `attempts` unchanged; `idempotency_key` unchanged (no new insert, so §5.3 no-op rule does not apply). | Next worker claim runs `replay_mode`; normal failure semantics apply from there. | None (user still waiting). |
 
 Invariants:
 
@@ -571,14 +606,32 @@ Invariants:
 
 States: `pending`, `sent`, `failed`.
 
-Transitions:
+`outbound_notifications.status` is a **roll-up** of the per-chunk
+ledger in `outbound_notification_chunks` (PRD Appendix D). Every
+logical notification has `chunk_count ≥ 1` chunk rows inserted
+atomically with the parent row; `telegram/outbound` operates on
+chunk rows, and the parent's `status` is derived:
+
+- parent `sent` iff every chunk row has `status = 'sent'`;
+- parent `failed` iff at least one chunk reached non-retryable
+  `failed` and no chunk is still `pending`;
+- parent `pending` otherwise.
+
+Retry semantics live at the chunk level: `notification_retry`
+selects chunk rows with `status IN ('pending', 'failed')` whose
+retry budget is not exhausted; a chunk with `status = 'sent'` is
+**never** resent. This is what makes mid-stream failure
+(e.g. chunks 1–2 sent, chunk 3 failed) safe to retry without
+re-sending the earlier chunks to the user (PRD §8.4, AC-NOTIF-003).
+
+Transitions (parent row, derived):
 
 | From      | To        | Trigger                                            | Transaction                                    | Side effects                                                 | Retry                                                   | User-visible notification |
 | --------- | --------- | -------------------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------- | ------------------------- |
-| —         | `pending` | Row inserted (by worker on terminal transition, by command, by summary). | Atomic with whatever write triggers it.        | Payload computed, `payload_hash` set.                        | Duplicate `(job_id, notification_type, payload_hash)` → no new row. | N/A.                      |
-| `pending` | `sent`    | `telegram/outbound` successfully called `sendMessage`. | Single-row update.                           | `sent_at`, `telegram_message_ids_json` set.                  | Terminal.                                               | The message itself.       |
-| `pending` | `failed`  | `sendMessage` returned a non-retryable error, or retry budget exhausted. | Single-row update.                  | `error_json`, `attempt_count` updated.                        | Manual or next-restart requeue; doctor flags.           | Admin notice only.        |
-| `failed`  | `pending` | `notification_retry` job ran and decided this row should be reattempted. | Single-row update.                     | `attempt_count` incremented on the next send attempt.         | Bounded by `max_attempts`.                              | N/A.                      |
+| —         | `pending` | Row inserted (by worker on terminal transition, by command, by summary). | Atomic with the chunk-row inserts.             | Payload computed, `payload_hash` set; `chunk_count` chunk rows inserted with `status = 'pending'`. | Duplicate `(job_id, notification_type, payload_hash)` → no new row. | N/A.                      |
+| `pending` | `sent`    | Last remaining chunk row reached `sent`.           | Same txn as the last chunk transition.         | `sent_at` set; `telegram_message_ids_json` populated from chunk rows in order. | Terminal.                                               | The chunk messages themselves. |
+| `pending` | `failed`  | Retry budget exhausted on at least one chunk and no chunk is still `pending`. | Same txn as the last chunk transition. | `error_json` summarises the worst chunk failure; `attempt_count` reflects notification-level passes. | Manual / operator requeue; doctor flags.                | Admin notice only.        |
+| `failed`  | `pending` | `notification_retry` decided to reattempt at least one `failed` chunk. | Same txn as the chunk `failed → pending` flip. | Notification-level `attempt_count` incremented. Already-`sent` chunks are not touched. | Bounded by `max_attempts`.                              | N/A.                      |
 
 Invariants:
 
@@ -613,6 +666,16 @@ States: `pending`, `uploaded`, `failed`, `deletion_requested`,
 `deleted`, `delete_failed`. All deletions are soft in SQLite;
 S3 object deletion (when applicable) is driven by `storage/sync`.
 
+`storage_objects.status` is the **sync** state machine and is only
+meaningful when `capture_status = 'captured'` (PRD Appendix D
+capture invariants). For Telegram attachments the row spends its
+first life inside `capture_status = pending` (no network I/O in
+the inbound txn); the sync machine below is entered only after the
+worker's capture pass (§7.2 step 3) commits
+`capture_status = captured`. Rows whose retention class is
+S3-ineligible (`ephemeral`, `session` without promotion) stay in
+`status = pending` forever — this is expected, not a backlog.
+
 Transitions:
 
 | From                  | To                    | Trigger                                                          | Transaction                              | Side effects                                                                                            | Retry                                                      | User-visible notification |
@@ -639,6 +702,11 @@ Invariants:
    not auto-retry these; it records the error and moves on.
 5. `ephemeral` artifacts never reach `uploaded`; they live and
    die in the local FS.
+6. Entry into this sync machine (any transition with `From = —`
+   or `pending → …`) requires `capture_status = 'captured'` for
+   the same row. `storage/sync` must filter on that column when
+   selecting candidates; a `capture_status = 'failed'` row is
+   never synced.
 
 ### 6.5 `memory_items.status`
 
@@ -724,6 +792,13 @@ Happy path:
    b. Advance `settings.telegram_next_offset` to `max(update_id) + 1`.
 4. Commit.
 
+Attachment handling in this transaction is metadata-only: if the
+update carries a photo / document / audio / video, classify it and
+insert a `storage_objects` row with `capture_status = pending` and
+`source_external_id` set to the Telegram `file_id`. Do **not**
+call `getFile`, do **not** download bytes, and do **not** probe
+MIME in this transaction; capture runs in §7.2.
+
 Failure modes:
 
 - Crash between step 2 and step 3: the updates reappear on next
@@ -733,8 +808,6 @@ Failure modes:
 - Inbound classifier throws for a single update: that row moves to
   `failed`, other rows in the batch still advance normally; offset
   advances only past the ones that reached a final status.
-- Attachment download fails (see §13.5 of PRD): the `jobs` row is
-  still created with attachment metadata indicating capture failed.
 
 ### 7.2 Worker loop → provider run
 
@@ -744,16 +817,33 @@ Happy path:
    now, job_type = provider_run`.
 2. Worker claims atomically: `UPDATE ... SET status='running',
    started_at=now, attempts=attempts+1 WHERE id=? AND
-   status='queued'`.
-3. Worker loads the `sessions` row and decides `resume_mode` vs
+   status='queued'`. This claim is its own short transaction; no
+   network I/O inside it (§7.10 transaction boundaries).
+3. **Attachment capture pass** (outside the claim transaction):
+   for each `storage_objects` row tied to this job with
+   `capture_status = pending`:
+   a. Call Telegram `getFile`, download bytes to the local store,
+      detect MIME, compute `sha256`, measure `size_bytes`.
+   b. In a single capture transaction, set
+      `capture_status = captured`, `captured_at = now`, and
+      populate `sha256` / `mime_type` / `size_bytes`. Enqueue a
+      `storage_sync` job only if the retention class is S3-eligible.
+   c. On download / probe failure: in a single transaction set
+      `capture_status = failed` with `capture_error_json`. The
+      `provider_run` continues; the user turn records that capture
+      failed so the user can retry (PRD §13.5).
+4. Worker loads the `sessions` row and decides `resume_mode` vs
    `replay_mode` (§10).
-4. `context/builder` + `context/packer` assemble the prompt.
-5. `providers/claude` spawns the subprocess (§14), streams events,
+5. `context/builder` + `context/packer` assemble the prompt,
+   injecting attachment metadata only for rows with
+   `capture_status = captured` (failed captures surface as a
+   user-visible note instead of bytes).
+6. `providers/claude` spawns the subprocess (§14), streams events,
    writes `provider_raw_events` (redacted) and `turns` as it goes.
-6. On subprocess exit code 0 with a valid final event: worker
+7. On subprocess exit code 0 with a valid final event: worker
    commits `status = succeeded`, `finished_at`, `result_json`, and
    inserts `outbound_notifications` row `job_completed`.
-7. `telegram/outbound` sends the notification and moves it to
+8. `telegram/outbound` sends the notification and moves it to
    `sent`.
 
 Failure modes:
@@ -868,7 +958,7 @@ Failure modes:
   `error_json`; retry scheduler eventually moves it back to
   `pending`.
 - Credential revoked for extended period: `/doctor` surfaces the
-  condition; runs continue to succeed (PRD AC08).
+  condition; runs continue to succeed (PRD AC-STO-001).
 - Local file missing (disk cleaned up, bug): record a permanent
   `failed`; do not retry; admin must resolve.
 
@@ -876,21 +966,34 @@ Failure modes:
 
 Happy path:
 
-1. `notification_retry` job scans `outbound_notifications` with
-   `status = pending` or `failed` that are within the retry
-   budget.
-2. For each, `telegram/outbound` attempts `sendMessage`.
-3. Success → `status = sent`. Non-retryable → `status = failed`
-   (terminal).
+1. `notification_retry` job scans `outbound_notification_chunks`
+   with `status IN ('pending', 'failed')` that are within the
+   per-chunk retry budget, ordered by parent
+   `outbound_notification_id` and `chunk_index`.
+2. For each eligible chunk, `telegram/outbound` attempts
+   `sendMessage` for that single chunk only.
+3. On success: chunk `status = sent`, `telegram_message_id`
+   recorded. In the same transaction, if this was the last
+   remaining chunk for its parent, flip the parent row to `sent`
+   and populate `telegram_message_ids_json`.
+4. On non-retryable error: chunk `status = failed` with
+   `error_json`. Parent row's `status` is re-derived (`failed`
+   iff no chunk is still `pending`, otherwise remains `pending`).
+
+Correctness rule: a chunk with `status = 'sent'` is **never**
+selected for retry. If chunks 1–2 are sent and chunk 3 fails, the
+retry loop sends only chunk 3; the user does not receive chunks 1–2
+again because of this retry path.
 
 Failure modes:
 
-- Telegram outage: rows stay `pending` / move to `failed`; next
+- Telegram outage: chunks stay `pending` / move to `failed`; next
   retry cycle picks them up; `storage_sync` and `provider_run`
   remain unaffected.
-- Message formatting issue (e.g. payload too large): split per
-  Telegram limits; treat oversize as a non-retryable error if
-  splitting is not possible; record in `error_json`.
+- Message formatting issue for a single chunk (e.g. payload too
+  large after a formatting bug): treat as non-retryable for that
+  chunk; record in `error_json`. Other chunks in the same
+  notification proceed independently.
 
 ### 7.8 Redaction boundary (flow view)
 
@@ -934,6 +1037,105 @@ Failure modes: if recovery itself fails (e.g. DB unreadable),
 systemd restarts the service; if it keeps failing, the service
 enters failed state and the operator is alerted out-of-band.
 
+### 7.10 Transaction boundaries
+
+This section is binding. SQLite transactions in this system must
+be short and must never perform any I/O that can block, fail
+independently, or race with other writers. That rule is what
+keeps the Telegram offset ledger durable, the `jobs` claim
+exclusive, and the `storage_sync` / `notification_retry` machines
+independent.
+
+Every committing transaction in P0 belongs to one of the
+following named classes. No transaction may span more than one
+class. No code path may open a transaction not listed here.
+
+**T1 — Inbound ingest** (`telegram/inbound` per §7.1):
+- Insert `telegram_updates` row(s), classify, insert attachment
+  `storage_objects` rows with `capture_status = 'pending'`, insert
+  `jobs` row(s), advance `settings.telegram_next_offset`.
+- Prohibited inside T1: Telegram `getFile`, any HTTP call, any
+  file I/O beyond SQLite, MIME sniffing of bytes, provider
+  subprocess spawn, `sendMessage`, S3 `PUT`/`DELETE`, logger
+  sinks that block on network.
+
+**T2 — Worker claim** (`queue/worker` per §7.2 step 2):
+- Single-row atomic `UPDATE` that moves a `jobs` row from
+  `queued → running` and increments `attempts`.
+- Prohibited inside T2: anything except that one `UPDATE`. No
+  context packing, no provider spawn, no notification write.
+
+**T3 — Attachment capture commit** (§7.2 step 3):
+- Per attachment: after the out-of-transaction `getFile` +
+  download + hash + MIME probe have succeeded, a single
+  transaction sets `capture_status = 'captured'`, populates
+  `sha256` / `mime_type` / `size_bytes` / `captured_at`, and
+  (only if retention is S3-eligible) inserts a `storage_sync`
+  job.
+- Prohibited: any further network I/O; any mutation to
+  `provider_runs`, `turns`, or `outbound_notifications`.
+
+**T4 — Provider raw event append** (§7.3):
+- One transaction per stream-json line: redact → insert
+  `provider_raw_events` row. Kept per-line on purpose so parse
+  failures mid-stream don't lose already-captured events.
+- Prohibited: `sendMessage`, S3 I/O, waiting on `proc.exited`.
+
+**T5 — Provider run completion** (§7.2 step 7):
+- Close out the `provider_runs` row (`status = succeeded|failed`,
+  `usage_json`, `parser_status`, `finished_at`), insert the final
+  assistant `turns` row, flip the owning `jobs` row to `succeeded`
+  (or `failed`), insert the parent `outbound_notifications` row
+  and its `chunk_count` `outbound_notification_chunks` rows with
+  `status = 'pending'`.
+- Prohibited: Telegram `sendMessage` (that's T7), S3 I/O.
+
+**T6 — Resume-fallback flip** (§6.2 resume-fallback transition):
+- Same-row mutation on a `jobs` row: `status = 'queued'`,
+  `request_json.context_packing_mode = 'replay_mode'`,
+  `result_json.resume_failed = true`; plus the
+  `provider_runs` row for the failed attempt is closed with
+  `status = 'failed', error_type = 'resume_failed'`.
+- Prohibited: inserting a new `jobs` row (§5.3); touching
+  `attempts`; sending a notification.
+
+**T7 — Outbound chunk delivery** (§7.7):
+- After a successful `sendMessage` for one chunk: set
+  `outbound_notification_chunks.status = 'sent'`,
+  `telegram_message_id`, `sent_at`; if this was the last chunk,
+  derive parent `outbound_notifications.status = 'sent'` and
+  populate `telegram_message_ids_json`.
+- Prohibited: Telegram `sendMessage` (that already happened
+  outside the transaction); mutating `provider_runs` or `jobs`.
+
+**T8 — Storage sync commit** (§7.6):
+- After a successful S3 `PUT` / `DELETE` outside the transaction:
+  flip `storage_objects.status` (`pending → uploaded`,
+  `deletion_requested → deleted`) and set timestamps.
+- Prohibited: S3 I/O inside the transaction; mutation of
+  `provider_runs` or `jobs` (PRD AC-STO-002, AC-STO-006).
+
+**T9 — Startup recovery** (§7.9 / §15):
+- Single boot transaction: `running → interrupted` for every
+  stale `jobs` row; for each, decide `interrupted → queued` in
+  the same transaction per `safe_retry`.
+- Prohibited: spawning subprocesses; sending notifications;
+  S3 I/O.
+
+Cross-class prohibitions (apply everywhere):
+
+- No transaction opens a subprocess or waits on one (`proc.exited`
+  is always awaited outside a transaction).
+- No transaction performs Telegram HTTP calls, S3 calls, or blocks
+  on a logger sink that hits the network.
+- No transaction spans two core flows (e.g. inbound ingest and
+  worker claim are always separate transactions, even if a future
+  optimisation tempts otherwise).
+
+Code review and tests should treat any transaction that violates
+the above as a defect regardless of whether the current behaviour
+looks correct.
+
 ---
 
 ## 8. Provider Adapter Design
@@ -972,10 +1174,22 @@ Rules:
    passed, and the resulting `provider_session_id` returned by
    Claude.
 2. A failed `--resume` (session not found on Claude's side) does
-   **not** silently fall back mid-call; the adapter exits and the
-   worker re-queues the job in `replay_mode` with the same
-   `idempotency_key`. This keeps replay/resume semantics testable
-   (playbook §6.1.6).
+   **not** silently fall back mid-call. The adapter exits,
+   records a `provider_runs` row with
+   `status = failed, error_type = 'resume_failed'`, and the worker
+   retries the **same** `jobs` row in `replay_mode`. Concretely, in
+   a single transaction:
+   - `jobs.status` transitions `running → queued` via the
+     resume-fallback path (§6.2 transition "resume fallback").
+   - `jobs.request_json.context_packing_mode` is set to
+     `replay_mode`; `jobs.result_json.resume_failed = true` for
+     observability.
+   - `attempts` is not incremented for the fallback; the next
+     worker claim increments it normally.
+   No new job is inserted and `idempotency_key` is unchanged —
+   the §5.3 duplicate-insert no-op rule is irrelevant because the
+   existing row is mutated in place. This keeps replay/resume
+   semantics testable (playbook §6.1.6).
 3. Resume must not double-answer: if the adapter detects the stream
    is replaying an already-persisted assistant turn, it treats it
    as an anomaly and logs it (spike §6.1.6 precondition).
@@ -1081,22 +1295,43 @@ Order of checks (first match wins):
 
 ### 9.3 Attachment handling (HLD-level)
 
-Per PRD §13.5:
+Per PRD §13.5. Attachment handling is split across **two** phases
+to keep the inbound SQLite transaction short and free of network
+I/O (§7.10 transaction boundaries).
 
-1. For each attachment file_id in the update, call `getFile`.
-2. Download to a local temp path.
-3. Compute `sha256`, detect MIME, measure size.
-4. Insert `storage_objects` row with `retention_class =
-   session`, `status = pending`, `source_channel = 'telegram'`,
-   `source_message_id = update.message_id`.
-5. Attach metadata (not bytes) to the provider prompt via
-   `context/packer`.
-6. Promotion to `long_term` is handled by explicit user intent
-   (`/save_last_attachment` or natural-language match).
+**Phase 1 — inbound metadata (runs inside the inbound txn, §7.1):**
 
-If the download itself fails, the `telegram_updates` row still
-moves to `enqueued` and the `jobs` row is created; the turn
-records that attachment capture failed, so the user can retry.
+1. For each attachment in the update, classify its Telegram type
+   (photo / document / audio / video) and read the metadata
+   Telegram already supplied in the update payload (file_id, claimed
+   MIME/size when present, message_id).
+2. Insert a `storage_objects` row with:
+   - `retention_class = session`
+   - `source_channel = 'telegram'`
+   - `source_message_id = update.message_id`
+   - `source_external_id = update.file_id`
+   - `capture_status = pending`
+   - `status = pending` (sync status; only meaningful once
+     `capture_status = captured`)
+   - `sha256` / `mime_type` / `size_bytes` left nullable.
+3. Create the `jobs` row and advance the Telegram offset as usual.
+   Do not call `getFile`, download bytes, or probe MIME in this
+   transaction.
+
+**Phase 2 — byte capture (runs in the worker, §7.2 step 3):**
+
+4. Worker pre-step, per attachment: `getFile` → download →
+   `sha256` / MIME / size.
+5. In a single capture transaction, set `capture_status = captured`,
+   `captured_at = now`, and populate the computed fields. If the
+   retention class is S3-eligible, enqueue a `storage_sync` job
+   here (not before).
+6. On failure, set `capture_status = failed` with
+   `capture_error_json`. The owning `provider_run` continues and
+   the user turn records that capture failed, so the user can retry.
+7. Promotion to `long_term` is handled by explicit user intent
+   (`/save_last_attachment` or natural-language match) and only
+   applies to rows with `capture_status = captured`.
 
 ### 9.4 Outbound delivery
 
@@ -1122,7 +1357,7 @@ here because it is the one that state drift most often violates:
 > the associated `jobs` rows, if any) has committed.**
 
 This is the invariant spike §6.1.3 exists to verify and the
-invariant AC06 (recovery behavior) relies on.
+invariant AC-JOB-002 (recovery behavior) relies on.
 
 ---
 
@@ -1326,7 +1561,7 @@ their `error_json.reason`.
 ### 12.4 Independence from provider success
 
 Explicit: a `storage_sync` failure never rolls back a
-`provider_run` succeeded status (AC12), and never prevents
+`provider_run` succeeded status (AC-STO-002), and never prevents
 `job_completed` notifications. Users see their response even if
 the S3 mirror is degraded.
 
@@ -1600,7 +1835,7 @@ tagged as `quick` or `deep` in the output and every line reports
 | `claude_version_pinned`        | quick    | Version matches the value recorded in `03_RISK_SPIKES.md`.   |
 | `redaction_boundary_quick`     | quick    | A small self-test string containing a known pattern is redacted correctly. |
 | `bootstrap_whoami_guard`       | quick    | If `BOOTSTRAP_WHOAMI=true`, remaining auto-expiry time is reported; `warn` while on, `fail` past the 30-minute window (DEC-009). |
-| `s3_endpoint_smoke`            | deep     | `put` + `get` + `stat` + `list` + `delete` on a temp key per PRD §12.8. AC16. |
+| `s3_endpoint_smoke`            | deep     | `put` + `get` + `stat` + `list` + `delete` on a temp key per PRD §12.8. AC-OBS-001. |
 | `claude_lockdown_smoke`        | deep     | A short prompt under `--tools ""` + `--permission-mode dontAsk` produces no interactive prompt and no fs writes outside Claude's session path (SP-05). |
 | `subprocess_teardown_smoke`    | deep     | `Bun.spawn` detached process-group kill completes within the grace + hard-kill budget (SP-07). |
 | `disk_free_ok`                 | deep     | Free bytes > configured threshold for SQLite + local storage; S3 degraded thresholds (DEC-018) not exceeded. |
@@ -1624,7 +1859,7 @@ totals.
 
 ### 16.3 Relation to acceptance
 
-AC16 requires `s3_endpoint_smoke` to pass for the P0 acceptance
+AC-OBS-001 requires `s3_endpoint_smoke` to pass for the P0 acceptance
 gate. Failure puts the system into a documented degraded mode
 (local-only) rather than refusing to start.
 
@@ -1683,7 +1918,7 @@ the boundaries above; this matches the playbook §7.2 build order.
 9. `memory/summary` (§11).
 10. `storage/local` + `storage/sync` (§12).
 11. `commands/*` and `/doctor` (§16).
-12. `startup/recovery` (§15) — hardened to pass AC06.
+12. `startup/recovery` (§15) — hardened to pass AC-JOB-002.
 13. systemd unit + RUNBOOK (playbook §10).
 
 Each vertical slice ends with at least one ledger integration
