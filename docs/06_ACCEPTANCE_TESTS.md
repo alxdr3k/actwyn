@@ -622,6 +622,7 @@ follow the same template as the sections above.
 | AC-PROV-014   | AC45           | `summary_generation` uses advisory profile |
 | AC-MEM-006    | AC46           | `summary_generation` output schema         |
 | AC-OPS-004    | AC47           | WAL-safe DB backup                        |
+| AC-SEC-ATTACH-001 | (new)      | Attachment filenames with §15 patterns stored as NULL |
 
 Suggested additional test plans to write alongside the backlog:
 

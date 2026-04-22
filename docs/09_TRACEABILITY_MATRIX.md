@@ -168,6 +168,7 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | AC-PROV-014 | `summary_generation` uses advisory lockdown                         | ADR-0005                   | SP-05                  |
 | AC-MEM-006 | `summary_generation` output matches `memory_summaries` schema      | ADR-0006                   | SP-06                  |
 | AC-OPS-004 | WAL-safe DB backup if implemented                                   | ADR-0003                   | SP-01                  |
+| AC-SEC-ATTACH-001 | Attachment `original_filename_redacted` respects §15 patterns | DEC-002, DEC-010           | SP-04                  |
 
 ## Orphan / broken-link check
 

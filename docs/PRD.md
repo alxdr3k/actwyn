@@ -1098,6 +1098,7 @@ form**. Domains:
 | AC-PROV-014 | `summary_generation` job은 Claude advisory/chat lockdown profile로 실행된다. | AC45 |
 | AC-MEM-006 | `summary_generation` output은 `memory_summaries` schema에 맞게 구조화되어 저장된다. | AC46 |
 | AC-OPS-004 | P0에서 SQLite DB snapshot이 구현되는 경우 WAL mode에 안전한 backup 절차를 사용한다. | AC47 |
+| AC-SEC-ATTACH-001 | `storage_objects.original_filename_redacted`는 파일명이 §15 redaction patterns (email, phone, token-like strings, personal-name patterns, configured sensitive terms) 중 하나라도 포함하면 `NULL`로 저장된다. 안전하지 않은 값을 그대로 저장하는 기본 경로는 금지이고, CI의 redaction grep-check가 이를 샘플 fixture로 검증한다. | (new in this revision) |
 
 ---
 
@@ -1524,7 +1525,7 @@ Owns artifact metadata for every durable or session-scoped binary. See
 | `storage_backend`             | TEXT     | `s3` \| `local`.                                                                                |
 | `bucket`                      | TEXT     | nullable when `storage_backend = local`.                                                        |
 | `storage_key`                 | TEXT     | Canonical key per §12.8.4. Unique within `(storage_backend, bucket)`.                           |
-| `original_filename_redacted`  | TEXT     | nullable; stored only if filename itself is not sensitive.                                      |
+| `original_filename_redacted`  | TEXT     | nullable; stored only if the filename is redaction-safe (no §15 pattern matches — email, phone, token-like string, personal-name pattern, configured sensitive terms). Otherwise `NULL`. See AC-SEC-ATTACH-001. |
 | `mime_type`                   | TEXT     | Detected MIME type (not user-claimed).                                                          |
 | `size_bytes`                  | INTEGER  | nullable until capture completes for channels that only learn size after download. |
 | `sha256`                      | TEXT     | nullable until capture completes; content hash for dedupe and integrity.           |
