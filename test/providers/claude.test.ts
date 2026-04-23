@@ -244,6 +244,60 @@ exit 0
   });
 });
 
+describe.skipIf(!IS_POSIX)("claude adapter — timeout (HLD §14.2)", () => {
+  test("max_runtime_ms exceeded → failed with error_type=timeout", async () => {
+    const workdir = mkdtempSync(join(tmpdir(), "actwyn-claude-"));
+    try {
+      const stub = makeStub(workdir, `sleep 10\nprintf '{"event":"end"}\\n'\nexit 0\n`);
+      const adapter = createClaudeAdapter({
+        binary: stub,
+        redactor: redactor(),
+        cwd: workdir,
+        max_runtime_ms: 150,
+        grace_ms: 100,
+        hard_kill_ms: 200,
+      });
+      const outcome = await adapter.run(req());
+      expect(outcome.kind).toBe("failed");
+      if (outcome.kind === "failed") {
+        expect(outcome.error_type).toBe("timeout");
+      }
+    } finally {
+      rmSync(workdir, { recursive: true, force: true });
+    }
+  });
+
+  test("stall_timeout_ms exceeded (no output) → failed with error_type=stall_timeout", async () => {
+    const workdir = mkdtempSync(join(tmpdir(), "actwyn-claude-"));
+    try {
+      // Stub writes one line then stalls for 10s before finishing.
+      const stub = makeStub(
+        workdir,
+        `printf '{"event":"text","text":"partial"}\\n'
+sleep 10
+printf '{"event":"end"}\\n'
+exit 0
+`,
+      );
+      const adapter = createClaudeAdapter({
+        binary: stub,
+        redactor: redactor(),
+        cwd: workdir,
+        stall_timeout_ms: 200,
+        grace_ms: 100,
+        hard_kill_ms: 200,
+      });
+      const outcome = await adapter.run(req());
+      expect(outcome.kind).toBe("failed");
+      if (outcome.kind === "failed") {
+        expect(outcome.error_type).toBe("stall_timeout");
+      }
+    } finally {
+      rmSync(workdir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe.skipIf(!IS_POSIX)("claude adapter — redaction", () => {
   test("stream line containing a bearer token is redacted in raw_events", async () => {
     const workdir = mkdtempSync(join(tmpdir(), "actwyn-claude-"));

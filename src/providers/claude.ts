@@ -50,6 +50,10 @@ export interface ClaudeAdapterOptions {
   readonly max_turns?: number;
   readonly grace_ms?: number;
   readonly hard_kill_ms?: number;
+  /** Maximum wall-clock ms for the whole run (HLD §14.2). Triggers teardown when exceeded. */
+  readonly max_runtime_ms?: number;
+  /** Max ms of stream silence before treating as subprocess stall (HLD §14.2). */
+  readonly stall_timeout_ms?: number;
   readonly redactor: Redactor;
   readonly now?: () => Date;
   /** Host cwd for the subprocess. */
@@ -108,8 +112,30 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): ProviderAdapter
       signal?.addEventListener("abort", () => resolve("cancel"), { once: true });
     });
 
+    // max_runtime_ms: absolute wall-clock limit (HLD §14.2 / §14.3).
+    const maxRuntimePromise: Promise<"timeout_max_runtime"> = opts.max_runtime_ms !== undefined
+      ? new Promise((resolve) => setTimeout(() => resolve("timeout_max_runtime"), opts.max_runtime_ms))
+      : new Promise(() => { /* never */ });
+
+    // stall_timeout_ms: silence detection (HLD §14.2). Timer resets on each output line.
+    let stallTimer: ReturnType<typeof setTimeout> | null = null;
+    let resolveStall: ((v: "timeout_stall") => void) | null = null;
+    const stallPromise: Promise<"timeout_stall"> = opts.stall_timeout_ms !== undefined
+      ? new Promise((resolve) => {
+          resolveStall = resolve;
+          stallTimer = setTimeout(() => resolve("timeout_stall"), opts.stall_timeout_ms);
+        })
+      : new Promise(() => { /* never */ });
+
+    function resetStall(): void {
+      if (opts.stall_timeout_ms === undefined || stallTimer === null) return;
+      clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => resolveStall!("timeout_stall"), opts.stall_timeout_ms);
+    }
+
     const stdoutTask = (async () => {
       for await (const line of readLines(child.stdout)) {
+        resetStall();
         const redacted = opts.redactor.apply(line).text;
         assembler.push(redacted, "stdout");
       }
@@ -117,18 +143,33 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): ProviderAdapter
 
     const stderrTask = (async () => {
       for await (const line of readLines(child.stderr)) {
+        resetStall();
         const redacted = opts.redactor.apply(line).text;
         assembler.push(redacted, "stderr");
       }
     })();
 
-    // Race subprocess exit vs cancel.
-    const finish = await Promise.race([
+    // Race subprocess exit vs cancel vs timeouts.
+    type FinishKind =
+      | { kind: "exit"; code: number }
+      | "cancel"
+      | "timeout_max_runtime"
+      | "timeout_stall";
+
+    const finish: FinishKind = await Promise.race([
       child.exited.then((code) => ({ kind: "exit" as const, code })),
       cancelPromise,
+      maxRuntimePromise,
+      stallPromise,
     ]);
 
-    if (finish === "cancel") {
+    // Clear stall timer so it doesn't fire after the race resolves.
+    if (stallTimer !== null) clearTimeout(stallTimer);
+
+    const isTimeout =
+      finish === "timeout_max_runtime" || finish === "timeout_stall";
+
+    if (finish === "cancel" || isTimeout) {
       try {
         await child.teardown(signal ?? new AbortController().signal);
       } catch {
@@ -137,11 +178,12 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): ProviderAdapter
       }
     }
 
-    // Drain streams either way — even under cancel, readers must
+    // Drain streams either way — even under cancel/timeout, readers must
     // terminate cleanly so we don't leak listeners.
     await Promise.allSettled([stdoutTask, stderrTask]);
 
-    const exitCode = finish === "cancel" ? await child.exited : finish.code;
+    const exitCode =
+      finish === "cancel" || isTimeout ? await child.exited : finish.code;
     const assembled = assembler.finish({ subprocess_exit_code: exitCode });
 
     const base: AgentResponse = {
@@ -161,6 +203,12 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): ProviderAdapter
         error_type: "cancelled",
       };
       return { kind: "cancelled", response };
+    }
+
+    if (isTimeout) {
+      const error_type = finish === "timeout_stall" ? "stall_timeout" : "timeout";
+      const response: AgentResponse = { ...base, error_type };
+      return { kind: "failed", response, error_type };
     }
 
     if (exitCode !== 0) {
