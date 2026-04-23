@@ -594,7 +594,9 @@ export async function runOneClaimed(
         : outcome.kind === "cancelled"
           ? "job_cancelled"
           : "job_failed";
-    const text = buildNotificationText(outcome.kind, outcome.response.final_text);
+    const text = (isSummaryJob && pendingSummarySync !== null)
+      ? buildSummaryNotificationText(pendingSummarySync.summaryData)
+      : buildNotificationText(outcome.kind, outcome.response.final_text);
     const created = createNotificationAndChunks({
       db: deps.db,
       newId: deps.newId,
@@ -641,6 +643,17 @@ export async function runOneClaimed(
         ? "cancelled"
         : "failed";
   return { job_id: job.id, terminal, turn_id: turnId, provider_run_id: providerRunId };
+}
+
+function buildSummaryNotificationText(summary: SummaryOutput): string {
+  const counts: string[] = [];
+  if (summary.facts.length > 0) counts.push(`사실 ${summary.facts.length}개`);
+  if (summary.preferences.length > 0) counts.push(`선호도 ${summary.preferences.length}개`);
+  if (summary.decisions.length > 0) counts.push(`결정 ${summary.decisions.length}개`);
+  if (summary.open_tasks.length > 0) counts.push(`열린 작업 ${summary.open_tasks.length}개`);
+  if (summary.cautions.length > 0) counts.push(`주의사항 ${summary.cautions.length}개`);
+  const detail = counts.length > 0 ? ` (${counts.join(", ")})` : "";
+  return `요약이 완료됐습니다${detail}.`;
 }
 
 function buildNotificationText(
