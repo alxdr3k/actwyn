@@ -252,6 +252,38 @@ export async function runOneClaimed(
     }
   }
 
+  // job_accepted notification (PRD §13.3 DEC-012): sent for non-system provider_run
+  // jobs when an outbound transport is available. Gives immediate feedback to the user
+  // while the AI run is pending.
+  if (
+    job.job_type === "provider_run" &&
+    deps.outbound &&
+    job.chat_id
+  ) {
+    const accepted = createNotificationAndChunks({
+      db: deps.db,
+      newId: deps.newId,
+      args: {
+        job_id: job.id,
+        chat_id: job.chat_id,
+        notification_type: "job_accepted",
+        text: "요청이 접수됐습니다.",
+        chunk_size: deps.config.notifications?.chunk_size,
+      },
+    });
+    try {
+      await sendNotification(
+        { db: deps.db, transport: deps.outbound, events: deps.events },
+        accepted.notification_id,
+        accepted.chunks,
+      );
+    } catch {
+      // Non-fatal: job_accepted delivery failure must not block the AI run.
+      // Enqueue retry so the user eventually gets the acknowledgment.
+      enqueueNotificationRetryJob(deps, accepted.notification_id, job.chat_id);
+    }
+  }
+
   const isSummaryJob = job.job_type === "summary_generation";
   const selectedAdapter = isSummaryJob && deps.summaryAdapter
     ? deps.summaryAdapter

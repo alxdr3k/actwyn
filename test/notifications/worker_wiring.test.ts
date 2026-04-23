@@ -70,6 +70,21 @@ function buildDeps(
 }
 
 describe("worker → outbound wiring", () => {
+  test("provider_run → job_accepted sent before job_completed (PRD §13.3 DEC-012)", async () => {
+    seedJob("j-accepted", "hi");
+    const transport = new StubOutboundTransport();
+    await runWorkerOnce(buildDeps(transport));
+
+    const accepted = db
+      .prepare<{ notification_type: string; status: string }, [string]>(
+        "SELECT notification_type, status FROM outbound_notifications WHERE job_id = ? AND notification_type = 'job_accepted'",
+      )
+      .get("j-accepted");
+    expect(accepted).not.toBeNull();
+    expect(accepted!.notification_type).toBe("job_accepted");
+    expect(accepted!.status).toBe("sent");
+  });
+
   test("succeeded provider_run → one job_completed notification; all chunks sent; ids recorded", async () => {
     seedJob("j-ok", "hello");
     const transport = new StubOutboundTransport();
@@ -80,7 +95,7 @@ describe("worker → outbound wiring", () => {
         { id: string; notification_type: string; status: string; chunk_count: number },
         []
       >(
-        "SELECT id, notification_type, status, chunk_count FROM outbound_notifications LIMIT 1",
+        "SELECT id, notification_type, status, chunk_count FROM outbound_notifications WHERE notification_type = 'job_completed' LIMIT 1",
       )
       .get()!;
     expect(notif.notification_type).toBe("job_completed");
@@ -110,7 +125,7 @@ describe("worker → outbound wiring", () => {
       .prepare<
         { notification_type: string; status: string },
         []
-      >("SELECT notification_type, status FROM outbound_notifications LIMIT 1")
+      >("SELECT notification_type, status FROM outbound_notifications WHERE notification_type = 'job_failed' LIMIT 1")
       .get()!;
     expect(row.notification_type).toBe("job_failed");
     expect(row.status).toBe("sent");
