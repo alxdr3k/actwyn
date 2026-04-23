@@ -86,6 +86,25 @@ export function pack(snapshot: ContextSnapshot, config: PackConfig): PackedConte
   };
 }
 
+/**
+ * Render the retained slots into a single prompt string suitable for
+ * passing as the `message` argument to Claude in replay_mode.
+ *
+ * The user_message slot is placed last; all other retained slots are
+ * prefixed with their label so Claude can orient itself.
+ */
+export function renderAsMessage(packed: PackedContext): string {
+  const retained = packed.slots.filter((s) => s.retained);
+  const nonUser = retained.filter((s) => s.key !== "user_message");
+  const userSlot = retained.find((s) => s.key === "user_message");
+  const parts: string[] = [];
+  for (const s of nonUser) {
+    parts.push(`[${s.label}]\n${s.text}`);
+  }
+  if (userSlot) parts.push(userSlot.text);
+  return parts.join("\n\n");
+}
+
 /** Serialize a packed context into the `injected_snapshot_json` shape. */
 export function serializeForProviderRun(packed: PackedContext): string {
   return JSON.stringify({

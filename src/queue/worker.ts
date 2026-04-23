@@ -46,7 +46,7 @@ import { whoamiReply } from "~/commands/whoami.ts";
 import { endSession, enqueueSummaryJob } from "~/commands/summary.ts";
 import { shouldAutoTriggerSummary, writeSummary, type SummaryOutput } from "~/memory/summary.ts";
 import { buildContext, type MemoryItemSlot, type TurnSlot } from "~/context/builder.ts";
-import { pack, serializeForProviderRun } from "~/context/packer.ts";
+import { pack, renderAsMessage, serializeForProviderRun } from "~/context/packer.ts";
 import { runUploadPass, runDeletePass, type SyncConfig } from "~/storage/sync.ts";
 import type { S3Transport } from "~/storage/s3.ts";
 import {
@@ -264,9 +264,28 @@ export async function runOneClaimed(
   const priorSessionId = !isSummaryJob && !forcedReplay && job.session_id
     ? queryPriorProviderSessionId(deps.db, job.session_id)
     : null;
-  const request = parseRequest(job, capture.attachments, priorSessionId);
+  const baseRequest = parseRequest(job, capture.attachments, priorSessionId);
   const providerRunId = deps.newId();
   const packingMode = priorSessionId ? "resume_mode" : "replay_mode";
+
+  // In replay_mode, inject the full packed context (memory + turns + summary)
+  // as the message so Claude receives the conversation history. In resume_mode
+  // Claude already has the history via --resume, so just send the user message.
+  let request = baseRequest;
+  let snapshotJson: string;
+  if (packingMode === "replay_mode" && job.session_id) {
+    const ctx = buildContextForRun({
+      db: deps.db,
+      sessionId: job.session_id,
+      req: baseRequest,
+      redactor: deps.redactor,
+    });
+    request = { ...baseRequest, message: ctx.packedMessage };
+    snapshotJson = ctx.snapshotJson;
+  } else {
+    snapshotJson = JSON.stringify({ mode: packingMode, session_id: job.session_id ?? "" });
+  }
+
   insertProviderRunStart({
     db: deps.db,
     id: providerRunId,
@@ -276,6 +295,7 @@ export async function runOneClaimed(
     req: request,
     packingMode,
     redactor: deps.redactor,
+    snapshotJson,
   });
 
   const outcome = await safeRun(selectedAdapter, request, signal, (pgid, pid) => {
@@ -394,8 +414,9 @@ export async function runOneClaimed(
     if (finalText.length > 0 && job.session_id) {
       // Insert user turn first (chronological order) for non-summary provider_run jobs.
       // Summary generation is an internal operation and does not produce a user turn.
-      if (!isSummaryJob && request.message.length > 0) {
-        const redactedUserMsg = deps.redactor.apply(request.message).text;
+      // Use baseRequest.message (raw user text), not the packed context sent to Claude.
+      if (!isSummaryJob && baseRequest.message.length > 0) {
+        const redactedUserMsg = deps.redactor.apply(baseRequest.message).text;
         deps.db
           .prepare<unknown, [string, string, string, string, string]>(
             `INSERT INTO turns(id, session_id, job_id, provider_run_id, role, content_redacted, redaction_applied)
@@ -689,15 +710,34 @@ function queryPriorProviderSessionId(db: DbHandle, session_id: string): string |
   return row?.provider_session_id ?? null;
 }
 
-function buildContextSnapshot(args: {
+interface ContextBuildResult {
+  /** Full packed message text: used as the actual prompt in replay_mode. */
+  readonly packedMessage: string;
+  /** JSON metadata for provider_runs.injected_snapshot_json. */
+  readonly snapshotJson: string;
+}
+
+/**
+ * Build and pack the context for a replay_mode provider run.
+ *
+ * Returns both the full rendered message (to pass to Claude) and the
+ * observability snapshot (to persist in injected_snapshot_json).
+ * In resume_mode the context is managed by Claude's session, so only
+ * the raw user message is used; this function still returns an
+ * appropriate snapshot for observability.
+ */
+function buildContextForRun(args: {
   db: DbHandle;
   sessionId: string;
   req: AgentRequest;
   redactor: Redactor;
-}): string {
-  if (!args.sessionId) {
-    return JSON.stringify({ attachments: args.req.attachments ?? [], session_id: "" });
-  }
+}): ContextBuildResult {
+  const fallback: ContextBuildResult = {
+    packedMessage: args.req.message,
+    snapshotJson: JSON.stringify({ mode: "replay_mode", session_id: args.sessionId ?? "" }),
+  };
+
+  if (!args.sessionId) return fallback;
 
   const turns = args.db
     .prepare<TurnSlot, [string]>(
@@ -720,7 +760,6 @@ function buildContextSnapshot(args: {
     )
     .all(args.sessionId);
 
-  // Include the latest session summary if available.
   const latestSummary = args.db
     .prepare<{ facts_json: string | null; open_tasks_json: string | null; created_at: string }, [string]>(
       `SELECT facts_json, open_tasks_json, created_at
@@ -760,9 +799,12 @@ function buildContextSnapshot(args: {
 
   try {
     const packed = pack(snap, { total_budget_tokens: 6000 });
-    return args.redactor.apply(serializeForProviderRun(packed)).text;
+    return {
+      packedMessage: args.redactor.apply(renderAsMessage(packed)).text,
+      snapshotJson: args.redactor.apply(serializeForProviderRun(packed)).text,
+    };
   } catch {
-    return JSON.stringify({ attachments: args.req.attachments ?? [], session_id: args.sessionId });
+    return fallback;
   }
 }
 
@@ -775,12 +817,12 @@ function insertProviderRunStart(args: {
   req: AgentRequest;
   packingMode: "resume_mode" | "replay_mode";
   redactor: Redactor;
+  snapshotJson: string;
 }): void {
   const argvRedacted = JSON.stringify(args.redactor.applyToJson({
     message: args.req.message,
     channel: args.req.channel,
   }));
-  const snapshot = buildContextSnapshot(args);
   args.db
     .prepare<
       unknown,
@@ -791,7 +833,7 @@ function insertProviderRunStart(args: {
           argv_json_redacted, cwd, injected_snapshot_json, parser_status)
        VALUES(?, ?, ?, ?, ?, 'started', ?, '.', ?, 'parsed')`,
     )
-    .run(args.id, args.jobId, args.sessionId, args.provider, args.packingMode, argvRedacted, snapshot);
+    .run(args.id, args.jobId, args.sessionId, args.provider, args.packingMode, argvRedacted, args.snapshotJson);
 }
 
 async function runStorageSyncJob(deps: WorkerDeps, job: ClaimedJob): Promise<RunResult> {

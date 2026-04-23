@@ -137,7 +137,8 @@ describe("worker → outbound wiring", () => {
 
   test("chunk send failure enqueues a notification_retry job", async () => {
     seedJob("j-retry-enq", "hello retry");
-    const planText = "echo: hello retry";
+    // Fake adapter echoes the full packed message (system_identity + user message).
+    const planText = "echo: [system_identity]\nactwyn personal agent\n\nhello retry";
     const transport = new StubOutboundTransport({
       plan: new Map([[planText, "fail_once"]]),
     });
@@ -158,7 +159,8 @@ describe("worker → outbound wiring", () => {
 
   test("notification_retry job dispatch retries chunks and marks job succeeded", async () => {
     seedJob("j-retry-run", "retry me");
-    const planText = "echo: retry me";
+    // Fake adapter echoes the full packed message (system_identity + user message).
+    const planText = "echo: [system_identity]\nactwyn personal agent\n\nretry me";
     // Fail on first attempt, succeed on second.
     const transport = new StubOutboundTransport({
       plan: new Map([[planText, "fail_once"]]),

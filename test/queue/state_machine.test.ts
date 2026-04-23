@@ -108,7 +108,7 @@ describe("state machine — queued → running → succeeded (fake adapter)", ()
     expect(turns[0]!.role).toBe("user");
     expect(turns[0]!.content_redacted).toBe("hello");
     expect(turns[1]!.role).toBe("assistant");
-    expect(turns[1]!.content_redacted).toContain("echo: hello");
+    expect(turns[1]!.content_redacted).toContain("hello");
   });
 });
 
