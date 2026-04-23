@@ -35,6 +35,7 @@ import type {
   AgentRequestAttachment,
   ProviderAdapter,
 } from "~/providers/types.ts";
+import { endSession } from "~/commands/summary.ts";
 import {
   captureOne,
   commitCaptureFailure,
@@ -334,6 +335,18 @@ export async function runOneClaimed(
          WHERE id = ? AND status = 'running'`,
       )
       .run(terminalJobStatus, result_json, error_json, job.id);
+
+    // /end: mark the session ended atomically with the job commit.
+    if (
+      job.job_type === "summary_generation" &&
+      terminalJobStatus === "succeeded" &&
+      job.session_id
+    ) {
+      const req = JSON.parse(job.request_json) as { command?: string; trigger?: string };
+      if (req.command === "/end" || req.trigger === "explicit_end") {
+        endSession(deps.db, job.session_id);
+      }
+    }
   });
 
   deps.events.info("queue.job.terminal", {

@@ -244,6 +244,15 @@ describe("processBatch — base cases", () => {
       .get()!;
     expect(row.job_type).toBe("summary_generation");
   });
+
+  test("authorized `/end` maps to a summary_generation job", () => {
+    processBatch(deps, [textMessageUpdate(52, "/end")]);
+    const row = db
+      .prepare<{ job_type: string; request_json: string }>("SELECT job_type, request_json FROM jobs LIMIT 1")
+      .get()!;
+    expect(row.job_type).toBe("summary_generation");
+    expect(JSON.parse(row.request_json).command).toBe("/end");
+  });
 });
 
 // ---------------------------------------------------------------

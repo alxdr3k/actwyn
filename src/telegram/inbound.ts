@@ -268,12 +268,14 @@ export function classifyAndCommit(
   };
   const requestJson = JSON.stringify(deps.redactor.applyToJson(requestPayload));
 
-  // `/summary` is the only inbound classification that maps to a
-  // non-provider job type at Phase 3. Everything else becomes a
-  // provider_run job; Phase 10 commands dispatcher reads
-  // request_json.command to differentiate further.
+  // `/summary` and `/end` map to summary_generation; all other
+  // commands and text messages map to provider_run. The worker checks
+  // request_json.command to differentiate /end (mark session ended)
+  // from /summary (summary only, session stays active).
   const jobType =
-    commandField === "/summary" ? "summary_generation" : "provider_run";
+    commandField === "/summary" || commandField === "/end"
+      ? "summary_generation"
+      : "provider_run";
   const idempotencyKey = `telegram:${update.update_id}`;
 
   const insertRes = deps.db

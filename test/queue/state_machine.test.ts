@@ -222,3 +222,34 @@ describe("provider_raw_events are redacted at rest", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------
+// /end command: summary_generation job marks session ended
+// ---------------------------------------------------------------
+
+describe("/end: summary_generation job marks session ended on success", () => {
+  test("session.status flips to 'ended' after the /end summary_generation job succeeds", async () => {
+    db.prepare<unknown, [string, string, string, string]>(
+      `INSERT INTO jobs
+         (id, status, job_type, session_id, user_id, chat_id, request_json, idempotency_key, provider)
+       VALUES(?, 'queued', 'summary_generation', ?, 'user-1', 'chat-1', ?, ?, 'fake')`,
+    ).run(
+      "j-end",
+      "sess-1",
+      JSON.stringify({ command: "/end", args: "", text: "", has_attachments: false }),
+      "telegram:end-test",
+    );
+
+    await runWorkerOnce(deps());
+
+    const job = db
+      .prepare<{ status: string }, [string]>("SELECT status FROM jobs WHERE id = ?")
+      .get("j-end")!;
+    expect(job.status).toBe("succeeded");
+
+    const sess = db
+      .prepare<{ status: string }>("SELECT status FROM sessions WHERE id = 'sess-1'")
+      .get()!;
+    expect(sess.status).toBe("ended");
+  });
+});
