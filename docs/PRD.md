@@ -160,7 +160,7 @@ P1+에서 별도 정책으로 다룬다. 자세한 결정 근거는
 
 | 상황 | 메시지 형식 |
 |------|------------|
-| job accepted | `"접수됨 · <short job_id> · provider · 상태: queued"` |
+| job accepted | `"접수됨 · <short_job_id> · <provider> · 상태: queued"` |
 | job completed | final answer + (optional) remember footer + duration + provider |
 | job failed | 사람이 이해할 수 있는 error summary + `/status` 안내 |
 | job cancelled | queued 취소인지 running 중단인지 명확히 표시 |
@@ -908,6 +908,24 @@ Rules:
   primary reference; only our `storage_objects.id` is durable.
   `source_external_id` is retained **only** so the capture pass can
   fetch the bytes, and it is redacted when it appears in logs.
+- `source_external_id` retention policy — P0 clears the column as
+  soon as it is no longer needed for capture:
+  1. While `capture_status = 'pending'`, `source_external_id` MAY
+     hold the Telegram `file_id` so the capture pass can fetch
+     bytes.
+  2. On `capture_status: pending → captured`, the capture
+     transaction sets `source_external_id = NULL` in the same
+     row-update.
+  3. On `capture_status: pending → failed` where the failure is
+     classified retryable (e.g. transient network), the column is
+     retained until the retry budget is exhausted; when the budget
+     expires the column is cleared.
+  4. On `capture_status: pending → failed` where the failure is
+     non-retryable (oversize, MIME blocklist, auth), the column is
+     cleared in the same transaction.
+  5. The column is not re-populated after being cleared; any later
+     operation that needs the bytes must use the local copy keyed
+     by `storage_objects.id`.
 - The inbound transaction inserts metadata only. Download errors,
   MIME probe failures, and capture-time oversize rejections are
   recorded by the capture pass in
@@ -1612,7 +1630,7 @@ Owns artifact metadata for every durable or session-scoped binary. See
 | `source_turn_id`              | TEXT     | nullable.                                                                                       |
 | `source_message_id`           | TEXT     | nullable; Telegram message id when `source_channel = telegram`.                                 |
 | `source_job_id`               | TEXT     | nullable.                                                                                       |
-| `source_external_id`          | TEXT     | nullable; e.g. Telegram `file_id` used by the capture pass to fetch bytes.                      |
+| `source_external_id`          | TEXT     | nullable; e.g. Telegram `file_id` used by the capture pass to fetch bytes. Cleared to `NULL` when the capture pass succeeds or when a non-retryable capture failure is recorded (see retention policy in §13.5). |
 | `artifact_type`               | TEXT     | `user_upload` \| `generated_artifact` \| `redacted_provider_transcript` \| `conversation_transcript` \| `memory_snapshot` \| `parser_fixture` \| `other`. |
 | `retention_class`             | TEXT     | `ephemeral` \| `session` \| `long_term` \| `archive`.                                           |
 | `visibility`                  | TEXT     | `private` (only value in P0).                                                                   |

@@ -8,10 +8,15 @@
 > when every P0 `Status: pending` below flips to `pass` on the
 > staging host against the pinned versions.
 >
-> IDs use the canonical `AC-<DOMAIN>-<###>` scheme from PRD §17.
+> IDs use the canonical domain-prefixed scheme from PRD §17:
+> `AC-<DOMAIN>-<###>` — e.g. `AC-TEL-001`, `AC-JOB-001`,
+> `AC-PROV-001`, `AC-NOTIF-003`, `AC-STO-006`. Compound IDs use a
+> lowercase suffix letter (`AC-STO-003a`, `AC-STO-003b`) when a
+> single criterion is split into orthogonal acceptance cases.
 > Legacy numeric IDs (`AC01`…`AC30`) from earlier revisions are
-> retained as parenthetical aliases in the `Maps to` line to ease
-> transition. Only the canonical IDs are authoritative.
+> retained **only** as parenthetical aliases in the `Maps to`
+> line to ease transition. Only the canonical domain-prefixed IDs
+> are authoritative.
 >
 > Coverage note: this file currently enumerates the first 30 PRD
 > criteria (everything through `AC-MEM-005` / legacy `AC30
@@ -434,17 +439,25 @@ Each entry uses:
   - `capture_status = 'captured'`, populated `sha256`,
     detected `mime_type` (not user-claimed), non-null
     `size_bytes`, `captured_at` set.
+  - `source_external_id IS NULL` (cleared by the capture
+    transaction per PRD §13.5 retention policy).
   - Local file path exists and its hash matches `sha256`.
   - A `storage_sync` job is enqueued **only if** the retention
     class is S3-eligible per §12.8.3 / §14.1 storage_sync query
     contract.
-- **Oracle (failure row)**:
+- **Oracle (failure row, non-retryable)**:
   - `capture_status = 'failed'`, `capture_error_json` populated
     (redacted), `sha256` / `mime_type` / `size_bytes` remain
     `NULL`, no local bytes held.
+  - `source_external_id IS NULL` (cleared in the same
+    transaction, per PRD §13.5 retention policy).
   - **No** `storage_sync` job is enqueued for this row.
   - The owning `provider_run` still reaches a terminal state; the
     user `turns` row is committed with a capture-failure note.
+- **Oracle (failure row, retryable, still within retry budget)**:
+  - `capture_status = 'failed'`, `capture_error_json` populated.
+  - `source_external_id` retained until the retry budget is
+    exhausted, then cleared.
 - **Status**: pending.
 
 ## AC-STO-004 — Attachment stays `session` without explicit save intent
