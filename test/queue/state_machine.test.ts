@@ -288,14 +288,14 @@ describe("storage_sync job dispatch — uploads pending storage_objects when s3 
     mkdirSync(localDir, { recursive: true });
     writeFileSync(join(localDir, objectId), bytes);
 
-    db.prepare<unknown, [string]>(
+    db.prepare<unknown, [string, string]>(
       `INSERT INTO storage_objects
          (id, storage_backend, bucket, storage_key, source_channel, source_message_id,
           source_job_id, artifact_type, retention_class, capture_status, status, sha256)
        VALUES(?, 's3', 'test-bucket', ?, 'system', '0', NULL, 'user_upload', 'long_term', 'captured', 'pending', 'deadbeef')`,
     ).run(objectId, objectKey);
 
-    db.prepare<unknown, [string]>(
+    db.prepare<unknown, [string, string, string]>(
       `INSERT INTO jobs
          (id, status, job_type, request_json, idempotency_key)
        VALUES(?, 'queued', 'storage_sync', ?, ?)`,
@@ -348,5 +348,44 @@ describe("storage_sync job dispatch — uploads pending storage_objects when s3 
       .get("j-sync-noop")!;
     expect(job.status).toBe("succeeded");
     expect(job.result_json).toContain("noop");
+  });
+});
+
+// ---------------------------------------------------------------
+// System command dispatch — worker handles /status locally
+// ---------------------------------------------------------------
+
+describe("system command dispatch — /status handled locally by worker", () => {
+  test("/status command produces succeeded job and a turn with queue info", async () => {
+    db.prepare<unknown, [string, string, string, string]>(
+      `INSERT INTO jobs
+         (id, status, job_type, session_id, user_id, chat_id, request_json, idempotency_key, provider)
+       VALUES(?, 'queued', 'provider_run', ?, 'user-1', 'chat-1', ?, ?, 'claude')`,
+    ).run(
+      "j-status",
+      "sess-1",
+      JSON.stringify({ command: "/status", args: "", text: "", has_attachments: false }),
+      "telegram:status-test",
+    );
+
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+
+    const job = db
+      .prepare<{ status: string; result_json: string | null }, [string]>(
+        "SELECT status, result_json FROM jobs WHERE id = ?",
+      )
+      .get("j-status")!;
+    expect(job.status).toBe("succeeded");
+
+    // A turn should be created with the status response.
+    const turn = db
+      .prepare<{ role: string; content_redacted: string }, [string]>(
+        "SELECT role, content_redacted FROM turns WHERE job_id = ?",
+      )
+      .get("j-status");
+    expect(turn).not.toBeNull();
+    expect(turn!.role).toBe("assistant");
+    expect(turn!.content_redacted).toContain("queue:");
   });
 });

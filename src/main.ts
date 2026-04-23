@@ -28,12 +28,13 @@ import { openDatabase } from "~/db.ts";
 import { migrate } from "~/db/migrator.ts";
 import { createEmitter } from "~/observability/events.ts";
 import { createRedactor } from "~/observability/redact.ts";
-import { createFakeAdapter } from "~/providers/fake.ts";
+import { createClaudeAdapter } from "~/providers/claude.ts";
 import { runWorkerLoop } from "~/queue/worker.ts";
 import { runStartupRecovery } from "~/startup/recovery.ts";
+import { BunS3Transport } from "~/storage/s3.ts";
+import { MagicMimeProbe } from "~/storage/mime.ts";
+import { BotAPITransport } from "~/telegram/bot_api.ts";
 import { runPoller } from "~/telegram/poller.ts";
-import type { TelegramTransport } from "~/telegram/poller.ts";
-import type { TelegramFileTransport } from "~/telegram/attachment_capture.ts";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -68,33 +69,28 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => controller.abort());
   process.on("SIGINT", () => controller.abort());
 
-  // P0 composition root — wire real transports here. In this
-  // skeleton we panic on transport use so an operator notices if
-  // they launch without a real Telegram client configured yet.
-  const transport: TelegramTransport = {
-    async getUpdates() {
-      throw new Error(
-        "Telegram transport not wired; src/main.ts composition root must be completed before production deploy",
-      );
-    },
-  };
+  // P0 composition root — real transports wired here.
+  const botApi = new BotAPITransport(config.telegram.bot_token);
+  const transport = botApi;
+  const fileTransport = botApi;
 
-  const fileTransport: TelegramFileTransport = {
-    async getFile() {
-      throw new Error("Telegram file transport not wired");
-    },
-    async download() {
-      throw new Error("Telegram file transport not wired");
-    },
-  };
+  const mime = new MagicMimeProbe();
 
-  const mime = {
-    async probe(): Promise<string> {
-      return "application/octet-stream";
-    },
-  };
+  const adapter = createClaudeAdapter({
+    binary: config.runtime.claude_binary,
+    redactor,
+    cwd: process.cwd(),
+  });
 
-  const adapter = createFakeAdapter(); // replaced by createClaudeAdapter in prod wiring.
+  const s3 = new BunS3Transport({
+    endpoint: config.s3.endpoint,
+    bucket: config.s3.bucket,
+    region: config.s3.region,
+    access_key_id: config.s3.access_key_id,
+    secret_access_key: config.s3.secret_access_key,
+  });
+
+  const localObjectsPath = process.env.ACTWYN_OBJECTS_PATH ?? "/var/lib/actwyn/objects";
 
   const inbound = {
     db,
@@ -123,12 +119,42 @@ async function main(): Promise<void> {
         adapter,
         transport: fileTransport,
         mime,
+        s3,
+        outbound: botApi,
         newId: () => crypto.randomUUID(),
         now: () => new Date(),
+        doctor: {
+          required_bun_version: config.runtime.required_bun_version,
+          current_bun_version: Bun.version,
+          bootstrap_whoami: false,
+          telegram_ping: async () => {
+            try {
+              const res = await fetch(`https://api.telegram.org/bot${config.telegram.bot_token}/getMe`);
+              return res.ok ? { ok: true } : { ok: false, detail: `HTTP ${res.status}` };
+            } catch (e) {
+              return { ok: false, detail: (e as Error).message };
+            }
+          },
+          claude_version: async () => {
+            try {
+              const proc = Bun.spawn([config.runtime.claude_binary, "--version"], { stdout: "pipe", stderr: "pipe" });
+              const code = await proc.exited;
+              if (code !== 0) return { ok: false, detail: `exit_code=${code}` };
+              const out = await new Response(proc.stdout).text();
+              return { ok: true, version: out.trim() };
+            } catch (e) {
+              return { ok: false, detail: (e as Error).message };
+            }
+          },
+        },
         config: {
           capture: {
             max_download_size_bytes: 20 * 1024 * 1024,
-            local_path: (id) => `/var/lib/actwyn/objects/${id}.bin`,
+            local_path: (id) => `${localObjectsPath}/${id}`,
+          },
+          sync: {
+            max_attempts: 3,
+            local_path: (id) => `${localObjectsPath}/${id}`,
           },
         },
       },

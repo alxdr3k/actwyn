@@ -25,6 +25,7 @@ export interface RuntimeFileConfig {
   readonly required_bun_version: string;
   readonly log: { readonly level: LogLevel };
   readonly redaction: RedactionConfig;
+  readonly claude_binary: string;
 }
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -165,10 +166,16 @@ function parseRuntimeFile(path: string): RuntimeFileConfig {
     ),
   };
 
+  const claudeBinary =
+    typeof raw.claude_binary === "string" && raw.claude_binary.trim() !== ""
+      ? raw.claude_binary.trim()
+      : "claude";
+
   return {
     required_bun_version: requiredBun.trim(),
     log: { level: log.level as LogLevel },
     redaction: parsed,
+    claude_binary: claudeBinary,
   };
 }
 

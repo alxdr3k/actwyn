@@ -134,4 +134,57 @@ describe("worker → outbound wiring", () => {
       .get()!;
     expect(prun.status).toBe("succeeded");
   });
+
+  test("chunk send failure enqueues a notification_retry job", async () => {
+    seedJob("j-retry-enq", "hello retry");
+    const planText = "echo: hello retry";
+    const transport = new StubOutboundTransport({
+      plan: new Map([[planText, "fail_once"]]),
+    });
+    await runWorkerOnce(buildDeps(transport));
+
+    // A notification_retry job should be queued.
+    const retryJob = db
+      .prepare<{ job_type: string; status: string; request_json: string }>(
+        "SELECT job_type, status, request_json FROM jobs WHERE job_type = 'notification_retry' LIMIT 1",
+      )
+      .get();
+    expect(retryJob).not.toBeNull();
+    expect(retryJob!.job_type).toBe("notification_retry");
+    expect(retryJob!.status).toBe("queued");
+    const req = JSON.parse(retryJob!.request_json) as { notification_id?: string };
+    expect(typeof req.notification_id).toBe("string");
+  });
+
+  test("notification_retry job dispatch retries chunks and marks job succeeded", async () => {
+    seedJob("j-retry-run", "retry me");
+    const planText = "echo: retry me";
+    // Fail on first attempt, succeed on second.
+    const transport = new StubOutboundTransport({
+      plan: new Map([[planText, "fail_once"]]),
+    });
+    // Run the provider job (creates notification_retry job in queue).
+    await runWorkerOnce(buildDeps(transport));
+
+    // Run again to pick up the notification_retry job.
+    await runWorkerOnce(buildDeps(transport));
+
+    const retryJob = db
+      .prepare<{ status: string; result_json: string | null }>(
+        "SELECT status, result_json FROM jobs WHERE job_type = 'notification_retry' LIMIT 1",
+      )
+      .get()!;
+    expect(retryJob.status).toBe("succeeded");
+
+    // The chunk should now be sent.
+    const chunkStatus = db
+      .prepare<{ status: string }>(
+        `SELECT c.status FROM outbound_notification_chunks c
+         JOIN outbound_notifications n ON c.outbound_notification_id = n.id
+         WHERE n.job_id = 'j-retry-run'
+         ORDER BY c.chunk_index ASC LIMIT 1`,
+      )
+      .get()!;
+    expect(chunkStatus.status).toBe("sent");
+  });
 });

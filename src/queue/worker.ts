@@ -35,6 +35,13 @@ import type {
   AgentRequestAttachment,
   ProviderAdapter,
 } from "~/providers/types.ts";
+import { buildStatusReport, formatStatus } from "~/commands/status.ts";
+import { cancelJob } from "~/commands/cancel.ts";
+import { runDoctor, type DoctorDeps } from "~/commands/doctor.ts";
+import { forgetArtifact, forgetLast, forgetMemory, forgetSession } from "~/commands/forget.ts";
+import { saveLastAttachment } from "~/commands/save.ts";
+import { switchProvider } from "~/commands/provider.ts";
+import { whoamiReply } from "~/commands/whoami.ts";
 import { endSession } from "~/commands/summary.ts";
 import { buildContext, type MemoryItemSlot, type TurnSlot } from "~/context/builder.ts";
 import { pack, serializeForProviderRun } from "~/context/packer.ts";
@@ -52,6 +59,7 @@ import {
 import {
   createNotificationAndChunks,
   sendNotification,
+  splitForTelegram,
   type NotificationType,
   type OutboundTransport,
 } from "~/telegram/outbound.ts";
@@ -80,6 +88,8 @@ export interface WorkerDeps {
   readonly outbound?: OutboundTransport | undefined;
   /** Optional: when set, storage_sync jobs call runUploadPass/runDeletePass via this transport. */
   readonly s3?: S3Transport | undefined;
+  /** Optional: when set, /doctor deep checks use these hooks. */
+  readonly doctor?: Pick<DoctorDeps, "required_bun_version" | "current_bun_version" | "bootstrap_whoami" | "telegram_ping" | "s3_ping" | "claude_version"> | undefined;
 }
 
 interface ClaimedJob {
@@ -220,12 +230,22 @@ export async function runOneClaimed(
     return runStorageSyncJob(deps, job);
   }
 
+  if (job.job_type === "notification_retry") {
+    return runNotificationRetryJob(deps, job);
+  }
+
   if (job.job_type !== "provider_run" && job.job_type !== "summary_generation") {
-    // notification_retry and any future non-provider job types: no-op
-    // until explicitly wired. Recording a provider_runs row for these
-    // would violate the invariant that only provider subprocess work
-    // lives there, so we commit a succeeded terminal without one.
+    // Future non-provider job types: no-op until explicitly wired.
     return commitSystemNoop(deps, job);
+  }
+
+  // System commands: handle locally without calling the Claude adapter.
+  if (job.job_type === "provider_run") {
+    const req = JSON.parse(job.request_json) as { command?: string | null; args?: string };
+    const cmd = req.command ?? null;
+    if (cmd && isSystemCommand(cmd)) {
+      return runSystemCommandJob(deps, job, cmd, req.args ?? "", signal);
+    }
   }
 
   const request = parseRequest(job, capture.attachments);
@@ -389,8 +409,9 @@ export async function runOneClaimed(
         chunk_size: deps.config.notifications?.chunk_size,
       },
     });
+    let retryNeeded = false;
     try {
-      await sendNotification(
+      const sendResult = await sendNotification(
         {
           db: deps.db,
           transport: deps.outbound,
@@ -399,6 +420,7 @@ export async function runOneClaimed(
         created.notification_id,
         created.chunks,
       );
+      retryNeeded = sendResult.roll_up_status !== "sent";
     } catch (e) {
       deps.events.warn("telegram.outbound.pass_error", {
         job_id: job.id,
@@ -407,9 +429,11 @@ export async function runOneClaimed(
         error_message: (e as Error).message,
       });
       // Do NOT roll back jobs.status or provider_runs.status here —
-      // the retry scheduler (Phase 5 notification_retry) will pick up
-      // the non-terminal chunk rows. Provider success stands
-      // independently of delivery (PRD AC-NOTIF-001, AC-STO-002).
+      // Provider success stands independently of delivery (AC-NOTIF-001).
+      retryNeeded = true;
+    }
+    if (retryNeeded) {
+      enqueueNotificationRetryJob(deps, created.notification_id, job.chat_id!);
     }
   }
 
@@ -662,8 +686,6 @@ async function runStorageSyncJob(deps: WorkerDeps, job: ClaimedJob): Promise<Run
 }
 
 function commitSystemNoop(deps: WorkerDeps, job: ClaimedJob): RunResult {
-  // Mark the job succeeded without a provider_runs row. Used for
-  // notification_retry and other future non-provider job types.
   deps.db
     .prepare<unknown, [string]>(
       `UPDATE jobs
@@ -675,4 +697,286 @@ function commitSystemNoop(deps: WorkerDeps, job: ClaimedJob): RunResult {
     .run(job.id);
   deps.events.info("queue.job.noop", { job_id: job.id, job_type: job.job_type });
   return { job_id: job.id, terminal: "succeeded", turn_id: null, provider_run_id: "" };
+}
+
+// ---------------------------------------------------------------
+// System command dispatch (local, no Claude subprocess)
+// ---------------------------------------------------------------
+
+const SYSTEM_COMMANDS = new Set([
+  "/status",
+  "/cancel",
+  "/doctor",
+  "/whoami",
+  "/provider",
+  "/save_last_attachment",
+  "/forget_last",
+  "/forget_session",
+  "/forget_artifact",
+  "/forget_memory",
+]);
+
+function isSystemCommand(cmd: string): boolean {
+  return SYSTEM_COMMANDS.has(cmd);
+}
+
+async function runSystemCommandJob(
+  deps: WorkerDeps,
+  job: ClaimedJob,
+  command: string,
+  args: string,
+  _signal?: AbortSignal,
+): Promise<RunResult> {
+  let responseText: string;
+
+  try {
+    responseText = await dispatchSystemCommand(deps, job, command, args);
+  } catch (e) {
+    const errMsg = (e as Error).message;
+    deps.db
+      .prepare<unknown, [string, string]>(
+        `UPDATE jobs
+         SET status = 'failed',
+             finished_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+             error_json = ?
+         WHERE id = ? AND status = 'running'`,
+      )
+      .run(JSON.stringify({ error_type: "command_threw", message: errMsg.slice(0, 200) }), job.id);
+    return { job_id: job.id, terminal: "failed", turn_id: null, provider_run_id: "" };
+  }
+
+  // Persist a turn so the notification retry can reconstruct chunk texts.
+  let turnId: string | null = null;
+  if (job.session_id && responseText.length > 0) {
+    turnId = deps.newId();
+    const redacted = deps.redactor.apply(responseText).text;
+    deps.db
+      .prepare<unknown, [string, string, string, string]>(
+        `INSERT INTO turns(id, session_id, job_id, role, content_redacted, redaction_applied)
+         VALUES(?, ?, ?, 'assistant', ?, 0)`,
+      )
+      .run(turnId, job.session_id, job.id, redacted);
+  }
+
+  deps.db
+    .prepare<unknown, [string, string]>(
+      `UPDATE jobs
+       SET status = 'succeeded',
+           finished_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+           result_json = ?
+       WHERE id = ? AND status = 'running'`,
+    )
+    .run(JSON.stringify({ command, response_length: responseText.length }), job.id);
+
+  deps.events.info("queue.job.system_command", { job_id: job.id, command });
+
+  if (deps.outbound && job.chat_id && responseText.length > 0) {
+    const created = createNotificationAndChunks({
+      db: deps.db,
+      newId: deps.newId,
+      args: {
+        job_id: job.id,
+        chat_id: job.chat_id,
+        notification_type: "job_completed",
+        text: responseText,
+        chunk_size: deps.config.notifications?.chunk_size,
+      },
+    });
+    let retryNeeded = false;
+    try {
+      const sendResult = await sendNotification(
+        { db: deps.db, transport: deps.outbound, events: deps.events },
+        created.notification_id,
+        created.chunks,
+      );
+      retryNeeded = sendResult.roll_up_status !== "sent";
+    } catch {
+      retryNeeded = true;
+    }
+    if (retryNeeded) {
+      enqueueNotificationRetryJob(deps, created.notification_id, job.chat_id);
+    }
+  }
+
+  return { job_id: job.id, terminal: "succeeded", turn_id: turnId, provider_run_id: "" };
+}
+
+async function dispatchSystemCommand(
+  deps: WorkerDeps,
+  job: ClaimedJob,
+  command: string,
+  args: string,
+): Promise<string> {
+  switch (command) {
+    case "/status": {
+      const report = buildStatusReport(deps.db);
+      return formatStatus(report);
+    }
+
+    case "/cancel": {
+      const cancelArgs = job.session_id
+        ? { session_id: job.session_id }
+        : {};
+      const outcome = cancelJob(deps.db, cancelArgs);
+      switch (outcome.kind) {
+        case "cancelled_queued": return `취소됐습니다 (job_id=${outcome.job_id}).`;
+        case "cancel_signalled": return `실행 중인 작업에 취소 신호를 보냈습니다 (job_id=${outcome.job_id}).`;
+        case "not_found": return "취소할 활성 작업이 없습니다.";
+        case "terminal": return `작업은 이미 종료됐습니다 (status=${outcome.status}).`;
+      }
+      break;
+    }
+
+    case "/doctor": {
+      const doctorDeps: DoctorDeps = {
+        db: deps.db,
+        required_bun_version: deps.doctor?.required_bun_version ?? Bun.version,
+        current_bun_version: deps.doctor?.current_bun_version ?? Bun.version,
+        bootstrap_whoami: deps.doctor?.bootstrap_whoami ?? false,
+        ...(deps.doctor?.telegram_ping ? { telegram_ping: deps.doctor.telegram_ping } : {}),
+        ...(deps.doctor?.s3_ping ? { s3_ping: deps.doctor.s3_ping } : {}),
+        ...(deps.doctor?.claude_version ? { claude_version: deps.doctor.claude_version } : {}),
+      };
+      const results = await runDoctor(doctorDeps);
+      const lines = results.map((r) =>
+        `${r.status === "ok" ? "✓" : r.status === "warn" ? "⚠" : "✗"} ${r.name}${r.detail ? `: ${r.detail}` : ""}`,
+      );
+      return lines.join("\n");
+    }
+
+    case "/whoami": {
+      const reply = whoamiReply({
+        user_id: job.user_id,
+        chat_id: job.chat_id,
+        bootstrap: deps.doctor?.bootstrap_whoami ?? false,
+      });
+      return reply.text;
+    }
+
+    case "/provider": {
+      const result = switchProvider({ requested: args });
+      return result.message;
+    }
+
+    case "/save_last_attachment": {
+      if (!job.session_id) return "활성 세션이 없습니다.";
+      const result = saveLastAttachment({
+        db: deps.db,
+        newId: deps.newId,
+        session_id: job.session_id,
+        caption: args || undefined,
+      });
+      return result.promoted
+        ? `첨부 파일을 저장했습니다 (id=${result.storage_object_id}).`
+        : "저장할 수 있는 첨부 파일이 없습니다.";
+    }
+
+    case "/forget_artifact": {
+      const id = args.trim();
+      if (!id) return "사용법: /forget_artifact <storage_object_id>";
+      const result = forgetArtifact(deps.db, id);
+      return result.affected > 0
+        ? `아티팩트(${id})를 삭제 예약했습니다.`
+        : "해당 아티팩트를 찾을 수 없거나 이미 삭제됐습니다.";
+    }
+
+    case "/forget_memory": {
+      const id = args.trim();
+      if (!id) return "사용법: /forget_memory <memory_id>";
+      const result = forgetMemory(deps.db, id);
+      return result.affected > 0 ? `메모리 항목(${id})을 취소했습니다.` : "해당 메모리 항목을 찾을 수 없습니다.";
+    }
+
+    case "/forget_session": {
+      if (!job.session_id) return "활성 세션이 없습니다.";
+      const result = forgetSession(deps.db, job.session_id);
+      return result.affected > 0 ? `세션의 모든 아티팩트를 삭제 예약했습니다.` : "삭제할 아티팩트가 없습니다.";
+    }
+
+    case "/forget_last": {
+      if (!job.session_id) return "활성 세션이 없습니다.";
+      const result = forgetLast(deps.db, job.session_id);
+      return result.affected > 0 ? `마지막 아티팩트를 삭제 예약했습니다.` : "삭제할 아티팩트가 없습니다.";
+    }
+
+    default:
+      return `알 수 없는 시스템 명령: ${command}`;
+  }
+  return "";
+}
+
+// ---------------------------------------------------------------
+// Notification retry job dispatch
+// ---------------------------------------------------------------
+
+async function runNotificationRetryJob(deps: WorkerDeps, job: ClaimedJob): Promise<RunResult> {
+  if (!deps.outbound) {
+    return commitSystemNoop(deps, job);
+  }
+
+  const req = JSON.parse(job.request_json) as { notification_id?: string };
+  if (!req.notification_id) {
+    return commitSystemNoop(deps, job);
+  }
+
+  const notif = deps.db
+    .prepare<{ job_id: string }, [string]>(
+      "SELECT job_id FROM outbound_notifications WHERE id = ?",
+    )
+    .get(req.notification_id);
+  if (!notif) {
+    return commitSystemNoop(deps, job);
+  }
+
+  // Recover chunk texts from the assistant turn for this notification's job.
+  const turn = deps.db
+    .prepare<{ content_redacted: string }, [string]>(
+      "SELECT content_redacted FROM turns WHERE job_id = ? AND role = 'assistant' ORDER BY created_at ASC LIMIT 1",
+    )
+    .get(notif.job_id);
+  const chunks = turn ? splitForTelegram(turn.content_redacted) : [];
+
+  if (chunks.length > 0) {
+    try {
+      await sendNotification(
+        { db: deps.db, transport: deps.outbound, events: deps.events },
+        req.notification_id,
+        chunks,
+      );
+    } catch (e) {
+      deps.events.warn("telegram.outbound.retry_error", {
+        job_id: job.id,
+        notification_id: req.notification_id,
+        error_message: (e as Error).message,
+      });
+    }
+  }
+
+  deps.db
+    .prepare<unknown, [string, string]>(
+      `UPDATE jobs
+       SET status = 'succeeded',
+           finished_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+           result_json = ?
+       WHERE id = ? AND status = 'running'`,
+    )
+    .run(JSON.stringify({ notification_id: req.notification_id, chunks_attempted: chunks.length }), job.id);
+  deps.events.info("queue.job.notification_retry", { job_id: job.id, notification_id: req.notification_id });
+  return { job_id: job.id, terminal: "succeeded", turn_id: null, provider_run_id: "" };
+}
+
+function enqueueNotificationRetryJob(
+  deps: WorkerDeps,
+  notification_id: string,
+  chat_id: string,
+): void {
+  const idempotencyKey = `notif-retry:${notification_id}`;
+  deps.db
+    .prepare<unknown, [string, string, string, string]>(
+      `INSERT INTO jobs(id, status, job_type, chat_id, request_json, idempotency_key)
+       VALUES(?, 'queued', 'notification_retry', ?, ?, ?)
+       ON CONFLICT(job_type, idempotency_key) DO NOTHING`,
+    )
+    .run(deps.newId(), chat_id, JSON.stringify({ notification_id }), idempotencyKey);
+  deps.events.info("queue.job.notification_retry.enqueued", { notification_id });
 }
