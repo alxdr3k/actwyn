@@ -112,10 +112,24 @@ export function runStartupRecovery(
         requeued.push(r.id);
       } else {
         stayed.push(r.id);
-        // Enqueue a job_failed notification for user visibility
-        // (DEC-016). chat_id may be NULL for system jobs — skip.
+        // Enqueue a job_failed notification for user visibility (DEC-016).
+        // chat_id may be NULL for system jobs — skip.
         if (r.chat_id) {
           const notifId = `notif-restart-${r.id}`;
+          const recoveryText = "작업이 중단됐습니다. /status 를 확인하세요.";
+          const turnId = crypto.randomUUID();
+
+          // Create an assistant turn so the notification_retry mechanism
+          // can recover the message text. session_id may be null for
+          // system jobs; use job_id as fallback to satisfy the FK if needed.
+          if (r.session_id) {
+            db.prepare<unknown, [string, string, string, string]>(
+              `INSERT INTO turns(id, session_id, job_id, role, content_redacted, redaction_applied)
+               VALUES(?, ?, ?, 'assistant', ?, 0)
+               ON CONFLICT DO NOTHING`,
+            ).run(turnId, r.session_id, r.id, recoveryText);
+          }
+
           db.prepare<
             unknown,
             [string, string, string, string, number]
@@ -132,6 +146,19 @@ export function runStartupRecovery(
              VALUES(?, ?, 1, 1, ?, 'pending')
              ON CONFLICT(outbound_notification_id, chunk_index) DO NOTHING`,
           ).run(`${notifId}-c1`, notifId, `restart-${r.id}`);
+
+          // Enqueue a notification_retry job so the worker sends it on startup.
+          const retryJobId = crypto.randomUUID();
+          db.prepare<unknown, [string, string, string, string]>(
+            `INSERT INTO jobs(id, status, job_type, chat_id, request_json, idempotency_key)
+             VALUES(?, 'queued', 'notification_retry', ?, ?, ?)
+             ON CONFLICT(job_type, idempotency_key) DO NOTHING`,
+          ).run(
+            retryJobId,
+            r.chat_id,
+            JSON.stringify({ notification_id: notifId }),
+            `notif-retry:${notifId}`,
+          );
         }
       }
     }

@@ -164,6 +164,24 @@ describe("DEC-016 — user-visible restart notification for non-requeued", () =>
         .get("j-requeued")?.n ?? 0;
     expect(n).toBe(0);
   });
+
+  test("non-retryable interrupted job also enqueues a notification_retry job for actual delivery", () => {
+    seedRunningJob({
+      id: "j-notif-retry",
+      ikey: "knr",
+      safe_retry: false,
+    });
+    runStartupRecovery(db);
+    const retryJob = db
+      .prepare<{ job_type: string; status: string; request_json: string }, []>(
+        "SELECT job_type, status, request_json FROM jobs WHERE job_type = 'notification_retry' LIMIT 1",
+      )
+      .get();
+    expect(retryJob).not.toBeNull();
+    expect(retryJob!.status).toBe("queued");
+    const req = JSON.parse(retryJob!.request_json) as { notification_id?: string };
+    expect(typeof req.notification_id).toBe("string");
+  });
 });
 
 describe("orphan sweep — kill_orphan callback", () => {
