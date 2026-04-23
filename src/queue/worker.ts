@@ -483,14 +483,23 @@ export async function runOneClaimed(
             capture_failures: capture.failures,
           })
         : null;
+    // cancelled_after_start (HLD §14.5): set when the subprocess had begun
+    // producing output before teardown, indicating possible side effects.
+    const cancelledAfterStart =
+      (outcome.kind === "cancelled" || outcome.kind === "failed") &&
+      (outcome.response.raw_events.length > 0 || outcome.response.final_text.length > 0);
     const error_json =
       outcome.kind === "failed"
         ? JSON.stringify({
             error_type: outcome.error_type,
             exit_code: outcome.response.exit_code,
+            ...(cancelledAfterStart ? { cancelled_after_start: true } : {}),
           })
         : outcome.kind === "cancelled"
-          ? JSON.stringify({ error_type: "cancelled" })
+          ? JSON.stringify({
+              error_type: "cancelled",
+              ...(cancelledAfterStart ? { cancelled_after_start: true } : {}),
+            })
           : null;
     deps.db
       .prepare<
@@ -556,8 +565,11 @@ export async function runOneClaimed(
   // parent row insert (HLD §6.3); the send pass itself is async
   // and outside that txn.
   if (deps.outbound && job.chat_id) {
-    const notificationType: NotificationType =
-      outcome.kind === "succeeded"
+    // summary_generation uses the 'summary' notification type (PRD §13.3 DEC-012).
+    // All other provider_run jobs use job_completed/job_failed/job_cancelled.
+    const notificationType: NotificationType = isSummaryJob && outcome.kind === "succeeded"
+      ? "summary"
+      : outcome.kind === "succeeded"
         ? "job_completed"
         : outcome.kind === "cancelled"
           ? "job_cancelled"
@@ -1091,13 +1103,15 @@ async function runSystemCommandJob(
   deps.events.info("queue.job.system_command", { job_id: job.id, command });
 
   if (deps.outbound && job.chat_id && responseText.length > 0) {
+    // /doctor responses use the 'doctor' notification type (PRD §13.3 DEC-012).
+    const cmdNotifType: NotificationType = command === "/doctor" ? "doctor" : "job_completed";
     const created = createNotificationAndChunks({
       db: deps.db,
       newId: deps.newId,
       args: {
         job_id: job.id,
         chat_id: job.chat_id,
-        notification_type: "job_completed",
+        notification_type: cmdNotifType,
         text: responseText,
         chunk_size: deps.config.notifications?.chunk_size,
       },
