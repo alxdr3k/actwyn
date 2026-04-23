@@ -26,6 +26,9 @@
 //     no storage_sync job, provider_run still reaches a terminal
 //     status.
 
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+
 import type { DbHandle } from "~/db.ts";
 import type { EventEmitter } from "~/observability/events.ts";
 import type { Redactor } from "~/observability/redact.ts";
@@ -411,6 +414,7 @@ export async function runOneClaimed(
 
   let turnId: string | null = null;
   const finalText = outcome.response.final_text;
+  let pendingSummarySync: { summaryId: string; summaryData: SummaryOutput } | null = null;
 
   deps.db.tx<void>(() => {
     const providerSessionIdFromRun =
@@ -525,11 +529,13 @@ export async function runOneClaimed(
       if (finalText.length > 0) {
         try {
           const raw = JSON.parse(finalText) as SummaryOutput;
-          writeSummary({
+          const summaryData: SummaryOutput = { ...raw, session_id: job.session_id };
+          const result = writeSummary({
             db: deps.db,
             newId: deps.newId,
-            summary: { ...raw, session_id: job.session_id },
+            summary: summaryData,
           });
+          pendingSummarySync = { summaryId: result.summary_id, summaryData };
         } catch {
           // Non-fatal: unstructured output is stored as a turn but not as a memory_summaries row.
         }
@@ -540,6 +546,16 @@ export async function runOneClaimed(
       }
     }
   });
+
+  // AC-MEM-001: write local snapshot file + enqueue storage_sync after summary succeeds.
+  // Runs outside the tx to avoid blocking I/O inside a transaction (HLD §7.10).
+  if (pendingSummarySync !== null && deps.config.sync) {
+    try {
+      await enqueueMemorySnapshotSync(deps, job.id, pendingSummarySync.summaryId, pendingSummarySync.summaryData);
+    } catch {
+      // Non-fatal: sync failure must not roll back the succeeded summary.
+    }
+  }
 
   // Auto-trigger summary check (AC-MEM-005 / PRD §12.3 DEC-019).
   // Only applies to successful conversational provider_run jobs.
@@ -1028,6 +1044,68 @@ function maybeEnqueueAutoSummary(
       error_message: (e as Error).message,
     });
   }
+}
+
+// ---------------------------------------------------------------
+// AC-MEM-001: memory snapshot → local file + storage_sync enqueue
+// ---------------------------------------------------------------
+
+async function enqueueMemorySnapshotSync(
+  deps: WorkerDeps,
+  jobId: string,
+  summaryId: string,
+  summary: SummaryOutput,
+): Promise<void> {
+  const sync = deps.config.sync!;
+  const content = JSON.stringify(summary) + "\n";
+  const bytes = new TextEncoder().encode(content);
+
+  const sha256Buf = await crypto.subtle.digest("SHA-256", bytes);
+  const sha256Hex = Array.from(new Uint8Array(sha256Buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+
+  const objectId = deps.newId();
+  const now = deps.now();
+  const yyyy = now.getUTCFullYear().toString();
+  const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(now.getUTCDate()).padStart(2, "0");
+  const storageKey = `objects/${yyyy}/${mm}/${dd}/${objectId}/${sha256Hex}.jsonl`;
+  const localPath = sync.local_path(objectId);
+
+  // Write local file outside tx (HLD §7.10: no blocking I/O inside transactions).
+  mkdirSync(dirname(localPath), { recursive: true });
+  writeFileSync(localPath, bytes);
+
+  // Atomic: create storage_objects row + update summary FK + enqueue storage_sync.
+  deps.db.tx<void>(() => {
+    deps.db
+      .prepare<unknown, [string, string, number, string, string, string]>(
+        `INSERT INTO storage_objects
+           (id, storage_backend, storage_key, mime_type, size_bytes, sha256,
+            source_channel, source_job_id, artifact_type, retention_class,
+            capture_status, status, captured_at)
+         VALUES(?, 's3', ?, 'application/jsonl', ?, ?,
+                'system', ?, 'memory_snapshot', 'long_term',
+                'captured', 'pending', strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
+      )
+      .run(objectId, storageKey, bytes.length, sha256Hex, jobId);
+
+    deps.db
+      .prepare<unknown, [string, string]>(
+        `UPDATE memory_summaries SET storage_key = ? WHERE id = ?`,
+      )
+      .run(storageKey, summaryId);
+
+    const syncJobId = deps.newId();
+    deps.db
+      .prepare<unknown, [string, string]>(
+        `INSERT INTO jobs(id, status, job_type, request_json, idempotency_key)
+         VALUES(?, 'queued', 'storage_sync', '{}', ?)
+         ON CONFLICT(job_type, idempotency_key) DO NOTHING`,
+      )
+      .run(syncJobId, `sync:${objectId}`);
+  });
 }
 
 // ---------------------------------------------------------------

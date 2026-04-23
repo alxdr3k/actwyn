@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -257,6 +257,100 @@ describe("/end: summary_generation job marks session ended on success", () => {
       .prepare<{ status: string }>("SELECT status FROM sessions WHERE id = 'sess-1'")
       .get()!;
     expect(sess.status).toBe("ended");
+  });
+});
+
+// ---------------------------------------------------------------
+// AC-MEM-001: summary_generation → local file + storage_sync job
+// ---------------------------------------------------------------
+
+describe("AC-MEM-001 — summary_generation writes local file + enqueues storage_sync", () => {
+  test("succeeded summary creates storage_objects row + local file + storage_sync job", async () => {
+    const summaryJson = JSON.stringify({
+      session_id: "sess-1",
+      summary_type: "session",
+      facts: [{ content: "fact", provenance: "observed", confidence: 0.8 }],
+      preferences: [],
+      open_tasks: [],
+      decisions: [],
+      cautions: [],
+      source_turn_ids: [],
+    });
+
+    db.prepare<unknown, [string, string, string, string]>(
+      `INSERT INTO jobs
+         (id, status, job_type, session_id, user_id, chat_id, request_json, idempotency_key, provider)
+       VALUES(?, 'queued', 'summary_generation', ?, 'user-1', 'chat-1', ?, ?, 'fake')`,
+    ).run(
+      "j-mem001",
+      "sess-1",
+      JSON.stringify({ text: "", command: "/summary", args: "", has_attachments: false }),
+      "telegram:mem001",
+    );
+
+    const localDir = join(workdir, "objects");
+    const syncDeps = deps({
+      summaryAdapter: {
+        name: "fake",
+        run: async () => ({
+          kind: "succeeded" as const,
+          response: {
+            provider: "fake",
+            session_id: "fake-session",
+            final_text: summaryJson,
+            raw_events: [],
+            duration_ms: 1,
+            exit_code: 0,
+            parser_status: "parsed" as const,
+          },
+        }),
+      },
+      config: {
+        capture: { max_download_size_bytes: 20 * 1024 * 1024, local_path: (id: string) => join(localDir, id) },
+        sync: { max_attempts: 3, local_path: (id: string) => join(localDir, id) },
+      },
+    });
+
+    await runWorkerOnce(syncDeps);
+
+    // memory_summaries row inserted
+    const sumRow = db
+      .prepare<{ id: string; storage_key: string | null }>(
+        "SELECT id, storage_key FROM memory_summaries WHERE session_id = 'sess-1' LIMIT 1",
+      )
+      .get();
+    expect(sumRow).not.toBeNull();
+    expect(typeof sumRow!.storage_key).toBe("string");
+    expect(sumRow!.storage_key).toMatch(/^objects\/\d{4}\/\d{2}\/\d{2}\//);
+
+    // storage_objects row created (memory_snapshot, long_term, captured, pending)
+    const so = db
+      .prepare<{ id: string; artifact_type: string; retention_class: string; capture_status: string; status: string; storage_key: string }>(
+        `SELECT id, artifact_type, retention_class, capture_status, status, storage_key
+         FROM storage_objects WHERE artifact_type = 'memory_snapshot' LIMIT 1`,
+      )
+      .get();
+    expect(so).not.toBeNull();
+    expect(so!.artifact_type).toBe("memory_snapshot");
+    expect(so!.retention_class).toBe("long_term");
+    expect(so!.capture_status).toBe("captured");
+    expect(so!.status).toBe("pending");
+    expect(so!.storage_key).toMatch(/^objects\/\d{4}\/\d{2}\/\d{2}\//);
+    // storage_key set on memory_summaries matches storage_objects
+    expect(sumRow!.storage_key).toBe(so!.storage_key);
+
+    // Local file written at local_path(storage_object_id)
+    const localPath = join(localDir, so!.id);
+    expect(existsSync(localPath)).toBe(true);
+
+    // storage_sync job enqueued
+    const syncJob = db
+      .prepare<{ status: string }>(
+        "SELECT status FROM jobs WHERE job_type = 'storage_sync' LIMIT 1",
+      )
+      .get();
+    expect(syncJob).not.toBeNull();
+    expect(syncJob!.status).toBe("queued");
   });
 });
 
