@@ -1,0 +1,56 @@
+; Personal Agent P0 — systemd unit.
+;
+; Install via deploy/install.sh. PRD §15 / §16.2 / HLD §14.3
+; constraints are encoded below:
+;   - Type=simple: the Bun entrypoint runs in the foreground.
+;   - KillMode=control-group: systemd kills the whole process
+;     group so stray subprocesses (Claude CLI) never survive a
+;     restart. This is the last-resort safety net for HLD §14.3.
+;   - Restart=on-failure with RestartSec=5 so transient crashes
+;     auto-recover; PRD §8.5 restart-recovery messages are the
+;     user-visible side of this.
+;   - EnvironmentFile points at a ROOT-only-readable file carrying
+;     TELEGRAM_BOT_TOKEN, S3_*_KEY, etc. (HLD §13.4 / PRD §15).
+;     DO NOT place secrets in this unit file.
+;   - Hardening directives follow systemd-hardening(7) to reduce
+;     blast radius if the process is exploited.
+
+[Unit]
+Description=Personal Agent P0 (actwyn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=actwyn
+Group=actwyn
+WorkingDirectory=/opt/actwyn
+EnvironmentFile=/etc/actwyn/env
+ExecStart=/usr/local/bin/bun run /opt/actwyn/src/main.ts
+
+KillMode=control-group
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+Restart=on-failure
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/actwyn
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
