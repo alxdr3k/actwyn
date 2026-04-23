@@ -1152,6 +1152,29 @@ async function dispatchSystemCommand(
         ? { session_id: job.session_id }
         : {};
       const outcome = cancelJob(deps.db, cancelArgs);
+      // For a queued job that was just cancelled, enqueue a job_cancelled
+      // notification for the cancelled job (HLD §6.2 / PRD §13.3 DEC-012).
+      // The running-job case is handled by the worker when teardown completes.
+      if (outcome.kind === "cancelled_queued" && deps.outbound && job.chat_id) {
+        const cancelNotif = createNotificationAndChunks({
+          db: deps.db,
+          newId: deps.newId,
+          args: {
+            job_id: outcome.job_id,
+            chat_id: job.chat_id,
+            notification_type: "job_cancelled",
+            text: "작업이 취소됐습니다.",
+            chunk_size: deps.config.notifications?.chunk_size,
+          },
+        });
+        sendNotification(
+          { db: deps.db, transport: deps.outbound, events: deps.events },
+          cancelNotif.notification_id,
+          cancelNotif.chunks,
+        ).catch(() => {
+          enqueueNotificationRetryJob(deps, cancelNotif.notification_id, job.chat_id!);
+        });
+      }
       switch (outcome.kind) {
         case "cancelled_queued": return `취소됐습니다 (job_id=${outcome.job_id}).`;
         case "cancel_signalled": return `실행 중인 작업에 취소 신호를 보냈습니다 (job_id=${outcome.job_id}).`;
