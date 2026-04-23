@@ -138,8 +138,182 @@ describe("interrupted_jobs check", () => {
 // AC-OBS-001 — S3 smoke (CI-optional)
 // ---------------------------------------------------------------
 
+// ---------------------------------------------------------------
+// config_loaded check
+// ---------------------------------------------------------------
+
+describe("config_loaded check", () => {
+  test("ok when config_ok returns ok", async () => {
+    const results = await runDoctor({
+      db,
+      ...BASE_DEPS,
+      config_ok: () => ({ ok: true, detail: "all fields present" }),
+    });
+    const check = results.find((r) => r.name === "config_loaded")!;
+    expect(check.status).toBe("ok");
+  });
+
+  test("fail when config_ok returns not ok", async () => {
+    const results = await runDoctor({
+      db,
+      ...BASE_DEPS,
+      config_ok: () => ({ ok: false, detail: "missing TELEGRAM_BOT_TOKEN" }),
+    });
+    const check = results.find((r) => r.name === "config_loaded")!;
+    expect(check.status).toBe("fail");
+    expect(check.detail).toContain("missing");
+  });
+
+  test("omitted when config_ok is not injected", async () => {
+    const results = await runDoctor({ db, ...BASE_DEPS });
+    expect(results.find((r) => r.name === "config_loaded")).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------
+// migrations_applied check
+// ---------------------------------------------------------------
+
+describe("migrations_applied check", () => {
+  test("ok when all expected migrations are applied", async () => {
+    // After migrate(db, MIGRATIONS) in beforeEach, both 001 and 002 are applied.
+    const results = await runDoctor({ db, ...BASE_DEPS, expected_schema_version: 2 });
+    const check = results.find((r) => r.name === "migrations_applied")!;
+    expect(check.status).toBe("ok");
+    expect(check.detail).toContain("applied=2");
+  });
+
+  test("fail when expected version is higher than applied", async () => {
+    const results = await runDoctor({ db, ...BASE_DEPS, expected_schema_version: 99 });
+    const check = results.find((r) => r.name === "migrations_applied")!;
+    expect(check.status).toBe("fail");
+    expect(check.detail).toContain("missing migrations");
+  });
+
+  test("omitted when expected_schema_version is not set", async () => {
+    const results = await runDoctor({ db, ...BASE_DEPS });
+    expect(results.find((r) => r.name === "migrations_applied")).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------
+// redaction_boundary_quick check
+// ---------------------------------------------------------------
+
+describe("redaction_boundary_quick check", () => {
+  test("ok when self-test passes", async () => {
+    const results = await runDoctor({
+      db,
+      ...BASE_DEPS,
+      redaction_self_test: () => ({ ok: true }),
+    });
+    const check = results.find((r) => r.name === "redaction_boundary_quick")!;
+    expect(check.status).toBe("ok");
+  });
+
+  test("fail when self-test fails", async () => {
+    const results = await runDoctor({
+      db,
+      ...BASE_DEPS,
+      redaction_self_test: () => ({ ok: false, detail: "pattern not redacted" }),
+    });
+    const check = results.find((r) => r.name === "redaction_boundary_quick")!;
+    expect(check.status).toBe("fail");
+    expect(check.detail).toContain("not redacted");
+  });
+});
+
+// ---------------------------------------------------------------
+// stale_pending_notifications check
+// ---------------------------------------------------------------
+
+describe("stale_pending_notifications check", () => {
+  test("ok with no pending notifications", async () => {
+    const results = await runDoctor({ db, ...BASE_DEPS });
+    const check = results.find((r) => r.name === "stale_pending_notifications")!;
+    expect(check.status).toBe("ok");
+  });
+
+  test("warn with a pending notification older than threshold", async () => {
+    // Insert the job FK dependency, then the stale notification.
+    db.prepare<unknown, [string, string, string, string]>(
+      `INSERT INTO jobs(id, status, job_type, session_id, chat_id, request_json, idempotency_key, provider)
+       VALUES(?, 'succeeded', 'provider_run', ?, ?, '{}', ?, 'fake')`,
+    ).run("job-stale", "sess-1", "chat-1", "ikey-stale");
+    db.prepare<unknown, [string, string, string, string]>(
+      `INSERT INTO outbound_notifications
+         (id, job_id, chat_id, notification_type, payload_hash, chunk_count, status, created_at)
+       VALUES(?, ?, ?, 'job_completed', 'abc123', 1, 'pending', ?)`,
+    ).run("notif-stale", "job-stale", "chat-1", "2000-01-01T00:00:00.000Z");
+    const results = await runDoctor({ db, ...BASE_DEPS, stale_threshold_ms: 1000 });
+    const check = results.find((r) => r.name === "stale_pending_notifications")!;
+    expect(check.status).toBe("warn");
+    expect(check.detail).toContain("stale_count=1");
+  });
+});
+
+// ---------------------------------------------------------------
+// stale_pending_storage_sync check
+// ---------------------------------------------------------------
+
+describe("stale_pending_storage_sync check", () => {
+  test("ok with no stale storage objects", async () => {
+    const results = await runDoctor({ db, ...BASE_DEPS });
+    const check = results.find((r) => r.name === "stale_pending_storage_sync")!;
+    expect(check.status).toBe("ok");
+  });
+
+  test("warn with a storage object in pending capture status older than threshold", async () => {
+    db.prepare<unknown, [string, string]>(
+      `INSERT INTO storage_objects
+         (id, storage_backend, bucket, storage_key, source_channel, source_message_id,
+          artifact_type, retention_class, capture_status, status, created_at)
+       VALUES(?, 's3', 'b', ?, 'telegram', '1', 'user_upload', 'session', 'pending', 'pending', '2000-01-01T00:00:00.000Z')`,
+    ).run("so-stale", "objects/stale.bin");
+    const results = await runDoctor({ db, ...BASE_DEPS, stale_threshold_ms: 1000 });
+    const check = results.find((r) => r.name === "stale_pending_storage_sync")!;
+    expect(check.status).toBe("warn");
+    expect(check.detail).toContain("stale_count=1");
+  });
+});
+
+// ---------------------------------------------------------------
+// orphan_processes check
+// ---------------------------------------------------------------
+
+describe("orphan_processes check", () => {
+  test("ok with no orphan processes", async () => {
+    const results = await runDoctor({ db, ...BASE_DEPS });
+    const check = results.find((r) => r.name === "orphan_processes")!;
+    expect(check.status).toBe("ok");
+    expect(check.detail).toContain("count=0");
+  });
+
+  test("warn when a provider_run is stuck in started with a process_group_id", async () => {
+    // Insert a job and provider_run to satisfy FK constraints.
+    db.prepare<unknown, [string, string, string, string]>(
+      `INSERT INTO jobs(id, status, job_type, session_id, chat_id, request_json, idempotency_key, provider)
+       VALUES(?, 'running', 'provider_run', ?, ?, '{}', ?, 'fake')`,
+    ).run("j-orphan", "sess-1", "chat-1", "ikey-orphan");
+    db.prepare<unknown, [string, string]>(
+      `INSERT INTO provider_runs(id, job_id, session_id, provider, context_packing_mode, status,
+                                 argv_json_redacted, cwd, injected_snapshot_json, parser_status,
+                                 process_group_id)
+       VALUES(?, ?, 'sess-1', 'fake', 'replay_mode', 'started', '[]', '/tmp', '{}', 'parsed', 12345)`,
+    ).run("pr-orphan", "j-orphan");
+    const results = await runDoctor({ db, ...BASE_DEPS });
+    const check = results.find((r) => r.name === "orphan_processes")!;
+    expect(check.status).toBe("warn");
+    expect(check.detail).toContain("count=1");
+  });
+});
+
+// ---------------------------------------------------------------
+// AC-OBS-001 — S3 smoke (CI-optional)
+// ---------------------------------------------------------------
+
 describe.skipIf(SKIP_S3)("AC-OBS-001 — S3 smoke check via /doctor (requires S3_* env)", () => {
-  test("s3_reachable is ok when credentials and endpoint are valid", async () => {
+  test("s3_endpoint_smoke is ok when credentials and endpoint are valid", async () => {
     const transport = new BunS3Transport({
       endpoint: S3_ENDPOINT!,
       bucket: S3_BUCKET!,
@@ -162,7 +336,7 @@ describe.skipIf(SKIP_S3)("AC-OBS-001 — S3 smoke check via /doctor (requires S3
         }
       },
     });
-    const check = results.find((r) => r.name === "s3_reachable");
+    const check = results.find((r) => r.name === "s3_endpoint_smoke");
     expect(check).not.toBeUndefined();
     expect(check?.status).toBe("ok");
   });

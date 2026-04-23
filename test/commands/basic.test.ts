@@ -248,7 +248,7 @@ describe("/doctor", () => {
     });
     expect(pinged).toBe(1);
     expect(results.some((r) => r.name === "telegram_api_reachable")).toBe(true);
-    expect(results.some((r) => r.name === "s3_reachable")).toBe(true);
+    expect(results.some((r) => r.name === "s3_endpoint_smoke")).toBe(true);
   });
 });
 
