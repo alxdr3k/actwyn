@@ -365,14 +365,20 @@ export async function runOneClaimed(
       outcome.kind === "succeeded" && outcome.response.session_id
         ? outcome.response.session_id
         : null;
+    const usageJson = outcome.response.usage
+      ? JSON.stringify(outcome.response.usage)
+      : null;
+    const providerVersion = outcome.response.provider_version ?? null;
     deps.db
-      .prepare<unknown, [string, string | null, string | null, string | null, string]>(
+      .prepare<unknown, [string, string | null, string | null, string | null, string | null, string | null, string]>(
         `UPDATE provider_runs
          SET status = ?,
              error_type = ?,
              finished_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
              parser_status = ?,
-             provider_session_id = ?
+             provider_session_id = ?,
+             usage_json = ?,
+             provider_version = ?
          WHERE id = ?`,
       )
       .run(
@@ -380,6 +386,8 @@ export async function runOneClaimed(
         outcome.response.error_type ?? null,
         outcome.response.parser_status,
         providerSessionIdFromRun,
+        usageJson,
+        providerVersion,
         providerRunId,
       );
 

@@ -290,8 +290,8 @@ export function commitCaptureSuccess(args: {
           unknown,
           [string, string, string]
         >(
-          `INSERT INTO jobs(id, status, job_type, request_json, idempotency_key)
-           VALUES(?, 'queued', 'storage_sync', ?, ?)
+          `INSERT INTO jobs(id, status, job_type, request_json, idempotency_key, safe_retry, max_attempts)
+           VALUES(?, 'queued', 'storage_sync', ?, ?, 1, 3)
            ON CONFLICT(job_type, idempotency_key) DO NOTHING`,
         )
         .run(

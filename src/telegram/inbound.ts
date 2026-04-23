@@ -283,8 +283,9 @@ export function classifyAndCommit(
       unknown,
       [string, string, string, string, string, string, string, string]
     >(
-      `INSERT INTO jobs(id, status, job_type, session_id, user_id, chat_id, request_json, idempotency_key, provider)
-       VALUES(?, 'queued', ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO jobs(id, status, job_type, session_id, user_id, chat_id, request_json,
+                        idempotency_key, provider, safe_retry, max_attempts)
+       VALUES(?, 'queued', ?, ?, ?, ?, ?, ?, ?, 1, 2)
        ON CONFLICT(job_type, idempotency_key) DO NOTHING`,
     )
     .run(
