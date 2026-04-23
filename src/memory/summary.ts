@@ -18,6 +18,7 @@
 // the structured output.
 
 import type { DbHandle } from "~/db.ts";
+import { insertMemoryItem, type ItemType } from "~/memory/items.ts";
 import { mayPromoteToLongTerm, type Provenance } from "~/memory/provenance.ts";
 
 export interface TriggerInput {
@@ -125,6 +126,7 @@ export interface WriteSummaryResult {
   readonly summary_id: string;
   readonly kept_preferences: number;
   readonly dropped_preferences: number;
+  readonly memory_items_inserted: number;
 }
 
 export function writeSummary(args: {
@@ -187,10 +189,39 @@ export function writeSummary(args: {
       JSON.stringify(args.summary.source_turn_ids),
     );
 
+  // Promote summary items to individual memory_items rows (HLD §6.5, HLD §4.8 line 409).
+  // Each item is inserted with status='active' so the context packer can inject it.
+  let itemsInserted = 0;
+
+  function promoteItems(items: readonly { content: string; provenance: Provenance; confidence: number }[], itemType: ItemType): void {
+    for (const item of items) {
+      try {
+        insertMemoryItem(args.db, args.newId(), {
+          session_id: args.summary.session_id,
+          item_type: itemType,
+          content: item.content,
+          provenance: item.provenance,
+          confidence: item.confidence,
+          source_turn_ids: args.summary.source_turn_ids,
+        });
+        itemsInserted += 1;
+      } catch {
+        // MemoryProvenanceError: skip the item silently; summary row is still valid.
+      }
+    }
+  }
+
+  promoteItems(args.summary.facts, "fact");
+  promoteItems(kept, "preference"); // already provenance-gated above
+  promoteItems(args.summary.open_tasks, "open_task");
+  promoteItems(args.summary.decisions, "decision");
+  promoteItems(args.summary.cautions, "caution");
+
   return {
     summary_id: id,
     kept_preferences: kept.length,
     dropped_preferences: dropped,
+    memory_items_inserted: itemsInserted,
   };
 }
 
