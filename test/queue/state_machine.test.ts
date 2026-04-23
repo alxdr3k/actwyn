@@ -98,12 +98,17 @@ describe("state machine — queued → running → succeeded (fake adapter)", ()
     expect(prun.status).toBe("succeeded");
     expect(prun.parser_status).toBe("parsed");
 
-    const turn = row<{ role: string; content_redacted: string }>(
-      "SELECT role, content_redacted FROM turns WHERE job_id = ?",
-      ["j-ok"],
-    );
-    expect(turn.role).toBe("assistant");
-    expect(turn.content_redacted).toContain("echo: hello");
+    // Expect a user turn (message) followed by an assistant turn (response).
+    const turns = db
+      .prepare<{ role: string; content_redacted: string }, [string]>(
+        "SELECT role, content_redacted FROM turns WHERE job_id = ? ORDER BY created_at ASC",
+      )
+      .all("j-ok");
+    expect(turns.length).toBe(2);
+    expect(turns[0]!.role).toBe("user");
+    expect(turns[0]!.content_redacted).toBe("hello");
+    expect(turns[1]!.role).toBe("assistant");
+    expect(turns[1]!.content_redacted).toContain("echo: hello");
   });
 });
 

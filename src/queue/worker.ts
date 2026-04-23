@@ -392,6 +392,17 @@ export async function runOneClaimed(
       );
 
     if (finalText.length > 0 && job.session_id) {
+      // Insert user turn first (chronological order) for non-summary provider_run jobs.
+      // Summary generation is an internal operation and does not produce a user turn.
+      if (!isSummaryJob && request.message.length > 0) {
+        const redactedUserMsg = deps.redactor.apply(request.message).text;
+        deps.db
+          .prepare<unknown, [string, string, string, string, string]>(
+            `INSERT INTO turns(id, session_id, job_id, provider_run_id, role, content_redacted, redaction_applied)
+             VALUES(?, ?, ?, ?, 'user', ?, 1)`,
+          )
+          .run(deps.newId(), job.session_id, job.id, providerRunId, redactedUserMsg);
+      }
       turnId = deps.newId();
       const redactedText = deps.redactor.apply(finalText).text;
       deps.db
