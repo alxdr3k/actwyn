@@ -253,3 +253,23 @@ describe("/end: summary_generation job marks session ended on success", () => {
     expect(sess.status).toBe("ended");
   });
 });
+
+// ---------------------------------------------------------------
+// Context snapshot stored in provider_runs.injected_snapshot_json
+// ---------------------------------------------------------------
+
+describe("context snapshot — injected_snapshot_json contains packed context", () => {
+  test("injected_snapshot_json includes mode and slots from context builder", async () => {
+    seedProviderJob("j-snap", "k-snap", "what is 2+2?");
+    await runWorkerOnce(deps());
+
+    const prun = db
+      .prepare<{ injected_snapshot_json: string }, [string]>(
+        "SELECT injected_snapshot_json FROM provider_runs WHERE job_id = ?",
+      )
+      .get("j-snap")!;
+    const snap = JSON.parse(prun.injected_snapshot_json) as { mode?: string; slots?: unknown[] };
+    expect(snap.mode).toBe("replay_mode");
+    expect(Array.isArray(snap.slots)).toBe(true);
+  });
+});

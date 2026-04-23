@@ -36,6 +36,8 @@ import type {
   ProviderAdapter,
 } from "~/providers/types.ts";
 import { endSession } from "~/commands/summary.ts";
+import { buildContext, type MemoryItemSlot, type TurnSlot } from "~/context/builder.ts";
+import { pack, serializeForProviderRun } from "~/context/packer.ts";
 import {
   captureOne,
   commitCaptureFailure,
@@ -521,6 +523,53 @@ function parseRequest(
   return req;
 }
 
+function buildContextSnapshot(args: {
+  db: DbHandle;
+  sessionId: string;
+  req: AgentRequest;
+  redactor: Redactor;
+}): string {
+  if (!args.sessionId) {
+    return JSON.stringify({ attachments: args.req.attachments ?? [], session_id: "" });
+  }
+
+  const turns = args.db
+    .prepare<TurnSlot, [string]>(
+      `SELECT id, role, content_redacted, created_at
+       FROM turns
+       WHERE session_id = ?
+       ORDER BY created_at DESC
+       LIMIT 20`,
+    )
+    .all(args.sessionId)
+    .reverse();
+
+  const memItems = args.db
+    .prepare<MemoryItemSlot, [string]>(
+      `SELECT id, content, provenance, confidence, status
+       FROM memory_items
+       WHERE session_id = ? AND status = 'active'
+       ORDER BY created_at DESC
+       LIMIT 50`,
+    )
+    .all(args.sessionId);
+
+  const snap = buildContext({
+    mode: "replay_mode",
+    user_message: args.req.message,
+    system_identity: "actwyn personal agent",
+    recent_turns: turns,
+    memory_items: memItems,
+  });
+
+  try {
+    const packed = pack(snap, { total_budget_tokens: 6000 });
+    return args.redactor.apply(serializeForProviderRun(packed)).text;
+  } catch {
+    return JSON.stringify({ attachments: args.req.attachments ?? [], session_id: args.sessionId });
+  }
+}
+
 function insertProviderRunStart(args: {
   db: DbHandle;
   id: string;
@@ -534,10 +583,7 @@ function insertProviderRunStart(args: {
     message: args.req.message,
     channel: args.req.channel,
   }));
-  const snapshot = JSON.stringify(args.redactor.applyToJson({
-    attachments: args.req.attachments ?? [],
-    session_id: args.req.session_id,
-  }));
+  const snapshot = buildContextSnapshot(args);
   args.db
     .prepare<
       unknown,
