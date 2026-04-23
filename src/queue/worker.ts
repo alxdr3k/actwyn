@@ -93,7 +93,7 @@ export interface WorkerDeps {
   /** Optional: when set, storage_sync jobs call runUploadPass/runDeletePass via this transport. */
   readonly s3?: S3Transport | undefined;
   /** Optional: when set, /doctor deep checks use these hooks. */
-  readonly doctor?: Pick<DoctorDeps, "required_bun_version" | "current_bun_version" | "bootstrap_whoami" | "telegram_ping" | "s3_ping" | "claude_version"> | undefined;
+  readonly doctor?: Omit<DoctorDeps, "db"> | undefined;
 }
 
 interface ClaimedJob {
@@ -1068,9 +1068,23 @@ async function dispatchSystemCommand(
         required_bun_version: deps.doctor?.required_bun_version ?? Bun.version,
         current_bun_version: deps.doctor?.current_bun_version ?? Bun.version,
         bootstrap_whoami: deps.doctor?.bootstrap_whoami ?? false,
+        ...(deps.doctor?.expected_schema_version !== undefined
+          ? { expected_schema_version: deps.doctor.expected_schema_version } : {}),
+        ...(deps.doctor?.pinned_claude_version
+          ? { pinned_claude_version: deps.doctor.pinned_claude_version } : {}),
+        ...(deps.doctor?.stale_threshold_ms !== undefined
+          ? { stale_threshold_ms: deps.doctor.stale_threshold_ms } : {}),
+        ...(deps.doctor?.config_ok ? { config_ok: deps.doctor.config_ok } : {}),
+        ...(deps.doctor?.redaction_self_test
+          ? { redaction_self_test: deps.doctor.redaction_self_test } : {}),
         ...(deps.doctor?.telegram_ping ? { telegram_ping: deps.doctor.telegram_ping } : {}),
         ...(deps.doctor?.s3_ping ? { s3_ping: deps.doctor.s3_ping } : {}),
         ...(deps.doctor?.claude_version ? { claude_version: deps.doctor.claude_version } : {}),
+        ...(deps.doctor?.disk_check ? { disk_check: deps.doctor.disk_check } : {}),
+        ...(deps.doctor?.claude_lockdown_smoke
+          ? { claude_lockdown_smoke: deps.doctor.claude_lockdown_smoke } : {}),
+        ...(deps.doctor?.subprocess_teardown_smoke
+          ? { subprocess_teardown_smoke: deps.doctor.subprocess_teardown_smoke } : {}),
       };
       const results = await runDoctor(doctorDeps);
       const lines = results.map((r) =>

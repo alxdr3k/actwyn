@@ -137,6 +137,26 @@ async function main(): Promise<void> {
           required_bun_version: config.runtime.required_bun_version,
           current_bun_version: Bun.version,
           bootstrap_whoami: false,
+          expected_schema_version: 2,
+          config_ok: () => {
+            // Verify config fields are not empty (loadConfig already validates, but
+            // this self-test runs inside the live process after boot).
+            const missing: string[] = [];
+            if (!config.telegram.bot_token) missing.push("TELEGRAM_BOT_TOKEN");
+            if (!config.telegram.authorized_user_id) missing.push("AUTHORIZED_TELEGRAM_USER_ID");
+            if (!config.s3.endpoint) missing.push("S3_ENDPOINT");
+            if (!config.s3.bucket) missing.push("S3_BUCKET");
+            if (missing.length > 0) {
+              return { ok: false, detail: `empty fields: ${missing.join(", ")}` };
+            }
+            return { ok: true, detail: `path=${config.config_path}` };
+          },
+          redaction_self_test: () => {
+            const sentinel = "Bearer actwyn_selftest_abc123XYZ_sentinel";
+            const result = redactor.apply(sentinel).text;
+            const ok = !result.includes("actwyn_selftest_abc123XYZ_sentinel");
+            return ok ? { ok: true } : { ok: false, detail: "bearer token not redacted" };
+          },
           s3_ping: () => s3.ping(),
           telegram_ping: async () => {
             try {
