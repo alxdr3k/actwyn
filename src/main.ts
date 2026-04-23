@@ -59,11 +59,27 @@ async function main(): Promise<void> {
   const db = openDatabase({ path: resolveDbPath() });
   migrate(db, resolveMigrationsPath());
 
-  const recovery = runStartupRecovery(db, { events });
+  const recovery = runStartupRecovery(db, {
+    events,
+    kill_orphan: (pgid) => {
+      try {
+        process.kill(-pgid, 0); // check alive
+      } catch {
+        return "already_gone";
+      }
+      try {
+        process.kill(-pgid, "SIGKILL");
+      } catch {
+        // best-effort; log via events but don't crash boot
+      }
+      return "alive_killed";
+    },
+  });
   events.info("boot.recovery", {
     interrupted: recovery.interrupted.length,
     requeued: recovery.requeued.length,
     remained_interrupted: recovery.remained_interrupted.length,
+    orphans_killed: recovery.orphans_killed.length,
   });
 
   // DEC-009: record bootstrap expiry timestamp when BOOTSTRAP_WHOAMI=true.

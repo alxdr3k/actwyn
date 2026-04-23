@@ -449,6 +449,7 @@ export async function runOneClaimed(
   let turnId: string | null = null;
   const finalText = outcome.response.final_text;
   const summaryResult = { sync: null as { summaryId: string; summaryData: SummaryOutput } | null };
+  let pendingNotification: { notification_id: string; chunks: readonly string[] } | null = null;
 
   deps.db.tx<void>(() => {
     const providerSessionIdFromRun =
@@ -630,13 +631,10 @@ export async function runOneClaimed(
     capture_failures: capture.failures,
   });
 
-  // Outbound notification (optional at the worker level; wired by
-  // Phase 5 tests + prod). Chunk creation is atomic with the
-  // parent row insert (HLD §6.3); the send pass itself is async
-  // and outside that txn.
+  // Outbound notification: create rows in their own txn immediately after T5 completes
+  // (HLD §7.10: notification creation uses its own transaction; T5 does not allow nesting
+  // because createNotificationAndChunks wraps inserts in db.tx() internally).
   if (deps.outbound && job.chat_id) {
-    // summary_generation uses the 'summary' notification type (PRD §13.3 DEC-012).
-    // All other provider_run jobs use job_completed/job_failed/job_cancelled.
     const notificationType: NotificationType = isSummaryJob && outcome.kind === "succeeded"
       ? "summary"
       : outcome.kind === "succeeded"
@@ -644,7 +642,7 @@ export async function runOneClaimed(
         : outcome.kind === "cancelled"
           ? "job_cancelled"
           : "job_failed";
-    const text = (isSummaryJob && summaryResult.sync !== null)
+    const notifText = (isSummaryJob && summaryResult.sync !== null)
       ? buildSummaryNotificationText(summaryResult.sync.summaryData)
       : buildNotificationText(outcome.kind, outcome.response.final_text, {
           duration_ms: outcome.response.duration_ms,
@@ -657,10 +655,16 @@ export async function runOneClaimed(
         job_id: job.id,
         chat_id: job.chat_id,
         notification_type: notificationType,
-        text,
+        text: notifText,
         chunk_size: deps.config.notifications?.chunk_size,
       },
     });
+    pendingNotification = { notification_id: created.notification_id, chunks: created.chunks };
+  }
+
+  // Send the notification (network I/O outside any transaction per HLD §7.10).
+  if (deps.outbound && job.chat_id && pendingNotification !== null) {
+    const { notification_id, chunks } = pendingNotification;
     let retryNeeded = false;
     try {
       const sendResult = await sendNotification(
@@ -669,14 +673,14 @@ export async function runOneClaimed(
           transport: deps.outbound,
           events: deps.events,
         },
-        created.notification_id,
-        created.chunks,
+        notification_id,
+        chunks,
       );
       retryNeeded = sendResult.roll_up_status !== "sent";
     } catch (e) {
       deps.events.warn("telegram.outbound.pass_error", {
         job_id: job.id,
-        notification_id: created.notification_id,
+        notification_id,
         error_type: (e as Error).name,
         error_message: (e as Error).message,
       });
@@ -685,7 +689,7 @@ export async function runOneClaimed(
       retryNeeded = true;
     }
     if (retryNeeded) {
-      enqueueNotificationRetryJob(deps, created.notification_id, job.chat_id!);
+      enqueueNotificationRetryJob(deps, notification_id, job.chat_id!);
     }
   }
 
