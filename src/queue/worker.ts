@@ -44,10 +44,19 @@ import {
   type MimeProbe,
   type TelegramFileTransport,
 } from "~/telegram/attachment_capture.ts";
+import {
+  createNotificationAndChunks,
+  sendNotification,
+  type NotificationType,
+  type OutboundTransport,
+} from "~/telegram/outbound.ts";
 
 export interface WorkerConfig {
   readonly capture: CaptureConfig;
-  readonly poll_interval_ms?: number;
+  readonly poll_interval_ms?: number | undefined;
+  readonly notifications?: {
+    readonly chunk_size?: number | undefined;
+  } | undefined;
 }
 
 export interface WorkerDeps {
@@ -60,6 +69,8 @@ export interface WorkerDeps {
   readonly newId: () => string;
   readonly now: () => Date;
   readonly config: WorkerConfig;
+  /** Optional: when set, terminal transitions enqueue an outbound notification and send it. */
+  readonly outbound?: OutboundTransport | undefined;
 }
 
 interface ClaimedJob {
@@ -332,6 +343,53 @@ export async function runOneClaimed(
     capture_failures: capture.failures,
   });
 
+  // Outbound notification (optional at the worker level; wired by
+  // Phase 5 tests + prod). Chunk creation is atomic with the
+  // parent row insert (HLD §6.3); the send pass itself is async
+  // and outside that txn.
+  if (deps.outbound && job.chat_id) {
+    const notificationType: NotificationType =
+      outcome.kind === "succeeded"
+        ? "job_completed"
+        : outcome.kind === "cancelled"
+          ? "job_cancelled"
+          : "job_failed";
+    const text = buildNotificationText(outcome.kind, outcome.response.final_text);
+    const created = createNotificationAndChunks({
+      db: deps.db,
+      newId: deps.newId,
+      args: {
+        job_id: job.id,
+        chat_id: job.chat_id,
+        notification_type: notificationType,
+        text,
+        chunk_size: deps.config.notifications?.chunk_size,
+      },
+    });
+    try {
+      await sendNotification(
+        {
+          db: deps.db,
+          transport: deps.outbound,
+          events: deps.events,
+        },
+        created.notification_id,
+        created.chunks,
+      );
+    } catch (e) {
+      deps.events.warn("telegram.outbound.pass_error", {
+        job_id: job.id,
+        notification_id: created.notification_id,
+        error_type: (e as Error).name,
+        error_message: (e as Error).message,
+      });
+      // Do NOT roll back jobs.status or provider_runs.status here —
+      // the retry scheduler (Phase 5 notification_retry) will pick up
+      // the non-terminal chunk rows. Provider success stands
+      // independently of delivery (PRD AC-NOTIF-001, AC-STO-002).
+    }
+  }
+
   const terminal: RunResult["terminal"] =
     outcome.kind === "succeeded"
       ? "succeeded"
@@ -339,6 +397,19 @@ export async function runOneClaimed(
         ? "cancelled"
         : "failed";
   return { job_id: job.id, terminal, turn_id: turnId, provider_run_id: providerRunId };
+}
+
+function buildNotificationText(
+  kind: "succeeded" | "failed" | "cancelled",
+  finalText: string,
+): string {
+  if (kind === "succeeded") {
+    return finalText.length > 0 ? finalText : "(empty response)";
+  }
+  if (kind === "cancelled") {
+    return "작업이 취소됐습니다.";
+  }
+  return finalText.length > 0 ? finalText : "작업이 실패했습니다. /status 를 확인하세요.";
 }
 
 // ---------------------------------------------------------------

@@ -1,0 +1,137 @@
+// Worker → outbound wiring: a succeeded provider_run produces a
+// job_completed notification with a chunk ledger that the stub
+// transport delivers end to end.
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { openDatabase, type DbHandle } from "../../src/db.ts";
+import { migrate } from "../../src/db/migrator.ts";
+import { createEmitter } from "../../src/observability/events.ts";
+import { createRedactor } from "../../src/observability/redact.ts";
+import { createFakeAdapter } from "../../src/providers/fake.ts";
+import { runWorkerOnce, type WorkerDeps } from "../../src/queue/worker.ts";
+import { StubOutboundTransport } from "../../src/telegram/outbound.ts";
+
+const MIGRATIONS = join(import.meta.dir, "..", "..", "migrations");
+
+let workdir: string;
+let db: DbHandle;
+
+beforeEach(() => {
+  workdir = mkdtempSync(join(tmpdir(), "actwyn-nf-wire-"));
+  db = openDatabase({ path: join(workdir, "t.db"), busyTimeoutMs: 250 });
+  migrate(db, MIGRATIONS);
+  db.prepare<unknown, [string, string, string]>(
+    "INSERT INTO sessions(id, chat_id, user_id) VALUES(?, ?, ?)",
+  ).run("sess-1", "chat-1", "user-1");
+});
+
+afterEach(() => {
+  db.close();
+  rmSync(workdir, { recursive: true, force: true });
+});
+
+function seedJob(id: string, message: string): void {
+  db.prepare<unknown, [string, string, string, string]>(
+    `INSERT INTO jobs
+       (id, status, job_type, session_id, user_id, chat_id, request_json, idempotency_key, provider)
+     VALUES(?, 'queued', 'provider_run', ?, 'user-1', 'chat-1', ?, ?, 'fake')`,
+  ).run(id, "sess-1", JSON.stringify({ text: message }), `ikey-${id}`);
+}
+
+function buildDeps(
+  transport: StubOutboundTransport,
+  overrides: Partial<WorkerDeps> = {},
+): WorkerDeps {
+  let n = 0;
+  return {
+    db,
+    redactor: createRedactor(
+      {
+        email_pii_mode: false,
+        phone_pii_mode: false,
+        high_entropy_min_length: 32,
+        high_entropy_min_bits_per_char: 4.0,
+      },
+      { exact_values: [] },
+    ),
+    events: createEmitter({ level: "error", sink: () => {} }),
+    adapter: createFakeAdapter(),
+    transport: { async getFile() { throw new Error("unused"); }, async download() { throw new Error("unused"); } },
+    mime: { async probe() { return "application/octet-stream"; } },
+    newId: () => `gen-${(++n).toString().padStart(5, "0")}`,
+    now: () => new Date("2026-04-23T00:00:00.000Z"),
+    config: { capture: { max_download_size_bytes: 1, local_path: (id) => `${workdir}/${id}` } },
+    outbound: transport,
+    ...overrides,
+  };
+}
+
+describe("worker → outbound wiring", () => {
+  test("succeeded provider_run → one job_completed notification; all chunks sent; ids recorded", async () => {
+    seedJob("j-ok", "hello");
+    const transport = new StubOutboundTransport();
+    await runWorkerOnce(buildDeps(transport));
+
+    const notif = db
+      .prepare<
+        { id: string; notification_type: string; status: string; chunk_count: number },
+        []
+      >(
+        "SELECT id, notification_type, status, chunk_count FROM outbound_notifications LIMIT 1",
+      )
+      .get()!;
+    expect(notif.notification_type).toBe("job_completed");
+    expect(notif.status).toBe("sent");
+    expect(notif.chunk_count).toBe(1);
+
+    const chunkRows = db
+      .prepare<{ status: string; telegram_message_id: string | null }, [string]>(
+        "SELECT status, telegram_message_id FROM outbound_notification_chunks WHERE outbound_notification_id = ?",
+      )
+      .all(notif.id);
+    expect(chunkRows.every((c) => c.status === "sent")).toBe(true);
+    expect(chunkRows.every((c) => c.telegram_message_id !== null)).toBe(true);
+  });
+
+  test("failed provider_run → one job_failed notification (chunk sends ok, parent=sent)", async () => {
+    seedJob("j-fail", "triggers error");
+    const transport = new StubOutboundTransport();
+    await runWorkerOnce(
+      buildDeps(transport, {
+        adapter: createFakeAdapter({
+          mode: { kind: "error", error_type: "bad_input", exit_code: 2 },
+        }),
+      }),
+    );
+    const row = db
+      .prepare<
+        { notification_type: string; status: string },
+        []
+      >("SELECT notification_type, status FROM outbound_notifications LIMIT 1")
+      .get()!;
+    expect(row.notification_type).toBe("job_failed");
+    expect(row.status).toBe("sent");
+  });
+
+  test("transport failure does NOT roll back jobs.status or provider_runs.status", async () => {
+    seedJob("j-nofail", "will send badly");
+    const planText = "echo: will send badly"; // fake adapter final_text prefix
+    const transport = new StubOutboundTransport({
+      plan: new Map([[planText, "fail_non_retryable"]]),
+    });
+    await runWorkerOnce(buildDeps(transport));
+    const job = db
+      .prepare<{ status: string }>("SELECT status FROM jobs WHERE id='j-nofail'")
+      .get()!;
+    expect(job.status).toBe("succeeded");
+    const prun = db
+      .prepare<{ status: string }>(
+        "SELECT status FROM provider_runs WHERE job_id='j-nofail'",
+      )
+      .get()!;
+    expect(prun.status).toBe("succeeded");
+  });
+});
