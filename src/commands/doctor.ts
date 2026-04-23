@@ -101,11 +101,63 @@ export async function runDoctor(deps: DoctorDeps): Promise<readonly CheckResult[
     }));
   }
 
+  if (deps.telegram_ping) {
+    results.push(await timed("telegram_api_reachable", "quick", async () => {
+      const r = await deps.telegram_ping!();
+      return {
+        status: r.ok ? "ok" : "fail",
+        ...(r.detail ? { detail: r.detail } : {}),
+      };
+    }));
+  }
+
+  if (deps.claude_version) {
+    results.push(await timed("claude_binary_present", "quick", async () => {
+      const r = await deps.claude_version!();
+      return {
+        status: r.ok ? "ok" : "fail",
+        ...(r.detail ? { detail: r.detail } : r.version ? { detail: r.version } : {}),
+      };
+    }));
+
+    if (deps.pinned_claude_version) {
+      results.push(await timed("claude_version_pinned", "quick", async () => {
+        const r = await deps.claude_version!();
+        if (!r.ok) {
+          return { status: "fail", detail: "claude binary not present" };
+        }
+        const actual = r.version ?? "";
+        const pinned = deps.pinned_claude_version!;
+        if (actual === pinned) {
+          return { status: "ok", detail: actual };
+        }
+        return {
+          status: "warn",
+          detail: `pinned=${pinned} actual=${actual}`,
+        };
+      }));
+    }
+  }
+
   results.push(await timed("bootstrap_whoami_guard", "quick", () => {
     // DEC-009: warn if BOOTSTRAP_WHOAMI is still true in steady state.
-    return deps.bootstrap_whoami
-      ? { status: "warn", detail: "BOOTSTRAP_WHOAMI is enabled — disable before production" }
-      : { status: "ok" };
+    if (!deps.bootstrap_whoami) return { status: "ok" };
+    const row = deps.db
+      .prepare<{ value: string }, [string]>(
+        "SELECT value FROM settings WHERE key = ?",
+      )
+      .get("bootstrap_whoami.expires_at");
+    if (row?.value) {
+      const expiresAt = new Date(row.value);
+      const nowMs = Date.now();
+      const remainingMs = expiresAt.getTime() - nowMs;
+      if (remainingMs <= 0) {
+        return { status: "fail", detail: "BOOTSTRAP_WHOAMI expired — restart service to clear" };
+      }
+      const remainingMin = Math.ceil(remainingMs / 60_000);
+      return { status: "warn", detail: `BOOTSTRAP_WHOAMI active, expires in ${remainingMin}m — disable before production` };
+    }
+    return { status: "warn", detail: "BOOTSTRAP_WHOAMI is enabled — disable before production" };
   }));
 
   results.push(await timed("storage_sync_backlog", "quick", () => {
@@ -125,55 +177,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<readonly CheckResult[
     };
   }));
 
-  results.push(await timed("interrupted_jobs", "quick", () => {
-    const row = deps.db
-      .prepare<{ n: number }>(
-        `SELECT COUNT(*) AS n FROM jobs WHERE status = 'interrupted'`,
-      )
-      .get();
-    const n = row?.n ?? 0;
-    return { status: n > 0 ? "warn" : "ok", detail: `count=${n}` };
-  }));
-
   // --- Deep checks ---
-
-  if (deps.telegram_ping) {
-    results.push(await timed("telegram_api_reachable", "deep", async () => {
-      const r = await deps.telegram_ping!();
-      return {
-        status: r.ok ? "ok" : "fail",
-        ...(r.detail ? { detail: r.detail } : {}),
-      };
-    }));
-  }
-
-  if (deps.claude_version) {
-    results.push(await timed("claude_binary_present", "deep", async () => {
-      const r = await deps.claude_version!();
-      return {
-        status: r.ok ? "ok" : "fail",
-        ...(r.detail ? { detail: r.detail } : r.version ? { detail: r.version } : {}),
-      };
-    }));
-
-    if (deps.pinned_claude_version) {
-      results.push(await timed("claude_version_pinned", "deep", async () => {
-        const r = await deps.claude_version!();
-        if (!r.ok) {
-          return { status: "fail", detail: "claude binary not present" };
-        }
-        const actual = r.version ?? "";
-        const pinned = deps.pinned_claude_version!;
-        if (actual === pinned) {
-          return { status: "ok", detail: actual };
-        }
-        return {
-          status: "warn",
-          detail: `pinned=${pinned} actual=${actual}`,
-        };
-      }));
-    }
-  }
 
   if (deps.s3_ping) {
     results.push(await timed("s3_endpoint_smoke", "deep", async () => {
@@ -259,6 +263,16 @@ export async function runDoctor(deps: DoctorDeps): Promise<readonly CheckResult[
       status: n > 0 ? "warn" : "ok",
       detail: `count=${n}`,
     };
+  }));
+
+  results.push(await timed("interrupted_jobs", "deep", () => {
+    const row = deps.db
+      .prepare<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM jobs WHERE status = 'interrupted'`,
+      )
+      .get();
+    const n = row?.n ?? 0;
+    return { status: n > 0 ? "warn" : "ok", detail: `count=${n}` };
   }));
 
   return results;

@@ -95,7 +95,7 @@ export function runStartupRecovery(
         safe_retry: safe,
         attempts: r.attempts,
         max_attempts: r.max_attempts,
-        user_visible: !safe,
+        user_visible: !!r.chat_id,
       });
 
       if (safe) {
@@ -110,55 +110,17 @@ export function runStartupRecovery(
            WHERE id = ? AND status = 'interrupted'`,
         ).run(r.id);
         requeued.push(r.id);
+        // DEC-016: notify user that the interrupted job will be retried.
+        if (r.chat_id) {
+          enqueueRecoveryNotification(db, r.id, r.chat_id, r.session_id, "job_accepted",
+            "중단된 작업을 복구해 다시 실행합니다.", `restart-safe-${r.id}`);
+        }
       } else {
         stayed.push(r.id);
-        // Enqueue a job_failed notification for user visibility (DEC-016).
-        // chat_id may be NULL for system jobs — skip.
+        // DEC-016: notify user that the interrupted job will NOT be retried.
         if (r.chat_id) {
-          const notifId = `notif-restart-${r.id}`;
-          const recoveryText = "작업이 중단됐습니다. /status 를 확인하세요.";
-          const turnId = crypto.randomUUID();
-
-          // Create an assistant turn so the notification_retry mechanism
-          // can recover the message text. session_id may be null for
-          // system jobs; use job_id as fallback to satisfy the FK if needed.
-          if (r.session_id) {
-            db.prepare<unknown, [string, string, string, string]>(
-              `INSERT INTO turns(id, session_id, job_id, role, content_redacted, redaction_applied)
-               VALUES(?, ?, ?, 'assistant', ?, 0)
-               ON CONFLICT DO NOTHING`,
-            ).run(turnId, r.session_id, r.id, recoveryText);
-          }
-
-          db.prepare<
-            unknown,
-            [string, string, string, string, number]
-          >(
-            `INSERT INTO outbound_notifications
-               (id, job_id, chat_id, notification_type, payload_hash, chunk_count, status)
-             VALUES(?, ?, ?, 'job_failed', ?, ?, 'pending')
-             ON CONFLICT(job_id, notification_type, payload_hash) DO NOTHING`,
-          ).run(notifId, r.id, r.chat_id, `restart-${r.id}`, 1);
-          // Insert one chunk row so the ledger is valid.
-          db.prepare<unknown, [string, string, string]>(
-            `INSERT INTO outbound_notification_chunks
-               (id, outbound_notification_id, chunk_index, chunk_count, payload_text_hash, status)
-             VALUES(?, ?, 1, 1, ?, 'pending')
-             ON CONFLICT(outbound_notification_id, chunk_index) DO NOTHING`,
-          ).run(`${notifId}-c1`, notifId, `restart-${r.id}`);
-
-          // Enqueue a notification_retry job so the worker sends it on startup.
-          const retryJobId = crypto.randomUUID();
-          db.prepare<unknown, [string, string, string, string]>(
-            `INSERT INTO jobs(id, status, job_type, chat_id, request_json, idempotency_key)
-             VALUES(?, 'queued', 'notification_retry', ?, ?, ?)
-             ON CONFLICT(job_type, idempotency_key) DO NOTHING`,
-          ).run(
-            retryJobId,
-            r.chat_id,
-            JSON.stringify({ notification_id: notifId }),
-            `notif-retry:${notifId}`,
-          );
+          enqueueRecoveryNotification(db, r.id, r.chat_id, r.session_id, "job_failed",
+            "작업이 중단되어 자동 재시도하지 않았습니다.", `restart-${r.id}`);
         }
       }
     }
@@ -230,4 +192,51 @@ export function runStartupRecovery(
     orphans_killed: orphans,
     offset_fast_forward,
   };
+}
+
+function enqueueRecoveryNotification(
+  db: DbHandle,
+  jobId: string,
+  chatId: string,
+  sessionId: string | null,
+  notifType: "job_accepted" | "job_failed",
+  text: string,
+  payloadHash: string,
+): void {
+  const notifId = `notif-restart-${jobId}-${notifType}`;
+  const turnId = crypto.randomUUID();
+
+  if (sessionId) {
+    db.prepare<unknown, [string, string, string, string]>(
+      `INSERT INTO turns(id, session_id, job_id, role, content_redacted, redaction_applied)
+       VALUES(?, ?, ?, 'assistant', ?, 0)
+       ON CONFLICT DO NOTHING`,
+    ).run(turnId, sessionId, jobId, text);
+  }
+
+  db.prepare<unknown, [string, string, string, string, string, number]>(
+    `INSERT INTO outbound_notifications
+       (id, job_id, chat_id, notification_type, payload_hash, chunk_count, status)
+     VALUES(?, ?, ?, ?, ?, ?, 'pending')
+     ON CONFLICT(job_id, notification_type, payload_hash) DO NOTHING`,
+  ).run(notifId, jobId, chatId, notifType, payloadHash, 1);
+
+  db.prepare<unknown, [string, string, string]>(
+    `INSERT INTO outbound_notification_chunks
+       (id, outbound_notification_id, chunk_index, chunk_count, payload_text_hash, status)
+     VALUES(?, ?, 1, 1, ?, 'pending')
+     ON CONFLICT(outbound_notification_id, chunk_index) DO NOTHING`,
+  ).run(`${notifId}-c1`, notifId, payloadHash);
+
+  const retryJobId = crypto.randomUUID();
+  db.prepare<unknown, [string, string, string, string]>(
+    `INSERT INTO jobs(id, status, job_type, chat_id, request_json, idempotency_key)
+     VALUES(?, 'queued', 'notification_retry', ?, ?, ?)
+     ON CONFLICT(job_type, idempotency_key) DO NOTHING`,
+  ).run(
+    retryJobId,
+    chatId,
+    JSON.stringify({ notification_id: notifId }),
+    `notif-retry:${notifId}`,
+  );
 }

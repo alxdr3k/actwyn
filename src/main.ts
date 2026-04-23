@@ -29,6 +29,7 @@ import { migrate } from "~/db/migrator.ts";
 import { createEmitter } from "~/observability/events.ts";
 import { createRedactor } from "~/observability/redact.ts";
 import { createClaudeAdapter } from "~/providers/claude.ts";
+import { runDoctor } from "~/commands/doctor.ts";
 import { runWorkerLoop } from "~/queue/worker.ts";
 import { runStartupRecovery } from "~/startup/recovery.ts";
 import { BunS3Transport } from "~/storage/s3.ts";
@@ -65,6 +66,17 @@ async function main(): Promise<void> {
     remained_interrupted: recovery.remained_interrupted.length,
   });
 
+  // DEC-009: record bootstrap expiry timestamp when BOOTSTRAP_WHOAMI=true.
+  if (config.bootstrap_whoami) {
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    db.prepare<unknown, [string]>(
+      `INSERT INTO settings(key, value, updated_at)
+       VALUES('bootstrap_whoami.expires_at', ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    ).run(expiresAt);
+    events.warn("boot.bootstrap_whoami.enabled", { expires_at: expiresAt });
+  }
+
   const controller = new AbortController();
   process.on("SIGTERM", () => controller.abort());
   process.on("SIGINT", () => controller.abort());
@@ -100,13 +112,14 @@ async function main(): Promise<void> {
   });
 
   const localObjectsPath = process.env.ACTWYN_OBJECTS_PATH ?? "/var/lib/actwyn/objects";
+  const memoryBasePath = process.env.ACTWYN_MEMORY_PATH ?? "/var/lib/actwyn/memory";
 
   const inbound = {
     db,
     redactor,
     config: {
       authorized_user_ids: new Set([config.telegram.authorized_user_id]),
-      bootstrap_whoami: false,
+      bootstrap_whoami: config.bootstrap_whoami,
       attachment: { max_inbound_size_bytes: 20 * 1024 * 1024 },
       s3_bucket: config.s3.bucket,
     },
@@ -114,10 +127,85 @@ async function main(): Promise<void> {
     now: () => new Date(),
   } as const;
 
+  const doctorDeps = {
+    db,
+    required_bun_version: config.runtime.required_bun_version,
+    current_bun_version: Bun.version,
+    bootstrap_whoami: config.bootstrap_whoami,
+    expected_schema_version: 2,
+    config_ok: () => {
+      const missing: string[] = [];
+      if (!config.telegram.bot_token) missing.push("TELEGRAM_BOT_TOKEN");
+      if (!config.telegram.authorized_user_id) missing.push("AUTHORIZED_TELEGRAM_USER_ID");
+      if (!config.s3.endpoint) missing.push("S3_ENDPOINT");
+      if (!config.s3.bucket) missing.push("S3_BUCKET");
+      if (missing.length > 0) {
+        return { ok: false, detail: `empty fields: ${missing.join(", ")}` };
+      }
+      return { ok: true, detail: `path=${config.config_path}` };
+    },
+    redaction_self_test: () => {
+      const sentinel = "Bearer actwyn_selftest_abc123XYZ_sentinel";
+      const result = redactor.apply(sentinel).text;
+      const ok = !result.includes("actwyn_selftest_abc123XYZ_sentinel");
+      return ok ? { ok: true } : { ok: false, detail: "bearer token not redacted" };
+    },
+    s3_ping: () => s3.ping(),
+    telegram_ping: async () => {
+      try {
+        const res = await fetch(`https://api.telegram.org/bot${config.telegram.bot_token}/getMe`);
+        return res.ok ? { ok: true } : { ok: false, detail: `HTTP ${res.status}` };
+      } catch (e) {
+        return { ok: false, detail: (e as Error).message };
+      }
+    },
+    claude_version: async () => {
+      try {
+        const proc = Bun.spawn([config.runtime.claude_binary, "--version"], { stdout: "pipe", stderr: "pipe" });
+        const code = await proc.exited;
+        if (code !== 0) return { ok: false, detail: `exit_code=${code}` };
+        const out = await new Response(proc.stdout).text();
+        return { ok: true, version: out.trim() };
+      } catch (e) {
+        return { ok: false, detail: (e as Error).message };
+      }
+    },
+  };
+
+  // HLD §7.9 step 6 / §16.2: boot-time doctor summary.
+  // Runs quick checks only at boot (deep checks skipped — no s3_ping/claude hooks
+  // during the blocking pre-loop phase; they run on-demand via /doctor command).
+  try {
+    const bootChecks = await runDoctor({
+      db: doctorDeps.db,
+      required_bun_version: doctorDeps.required_bun_version,
+      current_bun_version: doctorDeps.current_bun_version,
+      bootstrap_whoami: doctorDeps.bootstrap_whoami,
+      expected_schema_version: doctorDeps.expected_schema_version,
+      config_ok: doctorDeps.config_ok,
+      redaction_self_test: doctorDeps.redaction_self_test,
+    });
+    const rolled = bootChecks.reduce(
+      (acc, r) => {
+        acc[r.status] = (acc[r.status] ?? 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+    events.info("boot_doctor", {
+      ok: rolled["ok"] ?? 0,
+      warn: rolled["warn"] ?? 0,
+      fail: rolled["fail"] ?? 0,
+      checks: bootChecks.map((r) => ({ name: r.name, status: r.status, ...(r.detail ? { detail: r.detail } : {}) })),
+    });
+  } catch (e) {
+    events.warn("boot_doctor.error", { error: (e as Error).message });
+  }
+
   // Launch loops concurrently; both honour the AbortSignal.
   await Promise.allSettled([
     runPoller(
-      { db, inbound, transport, events },
+      { db, inbound, transport, events, outbound: botApi },
       { signal: controller.signal },
     ),
     runWorkerLoop(
@@ -133,51 +221,7 @@ async function main(): Promise<void> {
         outbound: botApi,
         newId: () => crypto.randomUUID(),
         now: () => new Date(),
-        doctor: {
-          required_bun_version: config.runtime.required_bun_version,
-          current_bun_version: Bun.version,
-          bootstrap_whoami: false,
-          expected_schema_version: 2,
-          config_ok: () => {
-            // Verify config fields are not empty (loadConfig already validates, but
-            // this self-test runs inside the live process after boot).
-            const missing: string[] = [];
-            if (!config.telegram.bot_token) missing.push("TELEGRAM_BOT_TOKEN");
-            if (!config.telegram.authorized_user_id) missing.push("AUTHORIZED_TELEGRAM_USER_ID");
-            if (!config.s3.endpoint) missing.push("S3_ENDPOINT");
-            if (!config.s3.bucket) missing.push("S3_BUCKET");
-            if (missing.length > 0) {
-              return { ok: false, detail: `empty fields: ${missing.join(", ")}` };
-            }
-            return { ok: true, detail: `path=${config.config_path}` };
-          },
-          redaction_self_test: () => {
-            const sentinel = "Bearer actwyn_selftest_abc123XYZ_sentinel";
-            const result = redactor.apply(sentinel).text;
-            const ok = !result.includes("actwyn_selftest_abc123XYZ_sentinel");
-            return ok ? { ok: true } : { ok: false, detail: "bearer token not redacted" };
-          },
-          s3_ping: () => s3.ping(),
-          telegram_ping: async () => {
-            try {
-              const res = await fetch(`https://api.telegram.org/bot${config.telegram.bot_token}/getMe`);
-              return res.ok ? { ok: true } : { ok: false, detail: `HTTP ${res.status}` };
-            } catch (e) {
-              return { ok: false, detail: (e as Error).message };
-            }
-          },
-          claude_version: async () => {
-            try {
-              const proc = Bun.spawn([config.runtime.claude_binary, "--version"], { stdout: "pipe", stderr: "pipe" });
-              const code = await proc.exited;
-              if (code !== 0) return { ok: false, detail: `exit_code=${code}` };
-              const out = await new Response(proc.stdout).text();
-              return { ok: true, version: out.trim() };
-            } catch (e) {
-              return { ok: false, detail: (e as Error).message };
-            }
-          },
-        },
+        doctor: doctorDeps,
         config: {
           capture: {
             max_download_size_bytes: 20 * 1024 * 1024,
@@ -188,6 +232,7 @@ async function main(): Promise<void> {
             local_path: (id) => `${localObjectsPath}/${id}`,
             bucket: config.s3.bucket,
           },
+          memory_base_path: memoryBasePath,
         },
       },
       { signal: controller.signal },

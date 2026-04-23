@@ -45,6 +45,8 @@ export interface AppConfig {
   readonly runtime: RuntimeFileConfig;
   readonly env: "development" | "production" | "test";
   readonly config_path: string;
+  /** DEC-009: set via BOOTSTRAP_WHOAMI=true env var; never true in steady state. */
+  readonly bootstrap_whoami: boolean;
 }
 
 export class ConfigError extends Error {
@@ -99,6 +101,9 @@ export function loadConfig(
     );
   }
 
+  const bootstrapWhoami =
+    (env.BOOTSTRAP_WHOAMI ?? "").toLowerCase().trim() === "true";
+
   const cfg: AppConfig = {
     telegram: {
       bot_token: env.TELEGRAM_BOT_TOKEN!.trim(),
@@ -114,6 +119,7 @@ export function loadConfig(
     runtime,
     env: envMode,
     config_path: configPath,
+    bootstrap_whoami: bootstrapWhoami,
   };
   return deepFreeze(cfg);
 }

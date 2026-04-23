@@ -422,13 +422,15 @@ export class StubOutboundTransport implements OutboundTransport {
 
   async send(args: SendMessageArgs): Promise<SendMessageResult> {
     this.calls.push(args);
-    const plan = this.opts.plan?.get(args.text) ?? "ok";
+    const plan = this.resolvePlan(args.text);
     if (plan === "fail_non_retryable") {
       throw new TelegramSendError("bad_request", undefined, false);
     }
     if (plan === "fail_once") {
-      if (!this.firstFails.has(args.text)) {
-        this.firstFails.add(args.text);
+      // Use the resolved key (which may be a prefix) as the dedupe key.
+      const key = this.resolveKey(args.text);
+      if (!this.firstFails.has(key)) {
+        this.firstFails.add(key);
         throw new TelegramSendError("transient", undefined, true);
       }
     }
@@ -436,7 +438,27 @@ export class StubOutboundTransport implements OutboundTransport {
     return { telegram_message_id: `tg-${this.counter}` };
   }
 
+  private resolvePlan(text: string): "ok" | "fail_once" | "fail_non_retryable" {
+    if (!this.opts.plan) return "ok";
+    // Exact match first.
+    if (this.opts.plan.has(text)) return this.opts.plan.get(text)!;
+    // Prefix match: plan key is a prefix of the sent text (e.g. text has a footer appended).
+    for (const [key, val] of this.opts.plan) {
+      if (text.startsWith(key)) return val;
+    }
+    return "ok";
+  }
+
+  private resolveKey(text: string): string {
+    if (!this.opts.plan) return text;
+    if (this.opts.plan.has(text)) return text;
+    for (const [key] of this.opts.plan) {
+      if (text.startsWith(key)) return key;
+    }
+    return text;
+  }
+
   countSendsFor(text: string): number {
-    return this.calls.filter((c) => c.text === text).length;
+    return this.calls.filter((c) => c.text === text || c.text.startsWith(text)).length;
   }
 }

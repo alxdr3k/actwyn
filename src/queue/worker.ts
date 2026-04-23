@@ -26,8 +26,8 @@
 //     no storage_sync job, provider_run still reaches a terminal
 //     status.
 
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 import type { DbHandle } from "~/db.ts";
 import type { EventEmitter } from "~/observability/events.ts";
@@ -49,7 +49,7 @@ import { whoamiReply } from "~/commands/whoami.ts";
 import { endSession, enqueueSummaryJob } from "~/commands/summary.ts";
 import { shouldAutoTriggerSummary, writeSummary, SUMMARY_SYSTEM_IDENTITY, type SummaryOutput } from "~/memory/summary.ts";
 import { buildContext, type MemoryItemSlot, type TurnSlot } from "~/context/builder.ts";
-import { pack, renderAsMessage, serializeForProviderRun } from "~/context/packer.ts";
+import { pack, renderAsMessage, serializeForProviderRun, PromptOverflowError } from "~/context/packer.ts";
 import { runUploadPass, runDeletePass, type SyncConfig } from "~/storage/sync.ts";
 import type { S3Transport } from "~/storage/s3.ts";
 import {
@@ -77,6 +77,13 @@ export interface WorkerConfig {
   } | undefined;
   /** Optional S3 sync config. When present, storage_sync jobs run the upload/delete pass. */
   readonly sync?: SyncConfig | undefined;
+  /**
+   * Local directory for human-readable memory files.
+   * When set, summary_generation writes `memory/sessions/<session_id>.jsonl`
+   * under this base path (AC-MEM-001). Defaults to a `memory` sibling of the
+   * objects root when absent.
+   */
+  readonly memory_base_path?: string | undefined;
 }
 
 export interface WorkerDeps {
@@ -270,7 +277,7 @@ export async function runOneClaimed(
         job_id: job.id,
         chat_id: job.chat_id,
         notification_type: "job_accepted",
-        text: "요청이 접수됐습니다.",
+        text: `접수됨 · ${job.id.slice(0, 8)} · ${job.provider ?? "claude"} · 상태: queued`,
         chunk_size: deps.config.notifications?.chunk_size,
       },
     });
@@ -309,16 +316,39 @@ export async function runOneClaimed(
   let request = baseRequest;
   let snapshotJson: string;
   if (packingMode === "replay_mode" && job.session_id) {
-    const ctx = buildContextForRun({
-      db: deps.db,
-      sessionId: job.session_id,
-      req: baseRequest,
-      redactor: deps.redactor,
-      // advisory profile: replace system_identity with schema instruction
-      systemIdentity: isSummaryJob ? SUMMARY_SYSTEM_IDENTITY : undefined,
-      // summary user message instructs Claude to produce structured output
-      userMessage: isSummaryJob ? "이 대화를 위의 JSON 스키마에 따라 요약해 주세요." : undefined,
-    });
+    let ctx: ContextBuildResult;
+    try {
+      ctx = buildContextForRun({
+        db: deps.db,
+        sessionId: job.session_id,
+        req: baseRequest,
+        redactor: deps.redactor,
+        // advisory profile: replace system_identity with schema instruction
+        systemIdentity: isSummaryJob ? SUMMARY_SYSTEM_IDENTITY : undefined,
+        // summary user message instructs Claude to produce structured output.
+        // On retry (attempts >= 2), append a stricter schema reminder per HLD §7.5 failure modes.
+        userMessage: isSummaryJob
+          ? job.attempts >= 2
+            ? "이 대화를 위의 JSON 스키마에 따라 요약해 주세요.\n\n반드시 유효한 JSON 객체만 반환하십시오. 마크다운 펜스나 설명 없이 JSON 객체 하나만 출력하세요. 이전 시도에서 스키마를 따르지 않은 것 같습니다."
+            : "이 대화를 위의 JSON 스키마에 따라 요약해 주세요."
+          : undefined,
+      });
+    } catch (e) {
+      if (e instanceof PromptOverflowError) {
+        // HLD §10.3 rule 2: minimum prompt doesn't fit; fail the job explicitly.
+        deps.db.tx<void>(() => {
+          deps.db
+            .prepare<unknown, [string, string]>(
+              `UPDATE jobs SET status = 'failed', finished_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+               error_json = ? WHERE id = ? AND status = 'running'`,
+            )
+            .run(JSON.stringify({ error_type: "prompt_overflow", detail: e.message }), job.id);
+        });
+        deps.events.warn("queue.job.prompt_overflow", { job_id: job.id, detail: e.message });
+        return { job_id: job.id, terminal: "failed", turn_id: null, provider_run_id: providerRunId };
+      }
+      throw e;
+    }
     request = { ...baseRequest, message: ctx.packedMessage };
     snapshotJson = ctx.snapshotJson;
   } else {
@@ -418,7 +448,7 @@ export async function runOneClaimed(
 
   let turnId: string | null = null;
   const finalText = outcome.response.final_text;
-  let pendingSummarySync: { summaryId: string; summaryData: SummaryOutput } | null = null;
+  const summaryResult = { sync: null as { summaryId: string; summaryData: SummaryOutput } | null };
 
   deps.db.tx<void>(() => {
     const providerSessionIdFromRun =
@@ -526,26 +556,46 @@ export async function runOneClaimed(
     // summary_generation: persist structured summary + optional /end session close.
     if (
       job.job_type === "summary_generation" &&
-      terminalJobStatus === "succeeded" &&
       job.session_id
     ) {
-      // Attempt to parse structured summary output from Claude's response.
-      if (finalText.length > 0) {
-        try {
-          const raw = JSON.parse(finalText) as SummaryOutput;
-          const summaryData: SummaryOutput = { ...raw, session_id: job.session_id };
-          const result = writeSummary({
-            db: deps.db,
-            newId: deps.newId,
-            summary: summaryData,
-          });
-          pendingSummarySync = { summaryId: result.summary_id, summaryData };
-        } catch {
-          // Non-fatal: unstructured output is stored as a turn but not as a memory_summaries row.
+      const summaryReq = JSON.parse(job.request_json) as { command?: string; trigger?: string };
+      const isEndTrigger = summaryReq.command === "/end" || summaryReq.trigger === "explicit_end";
+      if (terminalJobStatus === "succeeded") {
+        // Attempt to parse structured summary output from Claude's response.
+        let parsed = false;
+        if (finalText.length > 0) {
+          try {
+            const raw = JSON.parse(finalText) as SummaryOutput;
+            const summaryData: SummaryOutput = { ...raw, session_id: job.session_id };
+            const result = writeSummary({
+              db: deps.db,
+              newId: deps.newId,
+              summary: summaryData,
+            });
+            summaryResult.sync = { summaryId: result.summary_id, summaryData };
+            parsed = true;
+          } catch {
+            // Non-fatal: unstructured output is stored as a turn but not as a memory_summaries row.
+          }
+        }
+        // HLD §7.5 failure mode: /end on empty session → produce minimal summary.
+        if (!parsed && isEndTrigger) {
+          const minimalSummary: SummaryOutput = {
+            session_id: job.session_id,
+            summary_type: "session",
+            facts: [],
+            preferences: [],
+            decisions: [],
+            open_tasks: [],
+            cautions: [],
+            source_turn_ids: [],
+          };
+          const result = writeSummary({ db: deps.db, newId: deps.newId, summary: minimalSummary });
+          summaryResult.sync = { summaryId: result.summary_id, summaryData: minimalSummary };
         }
       }
-      const req = JSON.parse(job.request_json) as { command?: string; trigger?: string };
-      if (req.command === "/end" || req.trigger === "explicit_end") {
+      // HLD §7.5: /end closes the session regardless of summary success or failure.
+      if (isEndTrigger) {
         endSession(deps.db, job.session_id);
       }
     }
@@ -553,9 +603,9 @@ export async function runOneClaimed(
 
   // AC-MEM-001: write local snapshot file + enqueue storage_sync after summary succeeds.
   // Runs outside the tx to avoid blocking I/O inside a transaction (HLD §7.10).
-  if (pendingSummarySync !== null && deps.config.sync) {
+  if (summaryResult.sync !== null && deps.config.sync) {
     try {
-      await enqueueMemorySnapshotSync(deps, job.id, pendingSummarySync.summaryId, pendingSummarySync.summaryData);
+      await enqueueMemorySnapshotSync(deps, job.id, summaryResult.sync.summaryId, summaryResult.sync.summaryData);
     } catch {
       // Non-fatal: sync failure must not roll back the succeeded summary.
     }
@@ -594,9 +644,12 @@ export async function runOneClaimed(
         : outcome.kind === "cancelled"
           ? "job_cancelled"
           : "job_failed";
-    const text = (isSummaryJob && pendingSummarySync !== null)
-      ? buildSummaryNotificationText(pendingSummarySync.summaryData)
-      : buildNotificationText(outcome.kind, outcome.response.final_text);
+    const text = (isSummaryJob && summaryResult.sync !== null)
+      ? buildSummaryNotificationText(summaryResult.sync.summaryData)
+      : buildNotificationText(outcome.kind, outcome.response.final_text, {
+          duration_ms: outcome.response.duration_ms,
+          provider: outcome.response.provider,
+        });
     const created = createNotificationAndChunks({
       db: deps.db,
       newId: deps.newId,
@@ -659,14 +712,37 @@ function buildSummaryNotificationText(summary: SummaryOutput): string {
 function buildNotificationText(
   kind: "succeeded" | "failed" | "cancelled",
   finalText: string,
+  meta?: { duration_ms?: number; provider?: string },
 ): string {
   if (kind === "succeeded") {
-    return finalText.length > 0 ? finalText : "(empty response)";
+    const base = finalText.length > 0 ? finalText : "(empty response)";
+    if (meta?.duration_ms !== undefined && meta.provider) {
+      const sec = (meta.duration_ms / 1000).toFixed(1);
+      return `${base}\n\n---\n${sec}s · ${meta.provider}`;
+    }
+    return base;
   }
   if (kind === "cancelled") {
     return "작업이 취소됐습니다.";
   }
   return finalText.length > 0 ? finalText : "작업이 실패했습니다. /status 를 확인하세요.";
+}
+
+function buildJobCompletedFooter(db: DbHandle, jobId: string): string {
+  try {
+    const row = db
+      .prepare<{ provider: string | null; result_json: string | null }, [string]>(
+        "SELECT provider, result_json FROM jobs WHERE id = ?",
+      )
+      .get(jobId);
+    if (!row?.result_json) return "";
+    const r = JSON.parse(row.result_json) as { duration_ms?: number };
+    if (r.duration_ms === undefined) return "";
+    const sec = (r.duration_ms / 1000).toFixed(1);
+    return `\n\n---\n${sec}s · ${row.provider ?? "claude"}`;
+  } catch {
+    return "";
+  }
 }
 
 // ---------------------------------------------------------------
@@ -884,7 +960,11 @@ function buildContextForRun(args: {
       packedMessage: args.redactor.apply(renderAsMessage(packed)).text,
       snapshotJson: args.redactor.apply(serializeForProviderRun(packed)).text,
     };
-  } catch {
+  } catch (e) {
+    // HLD §10.3 rule 2: PromptOverflowError must propagate so the caller can
+    // fail the job with a user-visible error. All other packing errors fall back
+    // to bare user message to avoid blocking the queue.
+    if (e instanceof PromptOverflowError) throw e;
     return fallback;
   }
 }
@@ -1094,16 +1174,31 @@ async function enqueueMemorySnapshotSync(
   const storageKey = `objects/${yyyy}/${mm}/${dd}/${objectId}/${sha256Hex}.jsonl`;
   const localPath = sync.local_path(objectId);
 
-  // Write local file outside tx (HLD §7.10: no blocking I/O inside transactions).
+  // Write S3 staging file (HLD §7.10: no blocking I/O inside transactions).
   mkdirSync(dirname(localPath), { recursive: true });
   writeFileSync(localPath, bytes);
+
+  // AC-MEM-001: write human-readable memory files per PRD §12 / HLD §11.2.
+  // memory/sessions/<session_id>.jsonl — append-only JSONL per session.
+  // memory/personal/YYYY-MM-DD.md — rolled-up daily markdown line.
+  if (summary.session_id) {
+    const memBase = deps.config.memory_base_path ?? dirname(sync.local_path("x")).replace(/\/[^/]+$/, "/memory");
+    const sessionDir = join(memBase, "sessions");
+    mkdirSync(sessionDir, { recursive: true });
+    appendFileSync(join(sessionDir, `${summary.session_id}.jsonl`), content);
+
+    const personalDir = join(memBase, "personal");
+    mkdirSync(personalDir, { recursive: true });
+    const mdLine = `<!-- ${yyyy}-${mm}-${dd} session=${summary.session_id} summary=${summaryId} -->\n`;
+    appendFileSync(join(personalDir, `${yyyy}-${mm}-${dd}.md`), mdLine);
+  }
 
   const bucket = sync.bucket ?? null;
 
   // Atomic: create storage_objects row + update summary FK + enqueue storage_sync.
   deps.db.tx<void>(() => {
     deps.db
-      .prepare<unknown, [string, string | null, string, number, string, string, string]>(
+      .prepare<unknown, [string, string | null, string, number, string, string]>(
         `INSERT INTO storage_objects
            (id, storage_backend, bucket, storage_key, mime_type, size_bytes, sha256,
             source_channel, source_job_id, artifact_type, retention_class,
@@ -1136,6 +1231,9 @@ async function enqueueMemorySnapshotSync(
 // ---------------------------------------------------------------
 
 const SYSTEM_COMMANDS = new Set([
+  "/new",
+  "/chat",
+  "/help",
   "/status",
   "/cancel",
   "/doctor",
@@ -1243,8 +1341,56 @@ async function dispatchSystemCommand(
   args: string,
 ): Promise<string> {
   switch (command) {
+    case "/new":
+    case "/chat": {
+      // End the current session so the next message starts a fresh one.
+      if (job.session_id) {
+        endSession(deps.db, job.session_id);
+      }
+      return "새 세션을 시작합니다. 다음 메시지부터 새 대화가 시작됩니다.";
+    }
+
+    case "/help": {
+      // Look up current session + provider for the header (PRD §8.1).
+      let sessionLine = "";
+      let providerLine = "";
+      if (job.session_id) {
+        sessionLine = `\nsession: ${job.session_id.slice(0, 6)}`;
+        const lastRun = deps.db
+          .prepare<{ provider: string; context_packing_mode: string }, [string]>(
+            `SELECT provider, context_packing_mode FROM provider_runs
+             WHERE session_id = ? ORDER BY started_at DESC LIMIT 1`,
+          )
+          .get(job.session_id);
+        if (lastRun) {
+          providerLine = `\nprovider: ${lastRun.provider} · ${lastRun.context_packing_mode}`;
+        }
+      }
+      return [
+        `사용 가능한 명령어:${sessionLine}${providerLine}`,
+        "/new · /chat — 새 세션 시작",
+        "/status — 큐 상태 확인",
+        "/cancel — 실행 중인 작업 취소",
+        "/summary — 현재 세션 요약 생성",
+        "/end — 세션 종료 및 요약",
+        "/provider <name> — provider 전환 (P0: claude만 활성)",
+        "/doctor — 시스템 상태 진단",
+        "/whoami — 내 Telegram user_id 확인",
+        "/save_last_attachment — 마지막 첨부파일을 long_term으로 저장",
+        "/forget_last — 직전 기억/파일 비활성화",
+        "/forget_session — 현재 세션 메모리 비활성화",
+        "/forget_artifact <id> — 특정 아티팩트 삭제",
+        "/forget_memory <id> — 특정 메모리 비활성화",
+        "/correct <id> <새 내용> — 메모리 정정",
+      ].join("\n");
+    }
+
     case "/status": {
-      const report = buildStatusReport(deps.db);
+      const report = buildStatusReport(deps.db, {
+        session_id: job.session_id,
+        chat_id: job.chat_id,
+        now: deps.now,
+      });
       return formatStatus(report);
     }
 
@@ -1310,9 +1456,11 @@ async function dispatchSystemCommand(
           ? { subprocess_teardown_smoke: deps.doctor.subprocess_teardown_smoke } : {}),
       };
       const results = await runDoctor(doctorDeps);
-      const lines = results.map((r) =>
-        `${r.status === "ok" ? "✓" : r.status === "warn" ? "⚠" : "✗"} ${r.name}${r.detail ? `: ${r.detail}` : ""}`,
-      );
+      const lines = results.map((r) => {
+        const icon = r.status === "ok" ? "✓" : r.status === "warn" ? "⚠" : "✗";
+        const detail = r.detail ? `: ${r.detail}` : "";
+        return `${icon} [${r.category}] ${r.name} (${r.duration_ms}ms)${detail}`;
+      });
       return lines.join("\n");
     }
 
@@ -1338,9 +1486,12 @@ async function dispatchSystemCommand(
         session_id: job.session_id,
         caption: args || undefined,
       });
-      return result.promoted
-        ? `첨부 파일을 저장했습니다 (id=${result.storage_object_id}).`
-        : "저장할 수 있는 첨부 파일이 없습니다.";
+      if (result.promoted && result.storage_object_id) {
+        const artType = result.artifact_type ?? "user_upload";
+        const shortId = result.storage_object_id.slice(0, 8);
+        return `저장함: ${artType} · ${shortId} · long_term`;
+      }
+      return "저장할 수 있는 첨부 파일이 없습니다.";
     }
 
     case "/forget_artifact": {
@@ -1386,9 +1537,10 @@ async function dispatchSystemCommand(
       if (!existing) return `메모리 항목(${oldId})을 찾을 수 없습니다.`;
       const sessionId = job.session_id ?? existing.session_id;
       try {
+        const newMemId = deps.newId();
         correctMemory(deps.db, {
           old_id: oldId,
-          new_id: deps.newId(),
+          new_id: newMemId,
           new_item: {
             session_id: sessionId,
             item_type: existing.item_type as import("~/memory/items.ts").ItemType,
@@ -1398,7 +1550,8 @@ async function dispatchSystemCommand(
             source_turn_ids: [],
           },
         });
-        return `메모리 항목(${oldId})이 수정됐습니다.`;
+        // PRD §8.4 footer: 정정함: <old_id> → <new_id>
+        return `정정함: ${oldId} → ${newMemId}`;
       } catch (e) {
         return `수정 실패: ${(e as Error).message}`;
       }
@@ -1439,7 +1592,17 @@ async function runNotificationRetryJob(deps: WorkerDeps, job: ClaimedJob): Promi
       "SELECT content_redacted FROM turns WHERE job_id = ? AND role = 'assistant' ORDER BY created_at ASC LIMIT 1",
     )
     .get(notif.job_id);
-  const chunks = turn ? splitForTelegram(turn.content_redacted) : [];
+
+  // Reconstruct the job_completed footer (PRD §8.4: duration + provider).
+  const notifMeta = deps.db
+    .prepare<{ notification_type: string }, [string]>(
+      "SELECT notification_type FROM outbound_notifications WHERE id = ?",
+    )
+    .get(req.notification_id);
+  const footer = notifMeta?.notification_type === "job_completed"
+    ? buildJobCompletedFooter(deps.db, notif.job_id)
+    : "";
+  const chunks = turn ? splitForTelegram(turn.content_redacted + footer) : [];
 
   if (chunks.length > 0) {
     try {

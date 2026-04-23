@@ -54,6 +54,10 @@ export interface ClaudeAdapterOptions {
   readonly max_runtime_ms?: number;
   /** Max ms of stream silence before treating as subprocess stall (HLD §14.2). */
   readonly stall_timeout_ms?: number;
+  /** Max total stdout+stderr bytes before teardown (HLD §14.3). */
+  readonly max_output_bytes?: number;
+  /** Max prompt byte length; job fails before spawn if exceeded (AC-PROV-013). */
+  readonly max_prompt_bytes?: number;
   readonly redactor: Redactor;
   readonly now?: () => Date;
   /** Host cwd for the subprocess. */
@@ -73,6 +77,16 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): ProviderAdapter
     let argv: string[];
     let child;
     try {
+      // AC-PROV-013: fail before spawn if message exceeds max_prompt_bytes.
+      if (opts.max_prompt_bytes !== undefined && req.message.length > opts.max_prompt_bytes) {
+        return failed({
+          provider: "claude",
+          error_type: "prompt_too_large",
+          message: `prompt length ${req.message.length} exceeds max_prompt_bytes ${opts.max_prompt_bytes}`,
+          started,
+          now,
+        });
+      }
       argv = buildArgv({
         binary: opts.binary,
         profile,
@@ -133,9 +147,23 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): ProviderAdapter
       stallTimer = setTimeout(() => resolveStall!("timeout_stall"), opts.stall_timeout_ms);
     }
 
+    // max_output_bytes: total stdout+stderr byte cap (HLD §14.3). Triggers teardown when exceeded.
+    let totalOutputBytes = 0;
+    let resolveOutputLimit: ((v: "timeout_output_limit") => void) | null = null;
+    const outputLimitPromise: Promise<"timeout_output_limit"> = opts.max_output_bytes !== undefined
+      ? new Promise((resolve) => { resolveOutputLimit = resolve; })
+      : new Promise(() => { /* never */ });
+
+    function trackOutputBytes(line: string): void {
+      if (opts.max_output_bytes === undefined || resolveOutputLimit === null) return;
+      totalOutputBytes += line.length;
+      if (totalOutputBytes > opts.max_output_bytes) resolveOutputLimit("timeout_output_limit");
+    }
+
     const stdoutTask = (async () => {
       for await (const line of readLines(child.stdout)) {
         resetStall();
+        trackOutputBytes(line);
         const redacted = opts.redactor.apply(line).text;
         assembler.push(redacted, "stdout");
       }
@@ -144,6 +172,7 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): ProviderAdapter
     const stderrTask = (async () => {
       for await (const line of readLines(child.stderr)) {
         resetStall();
+        trackOutputBytes(line);
         const redacted = opts.redactor.apply(line).text;
         assembler.push(redacted, "stderr");
       }
@@ -154,20 +183,22 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): ProviderAdapter
       | { kind: "exit"; code: number }
       | "cancel"
       | "timeout_max_runtime"
-      | "timeout_stall";
+      | "timeout_stall"
+      | "timeout_output_limit";
 
     const finish: FinishKind = await Promise.race([
       child.exited.then((code) => ({ kind: "exit" as const, code })),
       cancelPromise,
       maxRuntimePromise,
       stallPromise,
+      outputLimitPromise,
     ]);
 
     // Clear stall timer so it doesn't fire after the race resolves.
     if (stallTimer !== null) clearTimeout(stallTimer);
 
     const isTimeout =
-      finish === "timeout_max_runtime" || finish === "timeout_stall";
+      finish === "timeout_max_runtime" || finish === "timeout_stall" || finish === "timeout_output_limit";
 
     if (finish === "cancel" || isTimeout) {
       try {
@@ -206,7 +237,9 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): ProviderAdapter
     }
 
     if (isTimeout) {
-      const error_type = finish === "timeout_stall" ? "stall_timeout" : "timeout";
+      const error_type = finish === "timeout_stall" ? "stall_timeout"
+        : finish === "timeout_output_limit" ? "output_limit_exceeded"
+        : "timeout";
       const response: AgentResponse = { ...base, error_type };
       return { kind: "failed", response, error_type };
     }

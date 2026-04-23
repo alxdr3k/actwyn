@@ -67,6 +67,7 @@ export function parseSaveIntent(text: string): SaveIntent | null {
 export interface SaveResult {
   readonly promoted: boolean;
   readonly storage_object_id?: string;
+  readonly artifact_type?: string;
   readonly memory_artifact_link_id?: string;
 }
 
@@ -80,8 +81,8 @@ export function saveLastAttachment(args: {
     // Find the most recent captured attachment row owned by a
     // job in this session.
     const row = args.db
-      .prepare<{ id: string }, [string]>(
-        `SELECT so.id
+      .prepare<{ id: string; artifact_type: string }, [string]>(
+        `SELECT so.id, so.artifact_type
          FROM storage_objects so
          JOIN jobs j ON j.id = so.source_job_id
          WHERE j.session_id = ?
@@ -112,7 +113,7 @@ export function saveLastAttachment(args: {
       .get(args.session_id);
     if (!turn) {
       // No turn to anchor: skip link creation but keep promotion.
-      return { promoted: true, storage_object_id: row.id };
+      return { promoted: true, storage_object_id: row.id, artifact_type: row.artifact_type };
     }
     args.db
       .prepare<unknown, [string, string, string, string | null]>(
@@ -125,6 +126,7 @@ export function saveLastAttachment(args: {
     return {
       promoted: true,
       storage_object_id: row.id,
+      artifact_type: row.artifact_type,
       memory_artifact_link_id: linkId,
     };
   });

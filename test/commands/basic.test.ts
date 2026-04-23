@@ -67,9 +67,28 @@ describe("/status", () => {
     expect(buildStatusReport(db).storage_sync.pending).toBe(1);
   });
 
-  test("formatStatus produces a one-line-per-section string", () => {
+  test("formatStatus produces the PRD §14.1 contract lines", () => {
     const txt = formatStatus(buildStatusReport(db));
-    expect(txt.split("\n").length).toBe(4);
+    const lines = txt.split("\n");
+    // Minimum 7 lines: 상태, session, provider, queue, post-processing, S3, last completed.
+    expect(lines.length).toBeGreaterThanOrEqual(7);
+    expect(lines[0]).toMatch(/^상태:/);
+    expect(lines[1]).toMatch(/^session:/);
+    expect(lines[2]).toMatch(/^provider:.*packing_mode:/);
+    expect(lines[3]).toMatch(/^queue:/);
+    expect(lines[4]).toMatch(/^post-processing:/);
+    expect(lines[5]).toMatch(/^S3:/);
+    expect(lines[6]).toMatch(/^last completed:/);
+  });
+
+  test("formatStatus overall_status=issue when failed jobs exist", () => {
+    db.prepare<unknown, [string, string, string]>(
+      `INSERT INTO jobs(id, status, job_type, chat_id, request_json, idempotency_key, provider, session_id)
+       VALUES(?, 'failed', 'provider_run', ?, '{}', ?, 'fake', 'sess-1')`,
+    ).run("j-failed", "chat-1", "ikey-f");
+    const report = buildStatusReport(db);
+    expect(report.overall_status).toBe("issue");
+    expect(formatStatus(report)).toContain("상태: issue");
   });
 });
 

@@ -258,6 +258,49 @@ describe("/end: summary_generation job marks session ended on success", () => {
       .get()!;
     expect(sess.status).toBe("ended");
   });
+
+  test("/end on empty session (fake returns no JSON) still closes session + inserts minimal summary", async () => {
+    // Fake adapter returns empty text — no valid JSON summary.
+    db.prepare<unknown, [string, string, string, string]>(
+      `INSERT INTO jobs
+         (id, status, job_type, session_id, user_id, chat_id, request_json, idempotency_key, provider)
+       VALUES(?, 'queued', 'summary_generation', ?, 'user-1', 'chat-1', ?, ?, 'fake')`,
+    ).run(
+      "j-end-empty",
+      "sess-1",
+      JSON.stringify({ trigger: "explicit_end" }),
+      "telegram:end-empty",
+    );
+
+    await runWorkerOnce(deps({
+      summaryAdapter: {
+        name: "fake",
+        run: async () => ({
+          kind: "succeeded" as const,
+          response: {
+            provider: "fake",
+            session_id: "fake-session",
+            final_text: "",
+            raw_events: [],
+            duration_ms: 1,
+            exit_code: 0,
+            parser_status: "parsed" as const,
+          },
+        }),
+      },
+    }));
+
+    const sess = db
+      .prepare<{ status: string }>("SELECT status FROM sessions WHERE id = 'sess-1'")
+      .get()!;
+    expect(sess.status).toBe("ended");
+
+    // A minimal memory_summaries row should have been created (HLD §7.5 failure modes).
+    const sumRow = db
+      .prepare<{ id: string }>("SELECT id FROM memory_summaries WHERE session_id = 'sess-1' LIMIT 1")
+      .get();
+    expect(sumRow).not.toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------
@@ -289,6 +332,7 @@ describe("AC-MEM-001 — summary_generation writes local file + enqueues storage
     );
 
     const localDir = join(workdir, "objects");
+    const memDir = join(workdir, "memory");
     const syncDeps = deps({
       summaryAdapter: {
         name: "fake",
@@ -308,6 +352,7 @@ describe("AC-MEM-001 — summary_generation writes local file + enqueues storage
       config: {
         capture: { max_download_size_bytes: 20 * 1024 * 1024, local_path: (id: string) => join(localDir, id) },
         sync: { max_attempts: 3, local_path: (id: string) => join(localDir, id) },
+        memory_base_path: memDir,
       },
     });
 
@@ -339,9 +384,17 @@ describe("AC-MEM-001 — summary_generation writes local file + enqueues storage
     // storage_key set on memory_summaries matches storage_objects
     expect(sumRow!.storage_key).toBe(so!.storage_key);
 
-    // Local file written at local_path(storage_object_id)
+    // S3 staging file written at local_path(storage_object_id)
     const localPath = join(localDir, so!.id);
     expect(existsSync(localPath)).toBe(true);
+
+    // AC-MEM-001: human-readable session JSONL file written at memory/sessions/<session_id>.jsonl
+    const sessionJsonlPath = join(memDir, "sessions", "sess-1.jsonl");
+    expect(existsSync(sessionJsonlPath)).toBe(true);
+
+    // AC-MEM-001: daily markdown line appended to memory/personal/YYYY-MM-DD.md
+    const dailyMdPath = join(memDir, "personal", "2026-04-23.md");
+    expect(existsSync(dailyMdPath)).toBe(true);
 
     // storage_sync job enqueued
     const syncJob = db
@@ -442,7 +495,7 @@ describe("storage_sync job dispatch — uploads pending storage_objects when s3 
       `INSERT INTO storage_objects
          (id, storage_backend, bucket, storage_key, source_channel, source_message_id,
           source_job_id, artifact_type, retention_class, capture_status, status, sha256)
-       VALUES(?, 's3', 'test-bucket', ?, 'system', '0', NULL, 'user_upload', 'long_term', 'captured', 'pending', 'deadbeef')`,
+       VALUES(?, 's3', 'test-bucket', ?, 'system', '0', NULL, 'user_upload', 'long_term', 'captured', 'pending', '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81')`,
     ).run(objectId, objectKey);
 
     db.prepare<unknown, [string, string, string]>(
@@ -480,6 +533,47 @@ describe("storage_sync job dispatch — uploads pending storage_objects when s3 
       .get(objectId)!;
     expect(so.status).toBe("uploaded");
     expect(stubTransport.store.size).toBe(1);
+  });
+
+  test("storage_sync rejects upload when sha256 does not match stored hash", async () => {
+    const objectId = "so-sync-bad-hash";
+    const objectKey = `objects/2026/04/23/${objectId}/badhash.bin`;
+    const bytes = new Uint8Array([1, 2, 3]);
+    const localDir = join(workdir, "objects");
+    mkdirSync(localDir, { recursive: true });
+    writeFileSync(join(localDir, objectId), bytes);
+
+    db.prepare<unknown, [string, string]>(
+      `INSERT INTO storage_objects
+         (id, storage_backend, bucket, storage_key, source_channel, source_message_id,
+          source_job_id, artifact_type, retention_class, capture_status, status, sha256)
+       VALUES(?, 's3', 'test-bucket', ?, 'system', '0', NULL, 'user_upload', 'long_term', 'captured', 'pending', 'wronghash')`,
+    ).run(objectId, objectKey);
+
+    db.prepare<unknown, [string, string, string]>(
+      `INSERT INTO jobs
+         (id, status, job_type, request_json, idempotency_key)
+       VALUES(?, 'queued', 'storage_sync', ?, ?)`,
+    ).run("j-sync-bad", JSON.stringify({}), "sync:bad-hash");
+
+    const stubTransport = new StubS3Transport();
+    const syncDeps = deps({
+      s3: stubTransport,
+      config: {
+        capture: { max_download_size_bytes: 20 * 1024 * 1024, local_path: (id) => join(localDir, id) },
+        sync: { max_attempts: 3, local_path: (id) => join(localDir, id) },
+      },
+    });
+    await runWorkerOnce(syncDeps);
+
+    const so = db
+      .prepare<{ status: string; error_json: string | null }, [string]>(
+        "SELECT status, error_json FROM storage_objects WHERE id = ?",
+      )
+      .get(objectId)!;
+    expect(so.status).toBe("failed");
+    expect(so.error_json).toContain("hash_mismatch");
+    expect(stubTransport.store.size).toBe(0);
   });
 
   test("storage_sync without s3 dep → noop (succeeds without uploading)", async () => {
