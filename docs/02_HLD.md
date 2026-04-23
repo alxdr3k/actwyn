@@ -317,7 +317,11 @@ ledger integration test (playbook §8.1) asserts against.
   1. `storage_sync` is the only writer that advances
      `storage_objects.status` to `uploaded`.
   2. `storage_sync` failure does not roll back any `provider_run`
-     success; it only re-pends the row (PRD §16.4, AC-STO-002, AC-STO-006).
+     success. It only updates `storage_objects` sync state
+     (PRD §16.4, AC-STO-002, AC-STO-006):
+     - transient or credential failure: `pending → failed`
+     - the retry scheduler may later move `failed → pending`
+     - successful upload: `pending → uploaded`
   3. S3 object keys follow the PRD §12.8.4 pattern and never carry
      user-facing semantics.
 
@@ -825,13 +829,18 @@ Happy path:
    a. Call Telegram `getFile`, download bytes to the local store,
       detect MIME, compute `sha256`, measure `size_bytes`.
    b. In a single capture transaction, set
-      `capture_status = captured`, `captured_at = now`, and
-      populate `sha256` / `mime_type` / `size_bytes`. Enqueue a
-      `storage_sync` job only if the retention class is S3-eligible.
+      `capture_status = captured`, `captured_at = now`,
+      populate `sha256` / `mime_type` / `size_bytes`, and clear
+      `source_external_id` (`NULL`) per the PRD §13.5 retention
+      policy. Enqueue a `storage_sync` job only if the retention
+      class is S3-eligible.
    c. On download / probe failure: in a single transaction set
-      `capture_status = failed` with `capture_error_json`. The
-      `provider_run` continues; the user turn records that capture
-      failed so the user can retry (PRD §13.5).
+      `capture_status = failed` with `capture_error_json`. If the
+      failure is classified non-retryable, also clear
+      `source_external_id`; retryable failures keep it until the
+      retry budget expires, then clear it. The `provider_run`
+      continues; the user turn records that capture failed so the
+      user can retry (PRD §13.5).
 4. Worker loads the `sessions` row and decides `resume_mode` vs
    `replay_mode` (§10).
 5. `context/builder` + `context/packer` assemble the prompt,
@@ -1579,11 +1588,40 @@ When `/doctor` reports Hetzner Object Storage as unreachable:
 
 ### 12.6 Delete paths
 
-- **Soft delete** (user `/forget_last_attachment`): updates
-  `storage_objects.status = deleted`; a later sync pass may issue
-  `DELETE` to S3 (policy configurable; default: delete S3 object
-  but retain SQLite row for audit).
-- **Hard delete**: out of scope for P0.
+**Soft delete request** (user `/forget_last_attachment` or
+`/forget_artifact <id>`):
+
+- Sets `storage_objects.status = deletion_requested` in the same
+  SQLite transaction that handles the command. The SQLite row is
+  retained for audit.
+- `memory_artifact_links` referencing this row are removed (or
+  marked inactive) according to the command's semantics in the
+  same transaction.
+- No S3 I/O occurs inside this transaction.
+
+**Sync pass** (`storage/sync` picking up `deletion_requested`
+rows):
+
+- If the object has an S3 key (i.e. it was previously uploaded or
+  scheduled for upload), `storage/sync` issues `DELETE` to S3.
+- On success: `deletion_requested → deleted` (set `deleted_at`;
+  remove the local file if still present).
+- On failure (non-transient): `deletion_requested → delete_failed`
+  (set `error_json`; local file retained for operator
+  inspection). Not auto-retried; surfaces via `/doctor`.
+
+**Local-only / session artifact** (object was never assigned an
+S3 key, e.g. `retention_class = session` or `storage_backend =
+local`):
+
+- The command pass may transition directly
+  `deletion_requested → deleted` **only after** local cleanup
+  succeeds (file removed from disk, or confirmed absent).
+- That direct transition MUST be recorded as
+  `{"local_only_delete": true}` in `result_json` so the audit
+  trail distinguishes it from an S3-backed delete.
+
+**Hard delete** (row removal from SQLite): out of scope for P0.
 
 ### 12.7 Key collision
 

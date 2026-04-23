@@ -1,0 +1,11 @@
+# Personal Agent P0 — Bun config.
+# Per HLD §3 dependency policy and PRD Appendix F, external packages
+# are added sparingly; when added, `minimumReleaseAge` guards against
+# freshly-published supply-chain compromises.
+
+[install]
+# Reject packages released in the last N seconds (7 days).
+minimumReleaseAge = 604800
+
+# The repo uses Bun's built-in test runner; `bun test` auto-discovers
+# `test/**/*.test.ts`.

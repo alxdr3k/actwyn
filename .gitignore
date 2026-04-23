@@ -6,9 +6,12 @@ dist/
 *.db
 *.db-wal
 *.db-shm
-data/
-logs/
-memory/
-artifacts/
-transcripts/
+
+# Runtime state directories — never source code. Anchored so
+# `src/memory/` and `test/memory/` are not accidentally ignored.
+/data/
+/logs/
+/memory/
+/artifacts/
+/transcripts/
 .DS_Store
