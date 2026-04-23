@@ -136,7 +136,7 @@ CREATE TABLE IF NOT EXISTS provider_runs (
   job_id                      TEXT    NOT NULL,
   session_id                  TEXT    NOT NULL,
   provider                    TEXT    NOT NULL
-                                      CHECK (provider IN ('claude')),
+                                      CHECK (provider IN ('claude', 'fake')),
   provider_session_id         TEXT,
   context_packing_mode        TEXT    NOT NULL
                                       CHECK (context_packing_mode IN ('resume_mode', 'replay_mode')),
