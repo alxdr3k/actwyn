@@ -82,6 +82,15 @@ async function main(): Promise<void> {
     cwd: process.cwd(),
   });
 
+  // Advisory profile for summary_generation jobs (HLD §4.4 / AC-PROV-014).
+  const summaryAdapter = createClaudeAdapter({
+    binary: config.runtime.claude_binary,
+    profile: "advisory",
+    max_turns: 2,
+    redactor,
+    cwd: process.cwd(),
+  });
+
   const s3 = new BunS3Transport({
     endpoint: config.s3.endpoint,
     bucket: config.s3.bucket,
@@ -117,6 +126,7 @@ async function main(): Promise<void> {
         redactor,
         events,
         adapter,
+        summaryAdapter,
         transport: fileTransport,
         mime,
         s3,

@@ -168,6 +168,82 @@ printf '{"event":"end"}\\n'
   });
 });
 
+describe.skipIf(!IS_POSIX)("claude adapter — resume_mode argv (HLD §10.2)", () => {
+  test("resume_mode passes --resume <provider_session_id> instead of --session-id", async () => {
+    const workdir = mkdtempSync(join(tmpdir(), "actwyn-claude-"));
+    try {
+      // Stub echoes its argv as JSON so we can inspect which flags were passed.
+      const stub = makeStub(
+        workdir,
+        `printf '{"event":"text","text":"%s"}\\n' "$*"
+printf '{"event":"end"}\\n'
+exit 0
+`,
+      );
+      const adapter = createClaudeAdapter({
+        binary: stub,
+        redactor: redactor(),
+        cwd: workdir,
+      });
+      const outcome = await adapter.run(req({
+        context_packing_mode: "resume_mode",
+        provider_session_id: "pvs-abc",
+      }));
+      expect(outcome.kind).toBe("succeeded");
+      if (outcome.kind === "succeeded") {
+        expect(outcome.response.final_text).toContain("--resume");
+        expect(outcome.response.final_text).toContain("pvs-abc");
+        expect(outcome.response.final_text).not.toContain("--session-id");
+      }
+    } finally {
+      rmSync(workdir, { recursive: true, force: true });
+    }
+  });
+
+  test("replay_mode passes --session-id (default when no provider_session_id)", async () => {
+    const workdir = mkdtempSync(join(tmpdir(), "actwyn-claude-"));
+    try {
+      const stub = makeStub(
+        workdir,
+        `printf '{"event":"text","text":"%s"}\\n' "$*"
+printf '{"event":"end"}\\n'
+exit 0
+`,
+      );
+      const adapter = createClaudeAdapter({
+        binary: stub,
+        redactor: redactor(),
+        cwd: workdir,
+      });
+      const outcome = await adapter.run(req({ context_packing_mode: "replay_mode" }));
+      expect(outcome.kind).toBe("succeeded");
+      if (outcome.kind === "succeeded") {
+        expect(outcome.response.final_text).toContain("--session-id");
+        expect(outcome.response.final_text).not.toContain("--resume");
+      }
+    } finally {
+      rmSync(workdir, { recursive: true, force: true });
+    }
+  });
+
+  test("onSpawn callback receives the process_group_id", async () => {
+    const workdir = mkdtempSync(join(tmpdir(), "actwyn-claude-"));
+    try {
+      const stub = makeStub(workdir, `printf '{"event":"end"}\\n'\nexit 0\n`);
+      const adapter = createClaudeAdapter({
+        binary: stub,
+        redactor: redactor(),
+        cwd: workdir,
+      });
+      let spawnedPgid: number | null = null;
+      await adapter.run(req(), undefined, (pgid) => { spawnedPgid = pgid; });
+      expect(spawnedPgid).toBeGreaterThan(0);
+    } finally {
+      rmSync(workdir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe.skipIf(!IS_POSIX)("claude adapter — redaction", () => {
   test("stream line containing a bearer token is redacted in raw_events", async () => {
     const workdir = mkdtempSync(join(tmpdir(), "actwyn-claude-"));

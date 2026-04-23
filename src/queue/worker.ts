@@ -38,6 +38,7 @@ import type {
 import { buildStatusReport, formatStatus } from "~/commands/status.ts";
 import { cancelJob } from "~/commands/cancel.ts";
 import { runDoctor, type DoctorDeps } from "~/commands/doctor.ts";
+import { correctMemory } from "~/commands/correct.ts";
 import { forgetArtifact, forgetLast, forgetMemory, forgetSession } from "~/commands/forget.ts";
 import { saveLastAttachment } from "~/commands/save.ts";
 import { switchProvider } from "~/commands/provider.ts";
@@ -80,6 +81,8 @@ export interface WorkerDeps {
   readonly redactor: Redactor;
   readonly events: EventEmitter;
   readonly adapter: ProviderAdapter;
+  /** Optional: when set, used for summary_generation jobs (advisory profile). Falls back to adapter. */
+  readonly summaryAdapter?: ProviderAdapter | undefined;
   readonly transport: TelegramFileTransport;
   readonly mime: MimeProbe;
   readonly newId: () => string;
@@ -249,7 +252,16 @@ export async function runOneClaimed(
     }
   }
 
-  const priorSessionId = job.session_id
+  const isSummaryJob = job.job_type === "summary_generation";
+  const selectedAdapter = isSummaryJob && deps.summaryAdapter
+    ? deps.summaryAdapter
+    : deps.adapter;
+
+  // summary_generation always runs in replay_mode (fresh context, no resume).
+  // Also respect an explicit replay_mode in request_json (e.g. after a resume-fallback).
+  const requestRaw = JSON.parse(job.request_json) as { context_packing_mode?: string };
+  const forcedReplay = requestRaw.context_packing_mode === "replay_mode";
+  const priorSessionId = !isSummaryJob && !forcedReplay && job.session_id
     ? queryPriorProviderSessionId(deps.db, job.session_id)
     : null;
   const request = parseRequest(job, capture.attachments, priorSessionId);
@@ -260,19 +272,57 @@ export async function runOneClaimed(
     id: providerRunId,
     jobId: job.id,
     sessionId: job.session_id ?? "",
-    provider: deps.adapter.name,
+    provider: selectedAdapter.name,
     req: request,
     packingMode,
     redactor: deps.redactor,
   });
 
-  const outcome = await safeRun(deps.adapter, request, signal, (pgid) => {
+  const outcome = await safeRun(selectedAdapter, request, signal, (pgid) => {
     deps.db
       .prepare<unknown, [number, string]>(
         `UPDATE provider_runs SET process_group_id = ? WHERE id = ?`,
       )
       .run(pgid, providerRunId);
   });
+
+  // Resume-fallback (HLD §10.2): if a resume_mode attempt fails, re-queue
+  // the job in replay_mode without counting the failed attempt.
+  if (
+    outcome.kind === "failed" &&
+    request.context_packing_mode === "resume_mode" &&
+    outcome.response.exit_code !== 0
+  ) {
+    deps.db.tx<void>(() => {
+      deps.db
+        .prepare<unknown, [string, string]>(
+          `UPDATE provider_runs
+           SET status = 'failed',
+               error_type = 'resume_failed',
+               finished_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+               parser_status = ?
+           WHERE id = ?`,
+        )
+        .run(outcome.response.parser_status, providerRunId);
+      // Re-queue the job in replay_mode; decrement attempts so this doesn't count.
+      const existingReq = JSON.parse(job.request_json) as Record<string, unknown>;
+      const newRequestJson = JSON.stringify({ ...existingReq, context_packing_mode: "replay_mode" });
+      deps.db
+        .prepare<unknown, [string, string]>(
+          `UPDATE jobs
+           SET status = 'queued',
+               started_at = NULL,
+               finished_at = NULL,
+               attempts = MAX(0, attempts - 1),
+               result_json = json_object('resume_failed', 1),
+               request_json = ?
+           WHERE id = ? AND status = 'running'`,
+        )
+        .run(newRequestJson, job.id);
+    });
+    deps.events.info("queue.job.resume_fallback", { job_id: job.id, provider_run_id: providerRunId });
+    return { job_id: job.id, terminal: "failed", turn_id: null, provider_run_id: providerRunId };
+  }
 
   // Persist raw events for audit. Each payload must already be redacted by
   // the adapter (Claude adapter in Phase 7 will enforce line-by-line
@@ -890,6 +940,7 @@ const SYSTEM_COMMANDS = new Set([
   "/forget_session",
   "/forget_artifact",
   "/forget_memory",
+  "/correct",
 ]);
 
 function isSystemCommand(cmd: string): boolean {
@@ -1073,6 +1124,39 @@ async function dispatchSystemCommand(
       if (!job.session_id) return "활성 세션이 없습니다.";
       const result = forgetLast(deps.db, job.session_id);
       return result.affected > 0 ? `마지막 아티팩트를 삭제 예약했습니다.` : "삭제할 아티팩트가 없습니다.";
+    }
+
+    case "/correct": {
+      const parts = args.trim().split(/\s+/);
+      const oldId = parts[0];
+      if (!oldId) return "사용법: /correct <memory_id> <새로운 내용>";
+      const newContent = parts.slice(1).join(" ").trim();
+      if (!newContent) return "사용법: /correct <memory_id> <새로운 내용>";
+      const existing = deps.db
+        .prepare<
+          { session_id: string; item_type: string; provenance: string; confidence: number },
+          [string]
+        >("SELECT session_id, item_type, provenance, confidence FROM memory_items WHERE id = ?")
+        .get(oldId);
+      if (!existing) return `메모리 항목(${oldId})을 찾을 수 없습니다.`;
+      const sessionId = job.session_id ?? existing.session_id;
+      try {
+        correctMemory(deps.db, {
+          old_id: oldId,
+          new_id: deps.newId(),
+          new_item: {
+            session_id: sessionId,
+            item_type: existing.item_type as import("~/memory/items.ts").ItemType,
+            content: newContent,
+            provenance: "user_stated",
+            confidence: 1.0,
+            source_turn_ids: [],
+          },
+        });
+        return `메모리 항목(${oldId})이 수정됐습니다.`;
+      } catch (e) {
+        return `수정 실패: ${(e as Error).message}`;
+      }
     }
 
     default:
