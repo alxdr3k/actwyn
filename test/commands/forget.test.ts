@@ -39,7 +39,7 @@ function seedArtifact(id: string, status = "uploaded"): void {
         source_job_id, source_external_id, artifact_type, retention_class,
         capture_status, status)
      VALUES(?, 's3', 'b', ?, 'telegram', '0', NULL, NULL, 'user_upload', 'long_term', 'captured', ?)`,
-  ).run(id, `users/user-1/objects/${id}/x.bin`, status);
+  ).run(id, `objects/2026/04/23/${id}/capture_pending.bin`, status);
 }
 
 describe("/forget_artifact", () => {

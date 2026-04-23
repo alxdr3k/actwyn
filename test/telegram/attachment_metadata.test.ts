@@ -97,6 +97,9 @@ function desc(overrides: Partial<AttachmentDescriptor> = {}): AttachmentDescript
   };
 }
 
+// Fixed date for deterministic key checks (PRD §12.8.4 format).
+const TEST_NOW = new Date("2026-04-23T00:00:00.000Z");
+
 describe("buildStorageObjectRow", () => {
   test("happy path: capture_status=pending, source_external_id set, sha256/mime/size NULL", () => {
     const row = buildStorageObjectRow({
@@ -108,6 +111,7 @@ describe("buildStorageObjectRow", () => {
       filenameIsRedactionSafe: ALLOW_FILENAME,
       storageKey: defaultStorageKey,
       bucket: "actwyn-test",
+      now: TEST_NOW,
     });
     expect(row.capture_status).toBe("pending");
     expect(row.status).toBe("pending");
@@ -122,7 +126,8 @@ describe("buildStorageObjectRow", () => {
     expect(row.source_message_id).toBe("7");
     expect(row.storage_backend).toBe("s3");
     expect(row.bucket).toBe("actwyn-test");
-    expect(row.storage_key).toBe("users/user-1/objects/obj-1/original.document");
+    // PRD §12.8.4: provisional key (sha256 unknown pre-capture)
+    expect(row.storage_key).toBe("objects/2026/04/23/obj-1/capture_pending.bin");
   });
 
   test("oversize-by-claim: capture_status=failed, reason=oversize_inbound, source_external_id NULL", () => {
@@ -169,10 +174,12 @@ describe("buildStorageObjectRow", () => {
       filenameIsRedactionSafe: ALLOW_FILENAME,
       storageKey: defaultStorageKey,
       bucket: "actwyn-test",
+      now: TEST_NOW,
     });
     expect(row.capture_status).toBe("pending");
     expect(row.size_bytes).toBeNull();
-    expect(row.storage_key).toContain("/original.photo");
+    // PRD §12.8.4: provisional key — extension is "bin" until MIME is known
+    expect(row.storage_key).toBe("objects/2026/04/23/obj-4/capture_pending.bin");
   });
 
   test("bucket=null → storage_backend=local", () => {

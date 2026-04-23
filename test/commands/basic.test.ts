@@ -46,24 +46,24 @@ describe("/status", () => {
   });
 
   test("session-retention storage_objects do NOT count as backlog (§14.1 query contract)", () => {
-    db.prepare<unknown, [string, string]>(
+    db.prepare<unknown, [string]>(
       `INSERT INTO storage_objects
          (id, storage_backend, bucket, storage_key, source_channel, source_message_id,
           source_job_id, source_external_id, artifact_type, retention_class,
           capture_status, status)
-       VALUES(?, 's3', 'b', ?, 'telegram', '0', NULL, NULL, 'user_upload', 'session', 'captured', 'pending')`,
-    ).run("obj-sess", "users/user-1/objects/obj-sess/x.bin");
+       VALUES(?, 's3', 'b', 'objects/2026/04/23/obj-sess/pending.bin', 'telegram', '0', NULL, NULL, 'user_upload', 'session', 'captured', 'pending')`,
+    ).run("obj-sess");
     expect(buildStatusReport(db).storage_sync.pending).toBe(0);
   });
 
   test("long_term pending storage_objects DO count as backlog", () => {
-    db.prepare<unknown, [string, string]>(
+    db.prepare<unknown, [string]>(
       `INSERT INTO storage_objects
          (id, storage_backend, bucket, storage_key, source_channel, source_message_id,
           source_job_id, source_external_id, artifact_type, retention_class,
           capture_status, status)
-       VALUES(?, 's3', 'b', ?, 'telegram', '0', NULL, NULL, 'user_upload', 'long_term', 'captured', 'pending')`,
-    ).run("obj-lt", "users/user-1/objects/obj-lt/x.bin");
+       VALUES(?, 's3', 'b', 'objects/2026/04/23/obj-lt/pending.bin', 'telegram', '0', NULL, NULL, 'user_upload', 'long_term', 'captured', 'pending')`,
+    ).run("obj-lt");
     expect(buildStatusReport(db).storage_sync.pending).toBe(1);
   });
 
@@ -262,13 +262,13 @@ describe("/save_last_attachment", () => {
       `INSERT INTO jobs(id, status, job_type, session_id, chat_id, request_json, idempotency_key, provider)
        VALUES(?, 'succeeded', 'provider_run', ?, ?, '{}', ?, 'fake')`,
     ).run("j-1", "sess-1", "chat-1", "ikey-save");
-    db.prepare<unknown, [string, string]>(
+    db.prepare<unknown, [string]>(
       `INSERT INTO storage_objects
          (id, storage_backend, bucket, storage_key, source_channel, source_message_id,
           source_job_id, source_external_id, artifact_type, retention_class,
           capture_status, status, captured_at)
-       VALUES(?, 's3', 'b', ?, 'telegram', '0', 'j-1', NULL, 'user_upload', 'session', 'captured', 'pending', strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
-    ).run("obj-save", "users/user-1/objects/obj-save/x.bin");
+       VALUES(?, 's3', 'b', 'objects/2026/04/23/obj-save/pending.bin', 'telegram', '0', 'j-1', NULL, 'user_upload', 'session', 'captured', 'pending', strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
+    ).run("obj-save");
     db.prepare<unknown, [string]>(
       "INSERT INTO turns(id, session_id, job_id, role, content_redacted, redaction_applied) VALUES(?, 'sess-1', 'j-1', 'assistant', 'hi', 1)",
     ).run("turn-save");

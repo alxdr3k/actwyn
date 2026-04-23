@@ -322,6 +322,7 @@ export function classifyAndCommit(
         filenameIsRedactionSafe: (fn) => !deps.redactor.detect(fn).matched,
         storageKey: defaultStorageKey,
         bucket: deps.config.s3_bucket,
+        now: deps.now(),
       });
       deps.db
         .prepare<
