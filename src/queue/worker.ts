@@ -1098,19 +1098,21 @@ async function enqueueMemorySnapshotSync(
   mkdirSync(dirname(localPath), { recursive: true });
   writeFileSync(localPath, bytes);
 
+  const bucket = sync.bucket ?? null;
+
   // Atomic: create storage_objects row + update summary FK + enqueue storage_sync.
   deps.db.tx<void>(() => {
     deps.db
-      .prepare<unknown, [string, string, number, string, string, string]>(
+      .prepare<unknown, [string, string | null, string, number, string, string, string]>(
         `INSERT INTO storage_objects
-           (id, storage_backend, storage_key, mime_type, size_bytes, sha256,
+           (id, storage_backend, bucket, storage_key, mime_type, size_bytes, sha256,
             source_channel, source_job_id, artifact_type, retention_class,
             capture_status, status, captured_at)
-         VALUES(?, 's3', ?, 'application/jsonl', ?, ?,
+         VALUES(?, 's3', ?, ?, 'application/jsonl', ?, ?,
                 'system', ?, 'memory_snapshot', 'long_term',
                 'captured', 'pending', strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
       )
-      .run(objectId, storageKey, bytes.length, sha256Hex, jobId);
+      .run(objectId, bucket, storageKey, bytes.length, sha256Hex, jobId);
 
     deps.db
       .prepare<unknown, [string, string]>(

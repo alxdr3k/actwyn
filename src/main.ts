@@ -186,6 +186,7 @@ async function main(): Promise<void> {
           sync: {
             max_attempts: 3,
             local_path: (id) => `${localObjectsPath}/${id}`,
+            bucket: config.s3.bucket,
           },
         },
       },

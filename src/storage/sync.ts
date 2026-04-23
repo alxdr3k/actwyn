@@ -36,6 +36,8 @@ export interface SyncConfig {
   readonly max_attempts: number;
   /** Map storage_object_id → local path (same mapping used at capture time). */
   readonly local_path: (storage_object_id: string) => string;
+  /** S3 bucket for new storage_objects rows that don't inherit a bucket from inbound. */
+  readonly bucket?: string | undefined;
 }
 
 export interface SyncDeps {
