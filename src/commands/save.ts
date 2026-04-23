@@ -4,6 +4,8 @@
 //   - PRD §8.1, §12.8 promotion rule
 //   - DEC-013 (session → long_term promotion requires explicit
 //     user intent)
+//   - ADR-0006 (explicit-save-first; natural-language synonyms trigger
+//     the same promotion as the slash command)
 //   - HLD §5.1 writer map (commands/save_last_attachment writes
 //     memory_artifact_links)
 //
@@ -12,6 +14,55 @@
 // we don't hold).
 
 import type { DbHandle } from "~/db.ts";
+
+// ---------------------------------------------------------------
+// Natural-language save intent detector (pure, ADR-0006)
+// ---------------------------------------------------------------
+
+export interface SaveIntent {
+  readonly caption: string | null;
+}
+
+/**
+ * Detect whether a free-text message expresses an explicit save
+ * intent per ADR-0006. Returns null when no save phrase is found.
+ * Recognises English and Korean patterns.
+ */
+export function parseSaveIntent(text: string): SaveIntent | null {
+  const t = text.trim();
+  if (!t) return null;
+
+  // /save_last_attachment (slash command handled upstream, but kept
+  // here for symmetry with parseCorrection so the dispatcher can
+  // call a single entry point).
+  if (/^\/save_last_attachment\b/i.test(t)) {
+    const cap = t.replace(/^\/save_last_attachment\s*/i, "").trim();
+    return { caption: cap || null };
+  }
+
+  // English natural language
+  const EN_PATTERNS = [
+    /\bsave\s+this\b/i,
+    /\bkeep\s+this\b/i,
+    /\bremember\s+this\s+file\b/i,
+    /\bkeep\s+this\s+for\s+later\b/i,
+    /\bstore\s+this\b/i,
+    /\barchive\s+this\b/i,
+  ];
+  if (EN_PATTERNS.some((p) => p.test(t))) return { caption: null };
+
+  // Korean natural language
+  const KO_PATTERNS = [
+    /이\s*파일\s*저장/,
+    /저장\s*해/,
+    /기억\s*해/,
+    /보관\s*해/,
+    /남겨\s*줘/,
+  ];
+  if (KO_PATTERNS.some((p) => p.test(t))) return { caption: null };
+
+  return null;
+}
 
 export interface SaveResult {
   readonly promoted: boolean;
