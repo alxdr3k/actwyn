@@ -42,7 +42,8 @@ import { forgetArtifact, forgetLast, forgetMemory, forgetSession } from "~/comma
 import { saveLastAttachment } from "~/commands/save.ts";
 import { switchProvider } from "~/commands/provider.ts";
 import { whoamiReply } from "~/commands/whoami.ts";
-import { endSession } from "~/commands/summary.ts";
+import { endSession, enqueueSummaryJob } from "~/commands/summary.ts";
+import { shouldAutoTriggerSummary, writeSummary, type SummaryOutput } from "~/memory/summary.ts";
 import { buildContext, type MemoryItemSlot, type TurnSlot } from "~/context/builder.ts";
 import { pack, serializeForProviderRun } from "~/context/packer.ts";
 import { runUploadPass, runDeletePass, type SyncConfig } from "~/storage/sync.ts";
@@ -366,18 +367,43 @@ export async function runOneClaimed(
       )
       .run(terminalJobStatus, result_json, error_json, job.id);
 
-    // /end: mark the session ended atomically with the job commit.
+    // summary_generation: persist structured summary + optional /end session close.
     if (
       job.job_type === "summary_generation" &&
       terminalJobStatus === "succeeded" &&
       job.session_id
     ) {
+      // Attempt to parse structured summary output from Claude's response.
+      if (finalText.length > 0) {
+        try {
+          const raw = JSON.parse(finalText) as SummaryOutput;
+          writeSummary({
+            db: deps.db,
+            newId: deps.newId,
+            summary: { ...raw, session_id: job.session_id },
+          });
+        } catch {
+          // Non-fatal: unstructured output is stored as a turn but not as a memory_summaries row.
+        }
+      }
       const req = JSON.parse(job.request_json) as { command?: string; trigger?: string };
       if (req.command === "/end" || req.trigger === "explicit_end") {
         endSession(deps.db, job.session_id);
       }
     }
   });
+
+  // Auto-trigger summary check (AC-MEM-005 / PRD §12.3 DEC-019).
+  // Only applies to successful conversational provider_run jobs.
+  if (
+    job.job_type === "provider_run" &&
+    outcome.kind === "succeeded" &&
+    job.session_id &&
+    job.user_id &&
+    job.chat_id
+  ) {
+    maybeEnqueueAutoSummary(deps, job.session_id, job.user_id, job.chat_id);
+  }
 
   deps.events.info("queue.job.terminal", {
     job_id: job.id,
@@ -697,6 +723,76 @@ function commitSystemNoop(deps: WorkerDeps, job: ClaimedJob): RunResult {
     .run(job.id);
   deps.events.info("queue.job.noop", { job_id: job.id, job_type: job.job_type });
   return { job_id: job.id, terminal: "succeeded", turn_id: null, provider_run_id: "" };
+}
+
+// ---------------------------------------------------------------
+// Auto-trigger summary (AC-MEM-005 / PRD §12.3)
+// ---------------------------------------------------------------
+
+function maybeEnqueueAutoSummary(
+  deps: WorkerDeps,
+  session_id: string,
+  user_id: string,
+  chat_id: string,
+): void {
+  try {
+    const counts = deps.db
+      .prepare<
+        {
+          total_turns: number;
+          user_turns: number;
+          total_chars: number;
+          session_age_seconds: number;
+          turns_since_last_summary: number;
+          user_turns_since_last_summary: number;
+        },
+        [string, string]
+      >(
+        `WITH last_sum AS (
+           SELECT COALESCE(MAX(created_at), '1970-01-01T00:00:00.000Z') AS ts
+           FROM memory_summaries WHERE session_id = ?
+         )
+         SELECT
+           COUNT(t.id) AS total_turns,
+           SUM(CASE WHEN t.role = 'user' THEN 1 ELSE 0 END) AS user_turns,
+           SUM(LENGTH(t.content_redacted)) AS total_chars,
+           CAST((JULIANDAY('now') - JULIANDAY(s.started_at)) * 86400 AS INTEGER) AS session_age_seconds,
+           SUM(CASE WHEN t.created_at > ls.ts THEN 1 ELSE 0 END) AS turns_since_last_summary,
+           SUM(CASE WHEN t.role = 'user' AND t.created_at > ls.ts THEN 1 ELSE 0 END) AS user_turns_since_last_summary
+         FROM turns t
+         JOIN sessions s ON s.id = t.session_id
+         CROSS JOIN last_sum ls
+         WHERE t.session_id = ?`,
+      )
+      .get(session_id, session_id);
+
+    if (!counts) return;
+
+    const decision = shouldAutoTriggerSummary({
+      turns_since_last_summary: counts.turns_since_last_summary ?? 0,
+      transcript_estimated_tokens: Math.ceil((counts.total_chars ?? 0) / 4),
+      session_age_seconds: counts.session_age_seconds ?? 0,
+      user_turns_since_last_summary: counts.user_turns_since_last_summary ?? 0,
+    });
+
+    if (!decision.trigger) return;
+
+    enqueueSummaryJob({
+      db: deps.db,
+      newId: deps.newId,
+      session_id,
+      user_id,
+      chat_id,
+      trigger: "explicit_summary",
+    });
+    deps.events.info("queue.summary.auto_enqueued", { session_id, reason: decision.reason });
+  } catch (e) {
+    // Non-fatal: auto-trigger failure must not affect the parent job's terminal status.
+    deps.events.warn("queue.summary.auto_trigger_error", {
+      session_id,
+      error_message: (e as Error).message,
+    });
+  }
 }
 
 // ---------------------------------------------------------------

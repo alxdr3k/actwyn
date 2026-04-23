@@ -389,3 +389,37 @@ describe("system command dispatch — /status handled locally by worker", () => 
     expect(turn!.content_redacted).toContain("queue:");
   });
 });
+
+// ---------------------------------------------------------------
+// Auto-trigger summary (AC-MEM-005 / PRD §12.3 DEC-019)
+// ---------------------------------------------------------------
+
+describe("auto-trigger summary — enqueues summary_generation after threshold", () => {
+  test("20 turns (10 user) since last summary → auto summary_generation job created", async () => {
+    // Insert 20 turns directly (10 user, 10 assistant) to simulate long conversation.
+    for (let i = 0; i < 10; i++) {
+      db.prepare<unknown, []>(
+        `INSERT INTO turns(id, session_id, job_id, role, content_redacted, redaction_applied)
+         VALUES('turn-u-${i}', 'sess-1', NULL, 'user', 'message', 0)`,
+      ).run();
+      db.prepare<unknown, []>(
+        `INSERT INTO turns(id, session_id, job_id, role, content_redacted, redaction_applied)
+         VALUES('turn-a-${i}', 'sess-1', NULL, 'assistant', 'reply', 0)`,
+      ).run();
+    }
+
+    // Now run a provider_run job that succeeds — should trigger auto-summary.
+    seedProviderJob("j-auto-sum", "k-auto-sum", "trigger check");
+    await runWorkerOnce(deps());
+
+    // A summary_generation job should have been enqueued.
+    const sumJob = db
+      .prepare<{ job_type: string; status: string }>(
+        "SELECT job_type, status FROM jobs WHERE job_type = 'summary_generation' LIMIT 1",
+      )
+      .get();
+    expect(sumJob).not.toBeNull();
+    expect(sumJob!.job_type).toBe("summary_generation");
+    expect(sumJob!.status).toBe("queued");
+  });
+});
