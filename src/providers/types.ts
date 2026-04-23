@@ -75,6 +75,6 @@ export interface ProviderAdapter {
   run(
     req: AgentRequest,
     signal?: AbortSignal,
-    onSpawn?: (pgid: number) => void,
+    onSpawn?: (pgid: number, pid: number) => void,
   ): Promise<AgentOutcome>;
 }

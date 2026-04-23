@@ -236,7 +236,7 @@ exit 0
         cwd: workdir,
       });
       let spawnedPgid: number | null = null;
-      await adapter.run(req(), undefined, (pgid) => { spawnedPgid = pgid; });
+      await adapter.run(req(), undefined, (pgid, _pid) => { spawnedPgid = pgid; });
       expect(spawnedPgid).toBeGreaterThan(0);
     } finally {
       rmSync(workdir, { recursive: true, force: true });

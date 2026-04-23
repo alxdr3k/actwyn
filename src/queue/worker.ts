@@ -278,12 +278,12 @@ export async function runOneClaimed(
     redactor: deps.redactor,
   });
 
-  const outcome = await safeRun(selectedAdapter, request, signal, (pgid) => {
+  const outcome = await safeRun(selectedAdapter, request, signal, (pgid, pid) => {
     deps.db
-      .prepare<unknown, [number, string]>(
-        `UPDATE provider_runs SET process_group_id = ? WHERE id = ?`,
+      .prepare<unknown, [number, number, string]>(
+        `UPDATE provider_runs SET process_group_id = ?, process_id = ? WHERE id = ?`,
       )
-      .run(pgid, providerRunId);
+      .run(pgid, pid, providerRunId);
   });
 
   // Resume-fallback (HLD §10.2): if a resume_mode attempt fails, re-queue
@@ -611,7 +611,7 @@ async function safeRun(
   adapter: ProviderAdapter,
   req: AgentRequest,
   signal?: AbortSignal,
-  onSpawn?: (pgid: number) => void,
+  onSpawn?: (pgid: number, pid: number) => void,
 ): Promise<AgentOutcome> {
   try {
     return await adapter.run(req, signal, onSpawn);

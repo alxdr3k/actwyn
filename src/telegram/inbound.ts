@@ -29,6 +29,7 @@ import {
   type InboundAttachmentConfig,
 } from "~/telegram/attachment_metadata.ts";
 import type { TelegramMessage, TelegramUpdate } from "~/telegram/types.ts";
+import { parseSaveIntent } from "~/commands/save.ts";
 
 // ---------------------------------------------------------------
 // Classification (pure)
@@ -85,6 +86,17 @@ export function classifyUpdate(
       command: cmd.command,
       args: cmd.args,
       has_attachments: hasAttachments,
+    };
+  }
+
+  // Natural-language save intent (ADR-0006): "save this", "저장해", etc.
+  const saveIntent = hasAttachments ? null : parseSaveIntent(text);
+  if (saveIntent) {
+    return {
+      kind: "command",
+      command: "/save_last_attachment",
+      args: saveIntent.caption ?? "",
+      has_attachments: false,
     };
   }
 

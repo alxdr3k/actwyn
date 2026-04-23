@@ -36,7 +36,7 @@ export function createFakeAdapter(opts: FakeAdapterOptions = {}): ProviderAdapte
   async function run(
     req: AgentRequest,
     signal?: AbortSignal,
-    _onSpawn?: (pgid: number) => void,
+    _onSpawn?: (pgid: number, pid: number) => void,
   ): Promise<AgentOutcome> {
     const started = (opts.now ?? (() => new Date()))().getTime();
     const events: AgentRawEvent[] = [
