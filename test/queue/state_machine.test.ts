@@ -355,6 +355,57 @@ describe("AC-MEM-001 — summary_generation writes local file + enqueues storage
 });
 
 // ---------------------------------------------------------------
+// ---------------------------------------------------------------
+// summary_generation uses advisory profile prompt (PRD §12.3)
+// ---------------------------------------------------------------
+
+describe("summary_generation — advisory profile schema prompt injected", () => {
+  test("summary_generation job sends JSON schema instruction in packed message", async () => {
+    let capturedMessage: string | undefined;
+    db.prepare<unknown, [string, string, string, string]>(
+      `INSERT INTO jobs
+         (id, status, job_type, session_id, user_id, chat_id, request_json, idempotency_key, provider)
+       VALUES(?, 'queued', 'summary_generation', ?, 'user-1', 'chat-1', ?, ?, 'fake')`,
+    ).run(
+      "j-prompt",
+      "sess-1",
+      JSON.stringify({ text: "", command: "/summary", args: "" }),
+      "telegram:prompt-test",
+    );
+
+    await runWorkerOnce(deps({
+      summaryAdapter: {
+        name: "fake",
+        run: async (req) => {
+          capturedMessage = req.message;
+          return {
+            kind: "succeeded" as const,
+            response: {
+              provider: "fake",
+              session_id: "fake-session",
+              final_text: JSON.stringify({
+                session_id: "sess-1", summary_type: "session",
+                facts: [], preferences: [], open_tasks: [], decisions: [], cautions: [],
+                source_turn_ids: [],
+              }),
+              raw_events: [],
+              duration_ms: 1,
+              exit_code: 0,
+              parser_status: "parsed" as const,
+            },
+          };
+        },
+      },
+    }));
+
+    expect(capturedMessage).toContain("session summariser");
+    expect(capturedMessage).toContain("JSON");
+    expect(capturedMessage).toContain("facts");
+    expect(capturedMessage).toContain("이 대화를");
+  });
+});
+
+// ---------------------------------------------------------------
 // Context snapshot stored in provider_runs.injected_snapshot_json
 // ---------------------------------------------------------------
 

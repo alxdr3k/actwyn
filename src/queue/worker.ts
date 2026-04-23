@@ -47,7 +47,7 @@ import { saveLastAttachment } from "~/commands/save.ts";
 import { switchProvider } from "~/commands/provider.ts";
 import { whoamiReply } from "~/commands/whoami.ts";
 import { endSession, enqueueSummaryJob } from "~/commands/summary.ts";
-import { shouldAutoTriggerSummary, writeSummary, type SummaryOutput } from "~/memory/summary.ts";
+import { shouldAutoTriggerSummary, writeSummary, SUMMARY_SYSTEM_IDENTITY, type SummaryOutput } from "~/memory/summary.ts";
 import { buildContext, type MemoryItemSlot, type TurnSlot } from "~/context/builder.ts";
 import { pack, renderAsMessage, serializeForProviderRun } from "~/context/packer.ts";
 import { runUploadPass, runDeletePass, type SyncConfig } from "~/storage/sync.ts";
@@ -314,6 +314,10 @@ export async function runOneClaimed(
       sessionId: job.session_id,
       req: baseRequest,
       redactor: deps.redactor,
+      // advisory profile: replace system_identity with schema instruction
+      systemIdentity: isSummaryJob ? SUMMARY_SYSTEM_IDENTITY : undefined,
+      // summary user message instructs Claude to produce structured output
+      userMessage: isSummaryJob ? "이 대화를 위의 JSON 스키마에 따라 요약해 주세요." : undefined,
     });
     request = { ...baseRequest, message: ctx.packedMessage };
     snapshotJson = ctx.snapshotJson;
@@ -791,9 +795,13 @@ function buildContextForRun(args: {
   sessionId: string;
   req: AgentRequest;
   redactor: Redactor;
+  /** Override the system_identity slot (e.g. advisory profile for summary_generation). */
+  systemIdentity?: string | undefined;
+  /** Override the user_message slot (e.g. schema prompt for summary_generation). */
+  userMessage?: string | undefined;
 }): ContextBuildResult {
   const fallback: ContextBuildResult = {
-    packedMessage: args.req.message,
+    packedMessage: args.userMessage ?? args.req.message,
     snapshotJson: JSON.stringify({ mode: "replay_mode", session_id: args.sessionId ?? "" }),
   };
 
@@ -850,8 +858,8 @@ function buildContextForRun(args: {
 
   const snap = buildContext({
     mode: "replay_mode",
-    user_message: args.req.message,
-    system_identity: "actwyn personal agent",
+    user_message: args.userMessage ?? args.req.message,
+    system_identity: args.systemIdentity ?? "actwyn personal agent",
     recent_turns: turns,
     memory_items: memItems,
     ...(currentSessionSummary ? { current_session_summary: currentSessionSummary } : {}),
