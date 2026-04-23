@@ -93,6 +93,18 @@ export class BunS3Transport implements S3Transport {
       );
     }
   }
+
+  /** Doctor smoke test: put + delete a sentinel object (PRD §12.8 / AC-OBS-001). */
+  async ping(): Promise<{ ok: boolean; detail?: string }> {
+    const sentinel = `_actwyn_ping_${Date.now()}`;
+    try {
+      await this.put({ bucket: this.bucket, key: sentinel, bytes: new Uint8Array([1]), content_type: "application/octet-stream" });
+      await this.delete({ bucket: this.bucket, key: sentinel });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, detail: (e as Error).message };
+    }
+  }
 }
 
 // ---------------------------------------------------------------

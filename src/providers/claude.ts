@@ -63,6 +63,7 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): ProviderAdapter
   async function run(
     req: AgentRequest,
     signal?: AbortSignal,
+    onSpawn?: (pgid: number) => void,
   ): Promise<AgentOutcome> {
     const started = now().getTime();
     let argv: string[];
@@ -75,6 +76,8 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): ProviderAdapter
         session_id: req.session_id,
         max_turns: opts.max_turns ?? 12,
         extra: opts.extra_argv ?? [],
+        ...(req.context_packing_mode ? { context_packing_mode: req.context_packing_mode } : {}),
+        ...(req.provider_session_id ? { provider_session_id: req.provider_session_id } : {}),
       });
       ensureNoForbidden(argv);
       child = spawnDetached({
@@ -83,6 +86,7 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): ProviderAdapter
         ...(opts.grace_ms !== undefined ? { grace_ms: opts.grace_ms } : {}),
         ...(opts.hard_kill_ms !== undefined ? { hard_kill_ms: opts.hard_kill_ms } : {}),
       });
+      onSpawn?.(child.process_group_id);
     } catch (e) {
       const error_type =
         e instanceof SubprocessError ? `spawn_${e.phase}` :
@@ -187,9 +191,13 @@ function buildArgv(args: {
   session_id: string;
   max_turns: number;
   extra: readonly string[];
+  context_packing_mode?: "resume_mode" | "replay_mode";
+  provider_session_id?: string;
 }): string[] {
   const out: string[] = [args.binary, args.message];
-  if (args.session_id) {
+  if (args.context_packing_mode === "resume_mode" && args.provider_session_id) {
+    out.push("--resume", args.provider_session_id);
+  } else if (args.session_id) {
     out.push("--session-id", args.session_id);
   }
   out.push("--output-format", "stream-json");

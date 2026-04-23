@@ -18,7 +18,7 @@ export interface EnqueueSummaryArgs {
   readonly session_id: string;
   readonly chat_id: string;
   readonly user_id: string;
-  readonly trigger: "explicit_summary" | "explicit_end";
+  readonly trigger: "explicit_summary" | "explicit_end" | "auto";
 }
 
 export interface EnqueueResult {

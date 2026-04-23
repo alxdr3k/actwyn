@@ -127,6 +127,7 @@ async function main(): Promise<void> {
           required_bun_version: config.runtime.required_bun_version,
           current_bun_version: Bun.version,
           bootstrap_whoami: false,
+          s3_ping: () => s3.ping(),
           telegram_ping: async () => {
             try {
               const res = await fetch(`https://api.telegram.org/bot${config.telegram.bot_token}/getMe`);

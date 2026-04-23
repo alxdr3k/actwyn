@@ -249,8 +249,12 @@ export async function runOneClaimed(
     }
   }
 
-  const request = parseRequest(job, capture.attachments);
+  const priorSessionId = job.session_id
+    ? queryPriorProviderSessionId(deps.db, job.session_id)
+    : null;
+  const request = parseRequest(job, capture.attachments, priorSessionId);
   const providerRunId = deps.newId();
+  const packingMode = priorSessionId ? "resume_mode" : "replay_mode";
   insertProviderRunStart({
     db: deps.db,
     id: providerRunId,
@@ -258,10 +262,17 @@ export async function runOneClaimed(
     sessionId: job.session_id ?? "",
     provider: deps.adapter.name,
     req: request,
+    packingMode,
     redactor: deps.redactor,
   });
 
-  const outcome = await safeRun(deps.adapter, request, signal);
+  const outcome = await safeRun(deps.adapter, request, signal, (pgid) => {
+    deps.db
+      .prepare<unknown, [number, string]>(
+        `UPDATE provider_runs SET process_group_id = ? WHERE id = ?`,
+      )
+      .run(pgid, providerRunId);
+  });
 
   // Persist raw events for audit. Each payload must already be redacted by
   // the adapter (Claude adapter in Phase 7 will enforce line-by-line
@@ -300,19 +311,25 @@ export async function runOneClaimed(
   const finalText = outcome.response.final_text;
 
   deps.db.tx<void>(() => {
+    const providerSessionIdFromRun =
+      outcome.kind === "succeeded" && outcome.response.session_id
+        ? outcome.response.session_id
+        : null;
     deps.db
-      .prepare<unknown, [string, string | null, string | null, string]>(
+      .prepare<unknown, [string, string | null, string | null, string | null, string]>(
         `UPDATE provider_runs
          SET status = ?,
              error_type = ?,
              finished_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-             parser_status = ?
+             parser_status = ?,
+             provider_session_id = ?
          WHERE id = ?`,
       )
       .run(
         terminalRunStatus,
         outcome.response.error_type ?? null,
         outcome.response.parser_status,
+        providerSessionIdFromRun,
         providerRunId,
       );
 
@@ -536,9 +553,10 @@ async function safeRun(
   adapter: ProviderAdapter,
   req: AgentRequest,
   signal?: AbortSignal,
+  onSpawn?: (pgid: number) => void,
 ): Promise<AgentOutcome> {
   try {
-    return await adapter.run(req, signal);
+    return await adapter.run(req, signal, onSpawn);
   } catch (e) {
     const msg = (e as Error).message ?? "adapter_threw";
     return {
@@ -561,6 +579,7 @@ async function safeRun(
 function parseRequest(
   job: ClaimedJob,
   attachments: readonly AgentRequestAttachment[],
+  priorProviderSessionId?: string | null,
 ): AgentRequest {
   const parsed = JSON.parse(job.request_json) as {
     text?: string;
@@ -577,8 +596,28 @@ function parseRequest(
     channel: job.chat_id ? `telegram:${job.chat_id}` : "",
     idempotency_key: job.idempotency_key,
     ...(attachments.length > 0 ? { attachments } : {}),
+    ...(priorProviderSessionId
+      ? {
+          context_packing_mode: "resume_mode" as const,
+          provider_session_id: priorProviderSessionId,
+        }
+      : { context_packing_mode: "replay_mode" as const }),
   };
   return req;
+}
+
+function queryPriorProviderSessionId(db: DbHandle, session_id: string): string | null {
+  const row = db
+    .prepare<{ provider_session_id: string }, [string]>(
+      `SELECT provider_session_id
+       FROM provider_runs
+       WHERE session_id = ? AND status = 'succeeded'
+         AND provider_session_id IS NOT NULL
+       ORDER BY finished_at DESC
+       LIMIT 1`,
+    )
+    .get(session_id);
+  return row?.provider_session_id ?? null;
 }
 
 function buildContextSnapshot(args: {
@@ -612,12 +651,42 @@ function buildContextSnapshot(args: {
     )
     .all(args.sessionId);
 
+  // Include the latest session summary if available.
+  const latestSummary = args.db
+    .prepare<{ facts_json: string | null; open_tasks_json: string | null; created_at: string }, [string]>(
+      `SELECT facts_json, open_tasks_json, created_at
+       FROM memory_summaries
+       WHERE session_id = ?
+       ORDER BY created_at DESC
+       LIMIT 1`,
+    )
+    .get(args.sessionId);
+
+  let currentSessionSummary: string | undefined;
+  if (latestSummary) {
+    const parts: string[] = [`[요약 기준: ${latestSummary.created_at}]`];
+    if (latestSummary.facts_json) {
+      try {
+        const facts = JSON.parse(latestSummary.facts_json) as Array<{ content: string }>;
+        if (facts.length > 0) parts.push(`사실: ${facts.map((f) => f.content).join("; ")}`);
+      } catch { /* ignore malformed JSON */ }
+    }
+    if (latestSummary.open_tasks_json) {
+      try {
+        const tasks = JSON.parse(latestSummary.open_tasks_json) as Array<{ content: string }>;
+        if (tasks.length > 0) parts.push(`미결: ${tasks.map((t) => t.content).join("; ")}`);
+      } catch { /* ignore */ }
+    }
+    currentSessionSummary = parts.join("\n");
+  }
+
   const snap = buildContext({
     mode: "replay_mode",
     user_message: args.req.message,
     system_identity: "actwyn personal agent",
     recent_turns: turns,
     memory_items: memItems,
+    ...(currentSessionSummary ? { current_session_summary: currentSessionSummary } : {}),
   });
 
   try {
@@ -635,6 +704,7 @@ function insertProviderRunStart(args: {
   sessionId: string;
   provider: string;
   req: AgentRequest;
+  packingMode: "resume_mode" | "replay_mode";
   redactor: Redactor;
 }): void {
   const argvRedacted = JSON.stringify(args.redactor.applyToJson({
@@ -645,14 +715,14 @@ function insertProviderRunStart(args: {
   args.db
     .prepare<
       unknown,
-      [string, string, string, string, string, string]
+      [string, string, string, string, string, string, string]
     >(
       `INSERT INTO provider_runs
          (id, job_id, session_id, provider, context_packing_mode, status,
           argv_json_redacted, cwd, injected_snapshot_json, parser_status)
-       VALUES(?, ?, ?, ?, 'replay_mode', 'started', ?, '.', ?, 'parsed')`,
+       VALUES(?, ?, ?, ?, ?, 'started', ?, '.', ?, 'parsed')`,
     )
-    .run(args.id, args.jobId, args.sessionId, args.provider, argvRedacted, snapshot);
+    .run(args.id, args.jobId, args.sessionId, args.provider, args.packingMode, argvRedacted, snapshot);
 }
 
 async function runStorageSyncJob(deps: WorkerDeps, job: ClaimedJob): Promise<RunResult> {
@@ -777,13 +847,23 @@ function maybeEnqueueAutoSummary(
 
     if (!decision.trigger) return;
 
+    // Throttle: don't enqueue a second auto-summary if one is already pending.
+    const pending = deps.db
+      .prepare<{ n: number }, [string]>(
+        `SELECT COUNT(*) AS n FROM jobs
+         WHERE job_type = 'summary_generation' AND session_id = ?
+           AND status IN ('queued', 'running')`,
+      )
+      .get(session_id);
+    if ((pending?.n ?? 0) > 0) return;
+
     enqueueSummaryJob({
       db: deps.db,
       newId: deps.newId,
       session_id,
       user_id,
       chat_id,
-      trigger: "explicit_summary",
+      trigger: "auto",
     });
     deps.events.info("queue.summary.auto_enqueued", { session_id, reason: decision.reason });
   } catch (e) {
