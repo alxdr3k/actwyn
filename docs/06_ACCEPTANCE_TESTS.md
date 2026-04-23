@@ -389,29 +389,70 @@ Each entry uses:
     allowlist or 08_DECISION_REGISTER.md.
 - **Status**: pending.
 
-## AC-STO-003 — Telegram attachment is captured into `storage_objects`
+## AC-STO-003a — Telegram attachment inbound metadata (Phase 1)
 
-- **Maps to**: PRD AC-STO-003 (legacy AC21 (artifact)); HLD §9.3.
-- **Test type**: end-to-end.
-- **Fixture**: Clean DB; Telegram + Hetzner available.
+- **Maps to**: PRD AC-STO-003a (supersedes legacy AC-STO-003 / AC21
+  (artifact)); PRD §13.5 Phase 1; HLD §7.1, §7.10, §9.3.
+- **Test type**: integration (inbound transaction boundary).
+- **Fixture**: Clean DB; Telegram poller with a stubbed
+  `getFile`/download surface that **asserts it is not called** during
+  the inbound transaction.
 - **Procedure**:
-  1. Send a photo and a small document.
-  2. Inspect `storage_objects`.
+  1. Feed a `getUpdates` batch containing a photo and a small
+     document.
+  2. Inspect `storage_objects` and `telegram_updates` after the
+     inbound transaction commits.
+  3. Verify that the stubbed Telegram file API was not invoked in
+     this phase.
 - **Oracle**:
-  - Two rows with `source_channel = 'telegram'`, detected
-    `mime_type`, non-null `sha256`, and
-    `source_message_id` set.
-  - Local file path exists and matches the hash.
+  - Two `storage_objects` rows exist with
+    `source_channel = 'telegram'`, `source_external_id` equal to
+    the Telegram `file_id`, `source_message_id` set,
+    `capture_status = 'pending'`, `status = 'pending'`, and
+    `sha256` / `mime_type` / `size_bytes` all `NULL`.
   - Retention defaults to `session` (not `long_term`).
-  - The Telegram `file_path` URL is never stored as the
+  - The Telegram `file_path` URL is not stored anywhere as a
     durable reference.
+  - The stubbed `getFile` / download / MIME probe surface
+    recorded **zero** calls during the inbound transaction.
+- **Status**: pending.
+
+## AC-STO-003b — Telegram attachment byte capture (Phase 2)
+
+- **Maps to**: PRD AC-STO-003b (supersedes legacy AC-STO-003 / AC21
+  (artifact)); PRD §13.5 Phase 2; HLD §7.2, §9.3; Appendix D capture
+  invariants.
+- **Test type**: end-to-end.
+- **Fixture**: Clean DB; Telegram + Hetzner available; starts from
+  the state produced by AC-STO-003a.
+- **Procedure**:
+  1. Let the worker claim the owning `provider_run` job and run the
+     attachment capture pre-step.
+  2. For the failure case, inject a `getFile` error on one of the
+     two rows.
+- **Oracle (success row)**:
+  - `capture_status = 'captured'`, populated `sha256`,
+    detected `mime_type` (not user-claimed), non-null
+    `size_bytes`, `captured_at` set.
+  - Local file path exists and its hash matches `sha256`.
+  - A `storage_sync` job is enqueued **only if** the retention
+    class is S3-eligible per §12.8.3 / §14.1 storage_sync query
+    contract.
+- **Oracle (failure row)**:
+  - `capture_status = 'failed'`, `capture_error_json` populated
+    (redacted), `sha256` / `mime_type` / `size_bytes` remain
+    `NULL`, no local bytes held.
+  - **No** `storage_sync` job is enqueued for this row.
+  - The owning `provider_run` still reaches a terminal state; the
+    user `turns` row is committed with a capture-failure note.
 - **Status**: pending.
 
 ## AC-STO-004 — Attachment stays `session` without explicit save intent
 
 - **Maps to**: PRD AC-STO-004 (legacy AC22 (artifact)); HLD §6.4, §9.3.
 - **Test type**: end-to-end.
-- **Fixture**: As AC-STO-003.
+- **Fixture**: As AC-STO-003b (capture must have reached `captured`
+  before this test's assertions are meaningful).
 - **Procedure**:
   1. Send an attachment with a neutral caption ("here's a
      photo").
@@ -431,7 +472,8 @@ Each entry uses:
 
 - **Maps to**: PRD AC-STO-005 (legacy AC23 (artifact)); HLD §6.4, §11.4.
 - **Test type**: end-to-end.
-- **Fixture**: As AC-STO-003.
+- **Fixture**: As AC-STO-003b (row must be `capture_status =
+  'captured'` before `/save_last_attachment` runs).
 - **Procedure**:
   1. Send an attachment.
   2. Run `/save_last_attachment` (or a natural-language "save
@@ -448,7 +490,7 @@ Each entry uses:
 
 - **Maps to**: PRD AC-SEC-002 (legacy AC24 (artifact)); HLD §5.2.
 - **Test type**: smoke.
-- **Fixture**: A handful of uploaded artifacts from AC-STO-003 /
+- **Fixture**: A handful of uploaded artifacts from AC-STO-003b /
   AC-STO-005.
 - **Procedure**:
   1. List the bucket under `objects/` and inspect keys.
@@ -626,7 +668,7 @@ follow the same template as the sections above.
 
 Suggested additional test plans to write alongside the backlog:
 
-- **TEST-TEL-ATTACH-001** (AC-STO-003 reinforcement): attachment
+- **TEST-TEL-ATTACH-001** (AC-STO-003b reinforcement): attachment
   download failure during the worker capture pass leaves the user
   turn committed and the `storage_objects` row at
   `capture_status = 'failed'` with `capture_error_json`; no corrupt
@@ -643,6 +685,57 @@ Suggested additional test plans to write alongside the backlog:
   `failed`, and `uploaded` semantics match PRD §17 /
   Appendix D / HLD §6.4 exactly; `capture_status` vs `status`
   columns are independent and never conflated in queries.
+
+### Phase-gate escalation rules for the backlog
+
+The "Pending-to-add" backlog above is not a free-for-all: each AC
+must be promoted into a full test plan (Fixture / Procedure / Oracle
+/ Status) **before the implementation phase that could ship its
+behavior closes**. The four reinforcement tests above are promoted
+on the same schedule as the AC they reinforce; they are not
+optional P1 items.
+
+The schedule is pinned to the milestones in
+[`docs/04_IMPLEMENTATION_PLAN.md`](./04_IMPLEMENTATION_PLAN.md) and
+the playbook gates:
+
+**Before the Phase 6 Walking Skeleton gate (M1 exit):** full test
+plans must exist for every AC whose behavior is covered by
+Phases 1–5:
+
+- Inbound / outbound ledger: AC-TEL-005, AC-TEL-006, AC-TEL-007,
+  AC-TEL-008, AC-TEL-009.
+- Outbound chunk ledger: AC-NOTIF-001, AC-NOTIF-002, AC-NOTIF-003,
+  AC-NOTIF-004, AC-NOTIF-005, plus TEST-NOTIF-CHUNK-001.
+- Attachment two-phase capture: AC-STO-003a (already written),
+  AC-STO-003b (already written), plus TEST-TEL-ATTACH-001.
+- Operator surface: AC-OPS-003.
+
+**Before the Phase 7 (Claude provider) gate (M2 exit):** full test
+plans must exist for:
+
+- Claude lockdown / behavior: AC-PROV-007, AC-PROV-008,
+  AC-PROV-010, AC-PROV-011, AC-PROV-012, AC-PROV-013, AC-PROV-014.
+- Claude security: AC-SEC-003, AC-SEC-004, AC-SEC-005, AC-SEC-006,
+  AC-SEC-007.
+- Resume fallback: TEST-PROV-RESUME-001.
+
+**Before the Phase 8–9 memory / summary gates (M3 exit):** full
+test plans for AC-MEM-006 and AC-PROV-014 (advisory profile).
+
+**Before the Phase 10 operate-and-polish gate (M4 exit):** full
+test plans for AC-OPS-002, AC-OPS-004, AC-PROV-009, and
+AC-SEC-ATTACH-001.
+
+**Before the P0 Acceptance gate (M5 exit):** every AC in PRD §17
+— including AC-STO-003a / AC-STO-003b explicitly — has a filled-in
+test plan in this file, plus the four reinforcement tests above.
+Entries still marked "backlog" block the gate.
+
+Updating this file is part of each phase's exit work; the gate
+reviewer checks that the backlog table at the top of the "Pending-
+to-add" section has shrunk to zero for the rows this phase owns
+before declaring the phase complete.
 
 ---
 
@@ -672,7 +765,8 @@ Rolled-up view for the P0 Acceptance gate.
 | AC-PROV-006 | pending | SP-07               | Three sub-cases.                               |
 | AC-JOB-003 | pending | SP-01               |                                                |
 | AC-OPS-001 | pending | —                   | CI script.                                     |
-| AC-STO-003 | pending | SP-02, SP-08        | Attachment capture.                            |
+| AC-STO-003a | pending | SP-02, SP-08       | Inbound metadata only; no Telegram I/O in inbound txn. |
+| AC-STO-003b | pending | SP-02, SP-08       | Worker capture pass populates bytes + hash.    |
 | AC-STO-004 | pending | SP-02               | Negative: no promotion.                        |
 | AC-STO-005 | pending | SP-02, SP-08        |                                                |
 | AC-SEC-002 | pending | SP-08               | Key hygiene.                                   |
