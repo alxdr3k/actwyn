@@ -38,6 +38,8 @@ import type {
 import { endSession } from "~/commands/summary.ts";
 import { buildContext, type MemoryItemSlot, type TurnSlot } from "~/context/builder.ts";
 import { pack, serializeForProviderRun } from "~/context/packer.ts";
+import { runUploadPass, runDeletePass, type SyncConfig } from "~/storage/sync.ts";
+import type { S3Transport } from "~/storage/s3.ts";
 import {
   captureOne,
   commitCaptureFailure,
@@ -60,6 +62,8 @@ export interface WorkerConfig {
   readonly notifications?: {
     readonly chunk_size?: number | undefined;
   } | undefined;
+  /** Optional S3 sync config. When present, storage_sync jobs run the upload/delete pass. */
+  readonly sync?: SyncConfig | undefined;
 }
 
 export interface WorkerDeps {
@@ -74,6 +78,8 @@ export interface WorkerDeps {
   readonly config: WorkerConfig;
   /** Optional: when set, terminal transitions enqueue an outbound notification and send it. */
   readonly outbound?: OutboundTransport | undefined;
+  /** Optional: when set, storage_sync jobs call runUploadPass/runDeletePass via this transport. */
+  readonly s3?: S3Transport | undefined;
 }
 
 interface ClaimedJob {
@@ -210,13 +216,15 @@ export async function runOneClaimed(
   // Capture pass first.
   const capture = await runCapturePass(deps, job.id);
 
+  if (job.job_type === "storage_sync") {
+    return runStorageSyncJob(deps, job);
+  }
+
   if (job.job_type !== "provider_run" && job.job_type !== "summary_generation") {
-    // Phase 4 only wires provider_run / summary_generation to an adapter.
-    // Other job types become succeeded no-ops here — Phase 9 wires
-    // storage_sync, Phase 5 wires notification_retry. Recording a
-    // provider_runs row for these would violate the invariant that
-    // only provider subprocess work lives there, so we commit a
-    // succeeded terminal without one.
+    // notification_retry and any future non-provider job types: no-op
+    // until explicitly wired. Recording a provider_runs row for these
+    // would violate the invariant that only provider subprocess work
+    // lives there, so we commit a succeeded terminal without one.
     return commitSystemNoop(deps, job);
   }
 
@@ -597,10 +605,65 @@ function insertProviderRunStart(args: {
     .run(args.id, args.jobId, args.sessionId, args.provider, argvRedacted, snapshot);
 }
 
+async function runStorageSyncJob(deps: WorkerDeps, job: ClaimedJob): Promise<RunResult> {
+  if (!deps.s3 || !deps.config.sync) {
+    // No S3 transport configured — noop so the queue keeps moving.
+    return commitSystemNoop(deps, job);
+  }
+
+  const syncDeps = {
+    db: deps.db,
+    transport: deps.s3,
+    events: deps.events,
+    config: deps.config.sync,
+  };
+
+  let uploadResult: { uploaded: number; failed: number; local_missing: number };
+  let deleteResult: { deleted: number; delete_failed: number; local_only_deleted: number };
+  try {
+    uploadResult = await runUploadPass(syncDeps);
+    deleteResult = await runDeletePass(syncDeps);
+  } catch (e) {
+    deps.db
+      .prepare<unknown, [string, string]>(
+        `UPDATE jobs
+         SET status = 'failed',
+             finished_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+             error_json = ?
+         WHERE id = ? AND status = 'running'`,
+      )
+      .run(JSON.stringify({ error_type: "sync_pass_threw", message: (e as Error).message.slice(0, 200) }), job.id);
+    return { job_id: job.id, terminal: "failed", turn_id: null, provider_run_id: "" };
+  }
+
+  const result_json = JSON.stringify({
+    uploaded: uploadResult.uploaded,
+    upload_failed: uploadResult.failed,
+    local_missing: uploadResult.local_missing,
+    deleted: deleteResult.deleted,
+    delete_failed: deleteResult.delete_failed,
+    local_only_deleted: deleteResult.local_only_deleted,
+  });
+  deps.db
+    .prepare<unknown, [string, string]>(
+      `UPDATE jobs
+       SET status = 'succeeded',
+           finished_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+           result_json = ?
+       WHERE id = ? AND status = 'running'`,
+    )
+    .run(result_json, job.id);
+  deps.events.info("queue.job.storage_sync", {
+    job_id: job.id,
+    uploaded: uploadResult.uploaded,
+    deleted: deleteResult.deleted,
+  });
+  return { job_id: job.id, terminal: "succeeded", turn_id: null, provider_run_id: "" };
+}
+
 function commitSystemNoop(deps: WorkerDeps, job: ClaimedJob): RunResult {
-  // Mark the job succeeded without a provider_runs row. Used by
-  // Phase 4 for non-provider job types (storage_sync, notification_retry)
-  // that haven't been wired yet — keeps the queue moving in tests.
+  // Mark the job succeeded without a provider_runs row. Used for
+  // notification_retry and other future non-provider job types.
   deps.db
     .prepare<unknown, [string]>(
       `UPDATE jobs

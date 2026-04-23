@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -9,6 +9,7 @@ import { createEmitter } from "../../src/observability/events.ts";
 import { createRedactor } from "../../src/observability/redact.ts";
 import { createFakeAdapter } from "../../src/providers/fake.ts";
 import { runWorkerOnce, type WorkerDeps } from "../../src/queue/worker.ts";
+import { StubS3Transport } from "../../src/storage/s3.ts";
 import type { MimeProbe, TelegramFileTransport } from "../../src/telegram/attachment_capture.ts";
 
 const MIGRATIONS = join(import.meta.dir, "..", "..", "migrations");
@@ -271,5 +272,81 @@ describe("context snapshot — injected_snapshot_json contains packed context", 
     const snap = JSON.parse(prun.injected_snapshot_json) as { mode?: string; slots?: unknown[] };
     expect(snap.mode).toBe("replay_mode");
     expect(Array.isArray(snap.slots)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------
+// storage_sync job dispatch
+// ---------------------------------------------------------------
+
+describe("storage_sync job dispatch — uploads pending storage_objects when s3 wired", () => {
+  test("storage_sync job triggers upload pass and marks job succeeded", async () => {
+    const objectId = "so-sync-1";
+    const objectKey = `objects/2026/04/23/${objectId}/deadbeef.bin`;
+    const bytes = new Uint8Array([1, 2, 3]);
+    const localDir = join(workdir, "objects");
+    mkdirSync(localDir, { recursive: true });
+    writeFileSync(join(localDir, objectId), bytes);
+
+    db.prepare<unknown, [string]>(
+      `INSERT INTO storage_objects
+         (id, storage_backend, bucket, storage_key, source_channel, source_message_id,
+          source_job_id, artifact_type, retention_class, capture_status, status, sha256)
+       VALUES(?, 's3', 'test-bucket', ?, 'system', '0', NULL, 'user_upload', 'long_term', 'captured', 'pending', 'deadbeef')`,
+    ).run(objectId, objectKey);
+
+    db.prepare<unknown, [string]>(
+      `INSERT INTO jobs
+         (id, status, job_type, request_json, idempotency_key)
+       VALUES(?, 'queued', 'storage_sync', ?, ?)`,
+    ).run(
+      "j-sync-1",
+      JSON.stringify({ storage_object_id: objectId }),
+      `sync:${objectId}`,
+    );
+
+    const stubTransport = new StubS3Transport();
+    const syncDeps = deps({
+      s3: stubTransport,
+      config: {
+        capture: { max_download_size_bytes: 20 * 1024 * 1024, local_path: (id) => join(localDir, id) },
+        sync: { max_attempts: 3, local_path: (id) => join(localDir, id) },
+      },
+    });
+    await runWorkerOnce(syncDeps);
+
+    const job = db
+      .prepare<{ status: string; result_json: string | null }, [string]>(
+        "SELECT status, result_json FROM jobs WHERE id = ?",
+      )
+      .get("j-sync-1")!;
+    expect(job.status).toBe("succeeded");
+    expect(job.result_json).toContain("uploaded");
+
+    const so = db
+      .prepare<{ status: string }, [string]>(
+        "SELECT status FROM storage_objects WHERE id = ?",
+      )
+      .get(objectId)!;
+    expect(so.status).toBe("uploaded");
+    expect(stubTransport.store.size).toBe(1);
+  });
+
+  test("storage_sync without s3 dep → noop (succeeds without uploading)", async () => {
+    db.prepare<unknown, []>(
+      `INSERT INTO jobs
+         (id, status, job_type, request_json, idempotency_key)
+       VALUES('j-sync-noop', 'queued', 'storage_sync', '{}', 'sync:noop')`,
+    ).run();
+
+    await runWorkerOnce(deps());
+
+    const job = db
+      .prepare<{ status: string; result_json: string | null }, [string]>(
+        "SELECT status, result_json FROM jobs WHERE id = ?",
+      )
+      .get("j-sync-noop")!;
+    expect(job.status).toBe("succeeded");
+    expect(job.result_json).toContain("noop");
   });
 });
