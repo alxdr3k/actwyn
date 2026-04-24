@@ -7,12 +7,17 @@
 //     --no-session-persistence, etc.)
 //
 // P0 spawn profile (conversational):
-//   claude <message>
-//     --session-id <session-id>           # or --resume in resume_mode
+//   claude -p <message>                   # print mode — non-interactive, exits when done
 //     --output-format stream-json
+//     --session-id <session-id>           # or --resume in resume_mode
 //     --tools ""                          # lockdown per HLD §4.4 / PRD §11.2
 //     --permission-mode dontAsk           # no interactive prompts
 //     --max-turns <n>
+//
+// Without `-p`, the Claude CLI treats the positional argument as the
+// initial prompt of an INTERACTIVE session and will not exit on its
+// own — spawns would then always hit the stall/runtime timers. Print
+// mode (`-p`) is the documented SDK/non-interactive entry point.
 //
 // The adapter is tested with a fake binary that emits stream-json
 // in the same event shape the parser understands; the real Claude
@@ -78,14 +83,21 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): ProviderAdapter
     let child;
     try {
       // AC-PROV-013: fail before spawn if message exceeds max_prompt_bytes.
-      if (opts.max_prompt_bytes !== undefined && req.message.length > opts.max_prompt_bytes) {
-        return failed({
-          provider: "claude",
-          error_type: "prompt_too_large",
-          message: `prompt length ${req.message.length} exceeds max_prompt_bytes ${opts.max_prompt_bytes}`,
-          started,
-          now,
-        });
+      // Review Medium 10: the option is named *_bytes and is compared against
+      // argv length, which the OS measures in bytes. For Korean (multi-byte
+      // UTF-8) prompts, String#length under-reports the byte size by up to
+      // 3×, so we must use TextEncoder to measure actual encoded bytes.
+      if (opts.max_prompt_bytes !== undefined) {
+        const promptBytes = new TextEncoder().encode(req.message).byteLength;
+        if (promptBytes > opts.max_prompt_bytes) {
+          return failed({
+            provider: "claude",
+            error_type: "prompt_too_large",
+            message: `prompt byte length ${promptBytes} exceeds max_prompt_bytes ${opts.max_prompt_bytes}`,
+            started,
+            now,
+          });
+        }
       }
       argv = buildArgv({
         binary: opts.binary,
@@ -265,6 +277,33 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): ProviderAdapter
 // argv construction (PRD §11.2)
 // ---------------------------------------------------------------
 
+export function buildClaudeArgv(args: {
+  binary: string;
+  profile: ClaudeProfile;
+  message: string;
+  session_id: string;
+  max_turns: number;
+  extra: readonly string[];
+  context_packing_mode?: "resume_mode" | "replay_mode";
+  provider_session_id?: string;
+}): string[] {
+  // `-p <message>` is print mode: non-interactive, exits when done.
+  // Must come before other flags so the adapter contract is easy to
+  // assert in tests (argv[1] === "-p").
+  const out: string[] = [args.binary, "-p", args.message, "--output-format", "stream-json"];
+  if (args.context_packing_mode === "resume_mode" && args.provider_session_id) {
+    out.push("--resume", args.provider_session_id);
+  } else if (args.session_id) {
+    out.push("--session-id", args.session_id);
+  }
+  // Lockdown per HLD §4.4 / PRD §11.2: no tools, no interactive prompts.
+  out.push("--tools", "");
+  out.push("--permission-mode", "dontAsk");
+  out.push("--max-turns", String(args.max_turns));
+  for (const a of args.extra) out.push(a);
+  return out;
+}
+
 function buildArgv(args: {
   binary: string;
   profile: ClaudeProfile;
@@ -275,19 +314,7 @@ function buildArgv(args: {
   context_packing_mode?: "resume_mode" | "replay_mode";
   provider_session_id?: string;
 }): string[] {
-  const out: string[] = [args.binary, args.message];
-  if (args.context_packing_mode === "resume_mode" && args.provider_session_id) {
-    out.push("--resume", args.provider_session_id);
-  } else if (args.session_id) {
-    out.push("--session-id", args.session_id);
-  }
-  out.push("--output-format", "stream-json");
-  // Lockdown per HLD §4.4 / PRD §11.2: no tools, no interactive prompts.
-  out.push("--tools", "");
-  out.push("--permission-mode", "dontAsk");
-  out.push("--max-turns", String(args.max_turns));
-  for (const a of args.extra) out.push(a);
-  return out;
+  return buildClaudeArgv(args);
 }
 
 function ensureNoForbidden(argv: readonly string[]): void {

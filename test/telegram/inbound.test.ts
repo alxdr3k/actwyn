@@ -194,6 +194,61 @@ describe("classifyUpdate — pure", () => {
     if (c.kind === "skip") expect(c.reason).toBe("unsupported_type");
   });
 
+  test("Blocker 7: group chat from authorized user → skip/unsupported_chat_type", () => {
+    const groupUpdate: TelegramUpdate = {
+      update_id: 201,
+      message: {
+        message_id: 2010,
+        date: 1_700_000_000,
+        from: { id: AUTHORIZED_USER_ID },
+        chat: { id: -1001234567890, type: "group" },
+        text: "hi everyone",
+      },
+    };
+    const c = classifyUpdate(groupUpdate, opts);
+    expect(c.kind).toBe("skip");
+    if (c.kind === "skip") expect(c.reason).toBe("unsupported_chat_type");
+  });
+
+  test("Blocker 7: supergroup and channel are also rejected", () => {
+    for (const chatType of ["supergroup", "channel"] as const) {
+      const u: TelegramUpdate = {
+        update_id: 202,
+        message: {
+          message_id: 2020,
+          date: 1_700_000_000,
+          from: { id: AUTHORIZED_USER_ID },
+          chat: { id: -100555, type: chatType },
+          text: "mentioned",
+        },
+      };
+      const c = classifyUpdate(u, opts);
+      expect(c.kind).toBe("skip");
+      if (c.kind === "skip") expect(c.reason).toBe("unsupported_chat_type");
+    }
+  });
+
+  test("Blocker 7 (writer): group chat message creates no job and no session", () => {
+    // Also verify via the full writer path. Use an isolated deps with a fresh id factory.
+    const u: TelegramUpdate = {
+      update_id: 203,
+      message: {
+        message_id: 2030,
+        date: 1_700_000_000,
+        from: { id: AUTHORIZED_USER_ID },
+        chat: { id: -100222, type: "group" },
+        text: "group msg",
+      },
+    };
+    processBatch(deps, [u]);
+    const row = getUpdateRow(203);
+    expect(row.status).toBe("skipped");
+    expect(row.skip_reason).toBe("unsupported_chat_type");
+    expect(countJobs()).toBe(0);
+    const sessN = db.prepare<{ n: number }>("SELECT COUNT(*) AS n FROM sessions").get()!.n;
+    expect(sessN).toBe(0);
+  });
+
   test("bootstrap_whoami: unauthorized /whoami → whoami_bootstrap", () => {
     const c = classifyUpdate(textMessageUpdate(8, "/whoami", UNAUTHORIZED_USER_ID), {
       ...opts,
@@ -292,6 +347,30 @@ describe("AC-TEL-003 — duplicate update_id", () => {
     expect(countJobs()).toBe(1);
     // offset may not move backwards.
     expect(readOffset(db)).toBe(78);
+  });
+
+  test("Blocker 6: duplicate attachment update does NOT create a second storage_objects row", () => {
+    const u = documentUpdate(301, { filename: "x.pdf", mime: "application/pdf", size: 1024 });
+    processBatch(deps, [u]);
+    expect(countStorageObjects()).toBe(1);
+    processBatch(deps, [u]);
+    // Same update_id re-delivered → NO new storage_objects (and no new job).
+    expect(countStorageObjects()).toBe(1);
+    expect(countJobs()).toBe(1);
+  });
+
+  test("Blocker 6: duplicate terminal-skipped update is not re-classified (no session promotion)", () => {
+    // Unauthorized sender → skipped.
+    const u = textMessageUpdate(311, "hi", UNAUTHORIZED_USER_ID);
+    processBatch(deps, [u]);
+    expect(countJobs()).toBe(0);
+    expect(getUpdateRow(311).status).toBe("skipped");
+
+    // Re-deliver: still skipped, no jobs, no sessions created.
+    processBatch(deps, [u]);
+    expect(countJobs()).toBe(0);
+    const sessN = db.prepare<{ n: number }>("SELECT COUNT(*) AS n FROM sessions").get()!.n;
+    expect(sessN).toBe(0);
   });
 });
 

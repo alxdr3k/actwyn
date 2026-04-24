@@ -15,12 +15,16 @@ import type { DbHandle } from "~/db.ts";
 export type CancelOutcome =
   | { kind: "cancelled_queued"; job_id: string }
   | { kind: "cancel_signalled"; job_id: string }
+  /** The job is running but no AbortController handle is registered for it
+   *  (e.g. running in a different worker process, or registry not wired).
+   *  Callers MUST NOT report this as a success to the user. */
+  | { kind: "cancel_unavailable"; job_id: string }
   | { kind: "not_found" }
   | { kind: "terminal"; job_id: string; status: string };
 
 export interface CancelDeps {
   /** For each running job_id, a handle to signal cancel. */
-  readonly running_cancel_handles?: Map<string, AbortController>;
+  readonly running_cancel_handles?: Map<string, AbortController> | undefined;
 }
 
 /**
@@ -62,7 +66,12 @@ export function cancelJob(
 
   if (row.status === "running") {
     const handle = args.deps?.running_cancel_handles?.get(row.id);
-    handle?.abort();
+    if (!handle) {
+      // Running in another process, or handle not yet registered. Do not
+      // pretend we cancelled — let the caller surface a clear message.
+      return { kind: "cancel_unavailable", job_id: row.id };
+    }
+    handle.abort();
     return { kind: "cancel_signalled", job_id: row.id };
   }
 

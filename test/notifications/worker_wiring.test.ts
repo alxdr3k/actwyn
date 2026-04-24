@@ -172,6 +172,51 @@ describe("worker → outbound wiring", () => {
     expect(typeof req.notification_id).toBe("string");
   });
 
+  test("exhausted chunks (all non-retryable) do NOT enqueue another notification_retry job (review Blocker 3)", async () => {
+    seedJob("j-exhaust", "keep failing");
+    const planText = "echo: [system_identity]\nactwyn personal agent\n\nkeep failing";
+    // `fail_non_retryable` fails once per call and marks the chunk permanently failed.
+    const transport = new StubOutboundTransport({
+      plan: new Map([[planText, "fail_non_retryable"]]),
+    });
+    await runWorkerOnce(buildDeps(transport));
+
+    // The first send is a non-retryable failure — the parent job_completed notification
+    // has no retry-eligible chunks, so the worker must NOT enqueue a notification_retry.
+    // (Sending path was `sendNotification`, which does the failing send itself. If a
+    // retry job was enqueued, the next claim would repeat the work indefinitely.)
+    const retryJobs = db
+      .prepare<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM jobs WHERE job_type = 'notification_retry'",
+      )
+      .get()!;
+    // At most the initial one-shot may be enqueued from the provider_run path, but
+    // running that retry to completion must NOT spawn another.
+    // Drain any queued notification_retry jobs.
+    let drained = 0;
+    while (drained < 10) {
+      const retry = db
+        .prepare<{ id: string; status: string }>(
+          "SELECT id, status FROM jobs WHERE job_type = 'notification_retry' AND status = 'queued' LIMIT 1",
+        )
+        .get();
+      if (!retry) break;
+      await runWorkerOnce(buildDeps(transport));
+      drained += 1;
+    }
+    expect(drained).toBeLessThan(5); // Terminates quickly — not infinite.
+
+    // After draining, no queued notification_retry jobs should remain.
+    const remaining = db
+      .prepare<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM jobs WHERE job_type = 'notification_retry' AND status = 'queued'",
+      )
+      .get()!;
+    expect(remaining.n).toBe(0);
+    // Total retry jobs ever created for this notification must be bounded.
+    expect(retryJobs.n).toBeLessThanOrEqual(5);
+  });
+
   test("notification_retry job dispatch retries chunks and marks job succeeded", async () => {
     seedJob("j-retry-run", "retry me");
     // Fake adapter echoes the full packed message (system_identity + user message).

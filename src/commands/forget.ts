@@ -27,8 +27,17 @@ export interface ForgetResult {
  * reference it (they are the "meaning" attached to the bytes and
  * should go away with the bytes — HLD §5.1 writer map).
  */
-export function forgetArtifact(db: DbHandle, storage_object_id: string): ForgetResult {
+export function forgetArtifact(
+  db: DbHandle,
+  storage_object_id: string,
+  opts?: { newId?: () => string },
+): ForgetResult {
   return db.tx<ForgetResult>(() => {
+    const existing = db
+      .prepare<{ storage_backend: string }, [string]>(
+        `SELECT storage_backend FROM storage_objects WHERE id = ?`,
+      )
+      .get(storage_object_id);
     const res = db
       .prepare<unknown, [string]>(
         `UPDATE storage_objects
@@ -42,6 +51,18 @@ export function forgetArtifact(db: DbHandle, storage_object_id: string): ForgetR
     db.prepare<unknown, [string]>(
       `DELETE FROM memory_artifact_links WHERE storage_object_id = ?`,
     ).run(storage_object_id);
+
+    // Review Blocker 5: transition to deletion_requested must enqueue a
+    // storage_sync job so the sync worker actually issues the S3 DELETE.
+    // Without this the row sits in deletion_requested forever.
+    if (existing?.storage_backend === "s3" && opts?.newId) {
+      db.prepare<unknown, [string, string]>(
+        `INSERT INTO jobs(id, status, job_type, request_json, idempotency_key)
+         VALUES(?, 'queued', 'storage_sync', '{}', ?)
+         ON CONFLICT(job_type, idempotency_key) DO NOTHING`,
+      ).run(opts.newId(), `storage-delete:${storage_object_id}`);
+    }
+
     return { affected: 1, ids: [storage_object_id] };
   });
 }

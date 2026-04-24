@@ -39,6 +39,7 @@ import { parseCorrection } from "~/commands/correct.ts";
 export type SkipReason =
   | "unauthorized"
   | "unsupported_type"
+  | "unsupported_chat_type"
   | "bootstrap_whoami_only"
   | "malformed";
 
@@ -75,6 +76,14 @@ export function classifyUpdate(
       return { kind: "whoami_bootstrap" };
     }
     return { kind: "skip", reason: "unauthorized" };
+  }
+
+  // Review Blocker 7: P0 only supports 1:1 DMs. Reject group / supergroup /
+  // channel chats even when sent by the authorized user, so we never persist
+  // messages from other participants as agent context.
+  const chatType = msg.chat?.type;
+  if (chatType !== undefined && chatType !== "private") {
+    return { kind: "skip", reason: "unsupported_chat_type" };
   }
 
   const text = (msg.text ?? msg.caption ?? "").trim();
@@ -202,10 +211,17 @@ export function readOffset(db: DbHandle): number {
   return Number.isFinite(v) && v >= 0 ? v : 0;
 }
 
+export type InsertReceivedResult =
+  | { kind: "inserted" }
+  | { kind: "existing"; existing_status: "received" | "enqueued" | "skipped"; job_id: string | null; skip_reason: SkipReason | null };
+
 /**
  * Insert-or-no-op a received Telegram update into `telegram_updates`.
- * Returns `"inserted"` if a new row was created, `"existing"` if a
- * row with the same `update_id` already existed (retry re-delivery).
+ *
+ * Review Blocker 6: duplicate deliveries must not re-run side effects
+ * (session creation, attachment rows, NL intent parsing). When the row
+ * already exists AND its status is terminal (`enqueued`|`skipped`), the
+ * caller treats this as a no-op rather than re-processing.
  *
  * This runs in its own single-statement txn context (caller may
  * wrap a batch in BEGIN IMMEDIATE).
@@ -213,7 +229,7 @@ export function readOffset(db: DbHandle): number {
 export function insertReceived(
   deps: InboundDeps,
   update: TelegramUpdate,
-): "inserted" | "existing" {
+): InsertReceivedResult {
   const rawRedacted = deps.redactor.applyToJson(update);
   const raw_update_json_redacted = JSON.stringify(rawRedacted);
 
@@ -234,7 +250,20 @@ export function insertReceived(
       msg ? "message" : "other",
       raw_update_json_redacted,
     );
-  return (res.changes ?? 0) > 0 ? "inserted" : "existing";
+  if ((res.changes ?? 0) > 0) return { kind: "inserted" };
+
+  const existing = deps.db
+    .prepare<
+      { status: "received" | "enqueued" | "skipped"; job_id: string | null; skip_reason: SkipReason | null },
+      [number]
+    >(`SELECT status, job_id, skip_reason FROM telegram_updates WHERE update_id = ?`)
+    .get(update.update_id);
+  return {
+    kind: "existing",
+    existing_status: existing?.status ?? "received",
+    job_id: existing?.job_id ?? null,
+    skip_reason: existing?.skip_reason ?? null,
+  };
 }
 
 /**
@@ -501,7 +530,23 @@ export function processBatch(
     let maxUpdateId = readOffset(deps.db) - 1;
     for (const u of updates) {
       // Insert the received row (idempotent by update_id).
-      insertReceived(deps, u);
+      const inserted = insertReceived(deps, u);
+      // Review Blocker 6: for a duplicate update whose previous processing
+      // already reached a terminal status, do NOT re-run classifyAndCommit.
+      // Re-running would: create duplicate storage_objects (new UUIDs each
+      // time bypass the jobs idempotency guard), re-trigger NL intent side
+      // effects, and reset the already-set job_id on the row.
+      if (inserted.kind === "existing" && inserted.existing_status !== "received") {
+        processed.push({
+          update_id: u.update_id,
+          telegram_status: inserted.existing_status,
+          skip_reason: inserted.skip_reason,
+          job_id: inserted.job_id,
+          storage_object_ids: [],
+        });
+        if (u.update_id > maxUpdateId) maxUpdateId = u.update_id;
+        continue;
+      }
       const outcome = classifyAndCommit(deps, u);
       processed.push(outcome);
       if (u.update_id > maxUpdateId) maxUpdateId = u.update_id;

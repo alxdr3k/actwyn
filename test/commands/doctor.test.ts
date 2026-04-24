@@ -312,6 +312,33 @@ describe("orphan_processes check", () => {
 // AC-OBS-001 — S3 smoke (CI-optional)
 // ---------------------------------------------------------------
 
+describe("AC-OBS-001 / Blocker 8 — s3_endpoint_smoke attributes failures to stage", () => {
+  test("get-stage failure is surfaced as fail even when put/delete would succeed", async () => {
+    const results = await runDoctor({
+      db,
+      ...BASE_DEPS,
+      // The transport-layer smoke test covers put/get/stat/list/delete. Here we
+      // simulate a hypothetical environment where put + delete pass but the
+      // deep-read round-trip fails — the doctor must still fail the gate.
+      s3_ping: async () => ({ ok: false, detail: "get failed: 403 Forbidden" }),
+    });
+    const check = results.find((r) => r.name === "s3_endpoint_smoke")!;
+    expect(check.status).toBe("fail");
+    expect(check.detail).toContain("get failed");
+  });
+
+  test("list-stage failure is surfaced as fail", async () => {
+    const results = await runDoctor({
+      db,
+      ...BASE_DEPS,
+      s3_ping: async () => ({ ok: false, detail: "list did not return sentinel under prefix '_actwyn_ping_'" }),
+    });
+    const check = results.find((r) => r.name === "s3_endpoint_smoke")!;
+    expect(check.status).toBe("fail");
+    expect(check.detail).toContain("list");
+  });
+});
+
 describe.skipIf(SKIP_S3)("AC-OBS-001 — S3 smoke check via /doctor (requires S3_* env)", () => {
   test("s3_endpoint_smoke is ok when credentials and endpoint are valid", async () => {
     const transport = new BunS3Transport({

@@ -77,6 +77,37 @@ describe("/forget_artifact", () => {
   test("unknown id returns affected=0", () => {
     expect(forgetArtifact(db, "none").affected).toBe(0);
   });
+
+  test("enqueues a storage_sync delete job (review Blocker 5)", () => {
+    seedArtifact("obj-del-1");
+    let n = 0;
+    const newId = () => `gen-${++n}`;
+    const r = forgetArtifact(db, "obj-del-1", { newId });
+    expect(r.affected).toBe(1);
+    const jobs = db
+      .prepare<{ idempotency_key: string; status: string }>(
+        "SELECT idempotency_key, status FROM jobs WHERE job_type = 'storage_sync'",
+      )
+      .all();
+    expect(jobs.length).toBe(1);
+    expect(jobs[0]!.idempotency_key).toBe("storage-delete:obj-del-1");
+    expect(jobs[0]!.status).toBe("queued");
+  });
+
+  test("duplicate /forget_artifact on same id does not create a second storage_sync job", () => {
+    seedArtifact("obj-del-2");
+    let n = 0;
+    const newId = () => `gen-${++n}`;
+    forgetArtifact(db, "obj-del-2", { newId });
+    // Second call: no-op because the row is already deletion_requested, so no new job.
+    forgetArtifact(db, "obj-del-2", { newId });
+    const jobs = db
+      .prepare<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM jobs WHERE job_type = 'storage_sync' AND idempotency_key = 'storage-delete:obj-del-2'",
+      )
+      .get()!;
+    expect(jobs.n).toBe(1);
+  });
 });
 
 describe("/forget_memory", () => {

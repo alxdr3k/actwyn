@@ -50,7 +50,12 @@ import { endSession, enqueueSummaryJob } from "~/commands/summary.ts";
 import { shouldAutoTriggerSummary, writeSummary, SUMMARY_SYSTEM_IDENTITY, type SummaryOutput } from "~/memory/summary.ts";
 import { buildContext, type MemoryItemSlot, type TurnSlot } from "~/context/builder.ts";
 import { pack, renderAsMessage, serializeForProviderRun, PromptOverflowError } from "~/context/packer.ts";
-import { runUploadPass, runDeletePass, type SyncConfig } from "~/storage/sync.ts";
+import {
+  runDeletePass,
+  runRetryScheduler,
+  runUploadPass,
+  type SyncConfig,
+} from "~/storage/sync.ts";
 import type { S3Transport } from "~/storage/s3.ts";
 import {
   captureOne,
@@ -104,6 +109,14 @@ export interface WorkerDeps {
   readonly s3?: S3Transport | undefined;
   /** Optional: when set, /doctor deep checks use these hooks. */
   readonly doctor?: Omit<DoctorDeps, "db"> | undefined;
+  /**
+   * Registry of job_id → AbortController for currently-running jobs.
+   * Used by /cancel (src/commands/cancel.ts) to actually abort a running
+   * provider subprocess. The worker populates this before dispatch and
+   * removes the entry after the run finishes. If omitted, /cancel on a
+   * running job returns `cancel_unavailable` instead of a false success.
+   */
+  readonly runningCancelHandles?: Map<string, AbortController> | undefined;
 }
 
 interface ClaimedJob {
@@ -236,6 +249,29 @@ export async function runOneClaimed(
   deps: WorkerDeps,
   job: ClaimedJob,
   signal?: AbortSignal,
+): Promise<RunResult> {
+  // Register a per-job AbortController so /cancel can actually abort the
+  // running subprocess (not just pretend). The worker-level `signal`
+  // (shutdown) is chained in so graceful stop still tears down the job.
+  const jobController = new AbortController();
+  const onWorkerAbort = (): void => jobController.abort();
+  if (signal) {
+    if (signal.aborted) jobController.abort();
+    else signal.addEventListener("abort", onWorkerAbort, { once: true });
+  }
+  deps.runningCancelHandles?.set(job.id, jobController);
+  try {
+    return await runOneClaimedInner(deps, job, jobController.signal);
+  } finally {
+    deps.runningCancelHandles?.delete(job.id);
+    signal?.removeEventListener("abort", onWorkerAbort);
+  }
+}
+
+async function runOneClaimedInner(
+  deps: WorkerDeps,
+  job: ClaimedJob,
+  signal: AbortSignal,
 ): Promise<RunResult> {
   // Capture pass first.
   const capture = await runCapturePass(deps, job.id);
@@ -486,11 +522,13 @@ export async function runOneClaimed(
         providerRunId,
       );
 
-    if (finalText.length > 0 && job.session_id) {
+    // Review Blocker 9: summary_generation output is an internal structured
+    // payload destined for memory_summaries, NOT a conversation turn. Writing
+    // it into `turns` would pollute the replay context on the NEXT run.
+    if (!isSummaryJob && finalText.length > 0 && job.session_id) {
       // Insert user turn first (chronological order) for non-summary provider_run jobs.
-      // Summary generation is an internal operation and does not produce a user turn.
       // Use baseRequest.message (raw user text), not the packed context sent to Claude.
-      if (!isSummaryJob && baseRequest.message.length > 0) {
+      if (baseRequest.message.length > 0) {
         const redactedUserMsg = deps.redactor.apply(baseRequest.message).text;
         deps.db
           .prepare<unknown, [string, string, string, string, string]>(
@@ -1020,7 +1058,12 @@ async function runStorageSyncJob(deps: WorkerDeps, job: ClaimedJob): Promise<Run
 
   let uploadResult: { uploaded: number; failed: number; local_missing: number };
   let deleteResult: { deleted: number; delete_failed: number; local_only_deleted: number };
+  // Review Medium 12: re-pend failed rows under max_attempts so the upload
+  // pass that follows can retry them. Without this call, a row that hit a
+  // transient S3 error never comes back from `failed`.
+  let schedulerResult: { repended: number; exhausted: number } = { repended: 0, exhausted: 0 };
   try {
+    schedulerResult = runRetryScheduler(syncDeps);
     uploadResult = await runUploadPass(syncDeps);
     deleteResult = await runDeletePass(syncDeps);
   } catch (e) {
@@ -1043,6 +1086,8 @@ async function runStorageSyncJob(deps: WorkerDeps, job: ClaimedJob): Promise<Run
     deleted: deleteResult.deleted,
     delete_failed: deleteResult.delete_failed,
     local_only_deleted: deleteResult.local_only_deleted,
+    retry_scheduler_repended: schedulerResult.repended,
+    retry_scheduler_exhausted: schedulerResult.exhausted,
   });
   deps.db
     .prepare<unknown, [string, string]>(
@@ -1285,16 +1330,26 @@ async function runSystemCommandJob(
   }
 
   // Persist a turn so the notification retry can reconstruct chunk texts.
+  // Review Medium 11: the redaction_applied flag must reflect whether the
+  // stored `content_redacted` was actually rewritten by the redactor, not a
+  // hard-coded zero. Using the redactor's reported `applied` avoids misleading
+  // audit/diagnostic output.
   let turnId: string | null = null;
   if (job.session_id && responseText.length > 0) {
     turnId = deps.newId();
-    const redacted = deps.redactor.apply(responseText).text;
+    const redactedResult = deps.redactor.apply(responseText);
     deps.db
-      .prepare<unknown, [string, string, string, string]>(
+      .prepare<unknown, [string, string, string, string, number]>(
         `INSERT INTO turns(id, session_id, job_id, role, content_redacted, redaction_applied)
-         VALUES(?, ?, ?, 'assistant', ?, 0)`,
+         VALUES(?, ?, ?, 'assistant', ?, ?)`,
       )
-      .run(turnId, job.session_id, job.id, redacted);
+      .run(
+        turnId,
+        job.session_id,
+        job.id,
+        redactedResult.text,
+        redactedResult.replacements > 0 ? 1 : 0,
+      );
   }
 
   deps.db
@@ -1404,8 +1459,8 @@ async function dispatchSystemCommand(
 
     case "/cancel": {
       const cancelArgs = job.session_id
-        ? { session_id: job.session_id }
-        : {};
+        ? { session_id: job.session_id, deps: { running_cancel_handles: deps.runningCancelHandles } }
+        : { deps: { running_cancel_handles: deps.runningCancelHandles } };
       const outcome = cancelJob(deps.db, cancelArgs);
       // For a queued job that was just cancelled, enqueue a job_cancelled
       // notification for the cancelled job (HLD §6.2 / PRD §13.3 DEC-012).
@@ -1440,6 +1495,8 @@ async function dispatchSystemCommand(
       switch (outcome.kind) {
         case "cancelled_queued": return `취소됐습니다 (job_id=${outcome.job_id}).`;
         case "cancel_signalled": return `실행 중인 작업에 취소 신호를 보냈습니다 (job_id=${outcome.job_id}).`;
+        case "cancel_unavailable":
+          return `실행 중인 작업을 이 프로세스에서 취소할 수 없습니다 (job_id=${outcome.job_id}). /status 로 상태를 확인하세요.`;
         case "not_found": return "취소할 활성 작업이 없습니다.";
         case "terminal": return `작업은 이미 종료됐습니다 (status=${outcome.status}).`;
       }
@@ -1512,7 +1569,7 @@ async function dispatchSystemCommand(
     case "/forget_artifact": {
       const id = args.trim();
       if (!id) return "사용법: /forget_artifact <storage_object_id>";
-      const result = forgetArtifact(deps.db, id);
+      const result = forgetArtifact(deps.db, id, { newId: deps.newId });
       return result.affected > 0
         ? `아티팩트(${id})를 삭제 예약했습니다.`
         : "해당 아티팩트를 찾을 수 없거나 이미 삭제됐습니다.";
@@ -1638,10 +1695,30 @@ async function runNotificationRetryJob(deps: WorkerDeps, job: ClaimedJob): Promi
     }
   }
 
-  // Re-enqueue if there are still unsent chunks so the next worker cycle retries.
-  // Use job.id as suffix so the new key doesn't collide with the currently-running
-  // retry row (which holds the base notif-retry:${id} key and is still in the table).
-  if (rollUpStatus !== "sent" && notif.chat_id) {
+  // Re-enqueue ONLY when the chunk ledger still has a retry-eligible chunk.
+  // A chunk is retry-eligible iff status IN ('pending','failed') AND
+  // attempt_count < max_attempts_per_chunk. If every non-terminal chunk is
+  // exhausted (or all chunks are `sent`), stop — otherwise the queue fills
+  // up with an infinite chain of notification_retry jobs (review Blocker 3).
+  const retryableRow = deps.db
+    .prepare<{ n: number }, [string, number]>(
+      `SELECT COUNT(*) AS n
+       FROM outbound_notification_chunks
+       WHERE outbound_notification_id = ?
+         AND status IN ('pending', 'failed')
+         AND attempt_count < ?`,
+    )
+    .get(req.notification_id, 3);
+  const retryable = retryableRow?.n ?? 0;
+
+  const retryOutcome: "sent" | "retry_scheduled" | "exhausted" =
+    rollUpStatus === "sent"
+      ? "sent"
+      : retryable > 0
+        ? "retry_scheduled"
+        : "exhausted";
+
+  if (retryOutcome === "retry_scheduled" && notif.chat_id) {
     enqueueNotificationRetryJob(deps, req.notification_id, notif.chat_id, job.id);
   }
 
@@ -1653,8 +1730,22 @@ async function runNotificationRetryJob(deps: WorkerDeps, job: ClaimedJob): Promi
            result_json = ?
        WHERE id = ? AND status = 'running'`,
     )
-    .run(JSON.stringify({ notification_id: req.notification_id, chunks_attempted: chunks.length, roll_up_status: rollUpStatus }), job.id);
-  deps.events.info("queue.job.notification_retry", { job_id: job.id, notification_id: req.notification_id, roll_up_status: rollUpStatus });
+    .run(
+      JSON.stringify({
+        notification_id: req.notification_id,
+        chunks_attempted: chunks.length,
+        roll_up_status: rollUpStatus,
+        retry_outcome: retryOutcome,
+        retryable_chunks: retryable,
+      }),
+      job.id,
+    );
+  deps.events.info("queue.job.notification_retry", {
+    job_id: job.id,
+    notification_id: req.notification_id,
+    roll_up_status: rollUpStatus,
+    retry_outcome: retryOutcome,
+  });
   return { job_id: job.id, terminal: "succeeded", turn_id: null, provider_run_id: "" };
 }
 
