@@ -111,10 +111,10 @@ export function createNotificationAndChunks(args: {
 
   return args.db.tx<CreatedNotification>(() => {
     const res = args.db
-      .prepare<unknown, [string, string, string, string, string, number]>(
+      .prepare<unknown, [string, string, string, string, string, number, string]>(
         `INSERT INTO outbound_notifications
-           (id, job_id, chat_id, notification_type, payload_hash, chunk_count, status)
-         VALUES(?, ?, ?, ?, ?, ?, 'pending')
+           (id, job_id, chat_id, notification_type, payload_hash, chunk_count, status, payload_text)
+         VALUES(?, ?, ?, ?, ?, ?, 'pending', ?)
          ON CONFLICT(job_id, notification_type, payload_hash) DO NOTHING`,
       )
       .run(
@@ -124,6 +124,7 @@ export function createNotificationAndChunks(args: {
         args.args.notification_type,
         pHash,
         chunks.length,
+        args.args.text,
       );
 
     if ((res.changes ?? 0) === 0) {

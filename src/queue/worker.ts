@@ -1582,39 +1582,42 @@ async function runNotificationRetryJob(deps: WorkerDeps, job: ClaimedJob): Promi
   }
 
   const notif = deps.db
-    .prepare<{ job_id: string }, [string]>(
-      "SELECT job_id FROM outbound_notifications WHERE id = ?",
+    .prepare<{ job_id: string; notification_type: string; payload_text: string | null; chat_id: string }, [string]>(
+      "SELECT job_id, notification_type, payload_text, chat_id FROM outbound_notifications WHERE id = ?",
     )
     .get(req.notification_id);
   if (!notif) {
     return commitSystemNoop(deps, job);
   }
 
-  // Recover chunk texts from the assistant turn for this notification's job.
-  const turn = deps.db
-    .prepare<{ content_redacted: string }, [string]>(
-      "SELECT content_redacted FROM turns WHERE job_id = ? AND role = 'assistant' ORDER BY created_at ASC LIMIT 1",
-    )
-    .get(notif.job_id);
+  // Prefer the stored payload_text (added in migration 003). Fall back to
+  // reconstructing from the assistant turn only for job_completed rows
+  // written before the migration.
+  let chunks: string[];
+  if (notif.payload_text !== null) {
+    // Re-split using the same chunk size so indices match the existing chunk rows.
+    chunks = splitForTelegram(notif.payload_text);
+  } else if (notif.notification_type === "job_completed") {
+    const turn = deps.db
+      .prepare<{ content_redacted: string }, [string]>(
+        "SELECT content_redacted FROM turns WHERE job_id = ? AND role = 'assistant' ORDER BY created_at ASC LIMIT 1",
+      )
+      .get(notif.job_id);
+    const footer = buildJobCompletedFooter(deps.db, notif.job_id);
+    chunks = turn ? splitForTelegram(turn.content_redacted + footer) : [];
+  } else {
+    chunks = [];
+  }
 
-  // Reconstruct the job_completed footer (PRD §8.4: duration + provider).
-  const notifMeta = deps.db
-    .prepare<{ notification_type: string }, [string]>(
-      "SELECT notification_type FROM outbound_notifications WHERE id = ?",
-    )
-    .get(req.notification_id);
-  const footer = notifMeta?.notification_type === "job_completed"
-    ? buildJobCompletedFooter(deps.db, notif.job_id)
-    : "";
-  const chunks = turn ? splitForTelegram(turn.content_redacted + footer) : [];
-
+  let rollUpStatus: "pending" | "sent" | "failed" = "pending";
   if (chunks.length > 0) {
     try {
-      await sendNotification(
+      const sendResult = await sendNotification(
         { db: deps.db, transport: deps.outbound, events: deps.events },
         req.notification_id,
         chunks,
       );
+      rollUpStatus = sendResult.roll_up_status;
     } catch (e) {
       deps.events.warn("telegram.outbound.retry_error", {
         job_id: job.id,
@@ -1622,6 +1625,11 @@ async function runNotificationRetryJob(deps: WorkerDeps, job: ClaimedJob): Promi
         error_message: (e as Error).message,
       });
     }
+  }
+
+  // Re-enqueue if there are still unsent chunks so the next worker cycle retries.
+  if (rollUpStatus !== "sent" && notif.chat_id) {
+    enqueueNotificationRetryJob(deps, req.notification_id, notif.chat_id);
   }
 
   deps.db
@@ -1632,8 +1640,8 @@ async function runNotificationRetryJob(deps: WorkerDeps, job: ClaimedJob): Promi
            result_json = ?
        WHERE id = ? AND status = 'running'`,
     )
-    .run(JSON.stringify({ notification_id: req.notification_id, chunks_attempted: chunks.length }), job.id);
-  deps.events.info("queue.job.notification_retry", { job_id: job.id, notification_id: req.notification_id });
+    .run(JSON.stringify({ notification_id: req.notification_id, chunks_attempted: chunks.length, roll_up_status: rollUpStatus }), job.id);
+  deps.events.info("queue.job.notification_retry", { job_id: job.id, notification_id: req.notification_id, roll_up_status: rollUpStatus });
   return { job_id: job.id, terminal: "succeeded", turn_id: null, provider_run_id: "" };
 }
 

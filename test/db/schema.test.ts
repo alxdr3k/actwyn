@@ -57,32 +57,34 @@ function hasTable(h: DbHandle, name: string): boolean {
 // ---------------------------------------------------------------
 
 describe("migrator — discovery + application", () => {
-  test("discovers 001_init + 002_artifacts in order", () => {
+  test("discovers 001_init + 002_artifacts + 003_notification_payload_text in order", () => {
     const files = discoverMigrations(MIGRATIONS_DIR);
-    expect(files.map((f) => f.version)).toEqual([1, 2]);
+    expect(files.map((f) => f.version)).toEqual([1, 2, 3]);
     expect(files[0]!.slug).toBe("init");
     expect(files[1]!.slug).toBe("artifacts");
+    expect(files[2]!.slug).toBe("notification_payload_text");
   });
 
-  test("fresh DB: applied = [1, 2], skipped = []", () => {
+  test("fresh DB: applied = [1, 2, 3], skipped = []", () => {
     const result = migrate(db, MIGRATIONS_DIR);
-    expect(result.applied).toEqual([1, 2]);
+    expect(result.applied).toEqual([1, 2, 3]);
     expect(result.skipped).toEqual([]);
-    expect(result.total).toBe(2);
+    expect(result.total).toBe(3);
   });
 
   test("re-running is a no-op", () => {
     migrate(db, MIGRATIONS_DIR);
     const second = migrate(db, MIGRATIONS_DIR);
     expect(second.applied).toEqual([]);
-    expect(second.skipped).toEqual([1, 2]);
+    expect(second.skipped).toEqual([1, 2, 3]);
   });
 
-  test("appliedVersions records 001 and 002", () => {
+  test("appliedVersions records 001, 002, and 003", () => {
     migrate(db, MIGRATIONS_DIR);
     const set = appliedVersions(db);
     expect(set.has(1)).toBe(true);
     expect(set.has(2)).toBe(true);
+    expect(set.has(3)).toBe(true);
   });
 });
 

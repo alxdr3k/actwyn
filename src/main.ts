@@ -148,7 +148,7 @@ async function main(): Promise<void> {
     required_bun_version: config.runtime.required_bun_version,
     current_bun_version: Bun.version,
     bootstrap_whoami: config.bootstrap_whoami,
-    expected_schema_version: 2,
+    expected_schema_version: 3,
     config_ok: () => {
       const missing: string[] = [];
       if (!config.telegram.bot_token) missing.push("TELEGRAM_BOT_TOKEN");
