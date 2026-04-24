@@ -281,15 +281,19 @@ export async function runOneClaimed(
         chunk_size: deps.config.notifications?.chunk_size,
       },
     });
+    let jobAcceptedRetryNeeded = false;
     try {
-      await sendNotification(
+      const jobAcceptedResult = await sendNotification(
         { db: deps.db, transport: deps.outbound, events: deps.events },
         accepted.notification_id,
         accepted.chunks,
       );
+      jobAcceptedRetryNeeded = jobAcceptedResult.roll_up_status !== "sent";
     } catch {
       // Non-fatal: job_accepted delivery failure must not block the AI run.
-      // Enqueue retry so the user eventually gets the acknowledgment.
+      jobAcceptedRetryNeeded = true;
+    }
+    if (jobAcceptedRetryNeeded) {
       enqueueNotificationRetryJob(deps, accepted.notification_id, job.chat_id);
     }
   }
@@ -1628,8 +1632,10 @@ async function runNotificationRetryJob(deps: WorkerDeps, job: ClaimedJob): Promi
   }
 
   // Re-enqueue if there are still unsent chunks so the next worker cycle retries.
+  // Use job.id as suffix so the new key doesn't collide with the currently-running
+  // retry row (which holds the base notif-retry:${id} key and is still in the table).
   if (rollUpStatus !== "sent" && notif.chat_id) {
-    enqueueNotificationRetryJob(deps, req.notification_id, notif.chat_id);
+    enqueueNotificationRetryJob(deps, req.notification_id, notif.chat_id, job.id);
   }
 
   deps.db
@@ -1649,8 +1655,13 @@ function enqueueNotificationRetryJob(
   deps: WorkerDeps,
   notification_id: string,
   chat_id: string,
+  from_job_id?: string,
 ): void {
-  const idempotencyKey = `notif-retry:${notification_id}`;
+  // When re-enqueuing from within a retry job, append the current job's id so the
+  // new key doesn't conflict with the completed retry row still in the jobs table.
+  const idempotencyKey = from_job_id
+    ? `notif-retry:${notification_id}:from:${from_job_id}`
+    : `notif-retry:${notification_id}`;
   deps.db
     .prepare<unknown, [string, string, string, string]>(
       `INSERT INTO jobs(id, status, job_type, chat_id, request_json, idempotency_key)

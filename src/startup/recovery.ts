@@ -214,12 +214,12 @@ function enqueueRecoveryNotification(
     ).run(turnId, sessionId, jobId, text);
   }
 
-  db.prepare<unknown, [string, string, string, string, string, number]>(
+  db.prepare<unknown, [string, string, string, string, string, number, string]>(
     `INSERT INTO outbound_notifications
-       (id, job_id, chat_id, notification_type, payload_hash, chunk_count, status)
-     VALUES(?, ?, ?, ?, ?, ?, 'pending')
+       (id, job_id, chat_id, notification_type, payload_hash, chunk_count, status, payload_text)
+     VALUES(?, ?, ?, ?, ?, ?, 'pending', ?)
      ON CONFLICT(job_id, notification_type, payload_hash) DO NOTHING`,
-  ).run(notifId, jobId, chatId, notifType, payloadHash, 1);
+  ).run(notifId, jobId, chatId, notifType, payloadHash, 1, text);
 
   db.prepare<unknown, [string, string, string]>(
     `INSERT INTO outbound_notification_chunks
