@@ -1606,8 +1606,8 @@ async function runNotificationRetryJob(deps: WorkerDeps, job: ClaimedJob): Promi
   // written before the migration.
   let chunks: string[];
   if (notif.payload_text !== null) {
-    // Re-split using the same chunk size so indices match the existing chunk rows.
-    chunks = splitForTelegram(notif.payload_text);
+    // Re-split with the same chunk_size config so indices match the existing rows.
+    chunks = splitForTelegram(notif.payload_text, deps.config.notifications?.chunk_size);
   } else if (notif.notification_type === "job_completed") {
     const turn = deps.db
       .prepare<{ content_redacted: string }, [string]>(

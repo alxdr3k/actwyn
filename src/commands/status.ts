@@ -141,7 +141,7 @@ export function buildStatusReport(db: DbHandle, ctx: StatusContext = {}): Status
 
   // Overall status.
   let overall: "OK" | "degraded" | "issue" = "OK";
-  if (q.failed > 0 || n.failed > 0 || captureFails > 0) {
+  if (q.failed > 0 || q.interrupted > 0 || n.failed > 0 || captureFails > 0) {
     overall = "issue";
   } else if (s.failed > 0 || s.pending > 0 || n.pending > 0) {
     overall = "degraded";
