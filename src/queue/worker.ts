@@ -1422,13 +1422,20 @@ async function dispatchSystemCommand(
             chunk_size: deps.config.notifications?.chunk_size,
           },
         });
-        sendNotification(
-          { db: deps.db, transport: deps.outbound, events: deps.events },
-          cancelNotif.notification_id,
-          cancelNotif.chunks,
-        ).catch(() => {
+        let cancelRetryNeeded = false;
+        try {
+          const cancelSendResult = await sendNotification(
+            { db: deps.db, transport: deps.outbound, events: deps.events },
+            cancelNotif.notification_id,
+            cancelNotif.chunks,
+          );
+          cancelRetryNeeded = cancelSendResult.roll_up_status !== "sent";
+        } catch {
+          cancelRetryNeeded = true;
+        }
+        if (cancelRetryNeeded) {
           enqueueNotificationRetryJob(deps, cancelNotif.notification_id, job.chat_id!);
-        });
+        }
       }
       switch (outcome.kind) {
         case "cancelled_queued": return `취소됐습니다 (job_id=${outcome.job_id}).`;

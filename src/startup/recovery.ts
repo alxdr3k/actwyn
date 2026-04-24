@@ -204,7 +204,8 @@ function enqueueRecoveryNotification(
   payloadHash: string,
 ): void {
   const notifId = `notif-restart-${jobId}-${notifType}`;
-  const turnId = crypto.randomUUID();
+  // Deterministic so repeated restarts don't accumulate duplicate turns.
+  const turnId = `turn-restart-${jobId}-${notifType}`;
 
   if (sessionId) {
     db.prepare<unknown, [string, string, string, string]>(
