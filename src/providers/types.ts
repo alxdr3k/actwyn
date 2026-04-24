@@ -25,6 +25,10 @@ export interface AgentRequest {
   readonly priority?: number | undefined;
   readonly idempotency_key?: string | undefined;
   readonly metadata?: Readonly<Record<string, unknown>> | undefined;
+  /** When set, adapter uses `--resume` instead of `--session-id` (HLD §10.2). */
+  readonly context_packing_mode?: "resume_mode" | "replay_mode" | undefined;
+  /** Claude provider session ID to resume (only meaningful in resume_mode). */
+  readonly provider_session_id?: string | undefined;
 }
 
 export interface AgentRequestAttachment {
@@ -71,5 +75,6 @@ export interface ProviderAdapter {
   run(
     req: AgentRequest,
     signal?: AbortSignal,
+    onSpawn?: (pgid: number, pid: number) => void,
   ): Promise<AgentOutcome>;
 }

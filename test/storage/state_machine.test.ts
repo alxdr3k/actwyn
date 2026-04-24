@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 
 import { openDatabase, type DbHandle } from "../../src/db.ts";
 import { migrate } from "../../src/db/migrator.ts";
+import { finalizeStorageKey, generateStorageKey } from "../../src/storage/objects.ts";
 import {
   StubS3Transport,
 } from "../../src/storage/s3.ts";
@@ -14,6 +15,7 @@ import {
   runUploadPass,
   selectEligibleUploads,
 } from "../../src/storage/sync.ts";
+import { sha256Hex } from "../../src/telegram/attachment_capture.ts";
 
 const MIGRATIONS = join(import.meta.dir, "..", "..", "migrations");
 
@@ -41,6 +43,29 @@ afterEach(() => {
   rmSync(workdir, { recursive: true, force: true });
 });
 
+// Fixed date used for deterministic key generation in seeds.
+const SEED_DATE = new Date("2026-04-23T00:00:00.000Z");
+// Fixed sha256 placeholder used when bytes are not provided for captured rows.
+const PLACEHOLDER_SHA256 = "0000000000000000000000000000000000000000000000000000000000000000";
+
+function seedKey(args: {
+  id: string;
+  capture_status: "pending" | "captured" | "failed";
+  bytes?: Uint8Array;
+}): { key: string; sha: string | null } {
+  if (args.capture_status === "captured") {
+    const sha = args.bytes ? sha256Hex(args.bytes) : PLACEHOLDER_SHA256;
+    return {
+      key: finalizeStorageKey({ date: SEED_DATE, object_id: args.id, sha256: sha, mime_type: null }),
+      sha,
+    };
+  }
+  return {
+    key: generateStorageKey({ date: SEED_DATE, object_id: args.id }),
+    sha: null,
+  };
+}
+
 function seedStorageObject(args: {
   id: string;
   retention_class?: "ephemeral" | "session" | "long_term" | "archive";
@@ -56,17 +81,17 @@ function seedStorageObject(args: {
   const captureStatus = args.capture_status ?? "captured";
   const status = args.status ?? "pending";
   const artifact = args.artifact_type ?? "user_upload";
-  const key = `users/user-1/objects/${args.id}/original.bin`;
+  const { key, sha } = seedKey({ id: args.id, capture_status: captureStatus, ...(args.bytes !== undefined ? { bytes: args.bytes } : {}) });
   db.prepare<
     unknown,
-    [string, string, string | null, string, string, string, string, string]
+    [string, string, string | null, string, string | null, string, string, string, string]
   >(
     `INSERT INTO storage_objects
-       (id, storage_backend, bucket, storage_key, source_channel, source_message_id,
+       (id, storage_backend, bucket, storage_key, sha256, source_channel, source_message_id,
         source_job_id, source_external_id, artifact_type, retention_class,
         capture_status, status, capture_error_json)
-     VALUES(?, ?, ?, ?, 'system', '0', NULL, NULL, ?, ?, ?, ?, NULL)`,
-  ).run(args.id, backend, bucket, key, artifact, args.retention_class ?? "long_term", captureStatus, status);
+     VALUES(?, ?, ?, ?, ?, 'system', '0', NULL, NULL, ?, ?, ?, ?, NULL)`,
+  ).run(args.id, backend, bucket, key, sha, artifact, args.retention_class ?? "long_term", captureStatus, status);
 
   if (captureStatus === "captured" && args.bytes) {
     const path = localPath(args.id);
@@ -165,8 +190,9 @@ describe("upload pass — happy path", () => {
 
 describe("retry scheduler — failed → pending → uploaded", () => {
   test("transient failure then success", async () => {
-    seedStorageObject({ id: "so-retry", bytes: new Uint8Array([9]) });
-    const planKey = "actwyn-test/users/user-1/objects/so-retry/original.bin";
+    const retryBytes = new Uint8Array([9]);
+    seedStorageObject({ id: "so-retry", bytes: retryBytes });
+    const planKey = `actwyn-test/${finalizeStorageKey({ date: SEED_DATE, object_id: "so-retry", sha256: sha256Hex(retryBytes), mime_type: null })}`;
     const transport = new StubS3Transport(
       new Map([[planKey, "fail_once"]]),
     );
@@ -197,9 +223,11 @@ describe("retry scheduler — failed → pending → uploaded", () => {
   });
 
   test("retry exhaustion does NOT re-pend", async () => {
-    seedStorageObject({ id: "so-exhaust", bytes: new Uint8Array([9]) });
+    const exhaustBytes = new Uint8Array([9]);
+    seedStorageObject({ id: "so-exhaust", bytes: exhaustBytes });
+    const exhaustKey = `actwyn-test/${finalizeStorageKey({ date: SEED_DATE, object_id: "so-exhaust", sha256: sha256Hex(exhaustBytes), mime_type: null })}`;
     const transport = new StubS3Transport(
-      new Map([["actwyn-test/users/user-1/objects/so-exhaust/original.bin", "fail_retryable"]]),
+      new Map([[exhaustKey, "fail_retryable"]]),
     );
     // Pass 1 fails.
     await runUploadPass({ db, transport, config: { max_attempts: 2, local_path: localPath } });
@@ -244,9 +272,11 @@ describe("delete pass — deletion_requested → deleted | delete_failed", () =>
   });
 
   test("S3 DELETE failure → delete_failed", async () => {
-    seedStorageObject({ id: "so-del-fail", bytes: new Uint8Array([7]) });
+    const delFailBytes = new Uint8Array([7]);
+    seedStorageObject({ id: "so-del-fail", bytes: delFailBytes });
+    const delFailKey = `actwyn-test/${finalizeStorageKey({ date: SEED_DATE, object_id: "so-del-fail", sha256: sha256Hex(delFailBytes), mime_type: null })}`;
     const transport = new StubS3Transport(
-      new Map([["actwyn-test/users/user-1/objects/so-del-fail/original.bin", "fail_non_retryable"]]),
+      new Map([[delFailKey, "fail_non_retryable"]]),
     );
     // Force row into deletion_requested state.
     db.prepare<unknown, [string]>(
@@ -298,12 +328,14 @@ describe("independence — storage failure does NOT touch provider_runs/jobs", (
       `INSERT INTO jobs(id, status, job_type, chat_id, request_json, idempotency_key, provider)
        VALUES('job-a', 'succeeded', 'provider_run', ?, '{}', ?, 'fake')`,
     ).run("chat-1", "ikey-a");
-    seedStorageObject({ id: "so-ind", bytes: new Uint8Array([5]) });
+    const indBytes = new Uint8Array([5]);
+    seedStorageObject({ id: "so-ind", bytes: indBytes });
     db.prepare<unknown, [string, string]>(
       "UPDATE storage_objects SET source_job_id = ? WHERE id = ?",
     ).run("job-a", "so-ind");
+    const indKey = `actwyn-test/${finalizeStorageKey({ date: SEED_DATE, object_id: "so-ind", sha256: sha256Hex(indBytes), mime_type: null })}`;
     const transport = new StubS3Transport(
-      new Map([["actwyn-test/users/user-1/objects/so-ind/original.bin", "fail_non_retryable"]]),
+      new Map([[indKey, "fail_non_retryable"]]),
     );
     await runUploadPass({
       db,

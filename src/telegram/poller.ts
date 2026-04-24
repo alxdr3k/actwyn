@@ -11,7 +11,9 @@
 import type { DbHandle } from "~/db.ts";
 import type { EventEmitter } from "~/observability/events.ts";
 import { processBatch, readOffset, type BatchResult, type InboundDeps } from "~/telegram/inbound.ts";
+import type { OutboundTransport } from "~/telegram/outbound.ts";
 import type { TelegramUpdate } from "~/telegram/types.ts";
+import { whoamiReply } from "~/commands/whoami.ts";
 
 export interface GetUpdatesArgs {
   readonly offset: number;
@@ -29,6 +31,8 @@ export interface PollerDeps {
   readonly events: EventEmitter;
   readonly poll_timeout_seconds?: number;
   readonly on_batch?: (result: BatchResult) => void;
+  /** Optional outbound transport for bootstrap whoami replies (DEC-009). */
+  readonly outbound?: OutboundTransport;
 }
 
 /** Run one poll iteration: fetch at current offset → process batch. */
@@ -47,6 +51,38 @@ export async function pollOnce(deps: PollerDeps): Promise<BatchResult> {
       skipped: result.processed.filter((p) => p.telegram_status === "skipped").length,
     });
   }
+
+  // Bootstrap whoami delivery (DEC-009): send user_id/chat_id to the sender
+  // outside the inbound txn (zero-network invariant in inbound.ts §4.2).
+  if (deps.outbound && deps.inbound.config.bootstrap_whoami) {
+    // Check DEC-009 expiry — skip delivery if the window has closed.
+    const expiryRow = deps.db
+      .prepare<{ value: string }, [string]>(
+        "SELECT value FROM settings WHERE key = ?",
+      )
+      .get("bootstrap_whoami.expires_at");
+    const expired = expiryRow?.value
+      ? new Date(expiryRow.value).getTime() <= Date.now()
+      : false;
+
+    if (!expired) {
+      for (const outcome of result.processed) {
+        if (outcome.skip_reason !== "bootstrap_whoami_only") continue;
+        const update = updates.find((u) => u.update_id === outcome.update_id);
+        if (!update?.message) continue;
+        const chatId = String(update.message.chat.id);
+        const userId = String(update.message.from?.id ?? "");
+        const reply = whoamiReply({ user_id: userId, chat_id: chatId, bootstrap: true });
+        deps.outbound.send({ chat_id: chatId, text: reply.text }).catch((e) => {
+          deps.events.warn("telegram.bootstrap_whoami.send_error", {
+            chat_id: chatId,
+            error_message: (e as Error).message,
+          });
+        });
+      }
+    }
+  }
+
   return result;
 }
 

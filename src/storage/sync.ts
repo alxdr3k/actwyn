@@ -26,6 +26,8 @@
 //
 // The sync worker never touches provider_runs.status or jobs.status.
 
+import { createHash } from "node:crypto";
+
 import type { DbHandle } from "~/db.ts";
 import type { EventEmitter } from "~/observability/events.ts";
 import { localExists, readLocal, removeLocal } from "~/storage/local.ts";
@@ -36,6 +38,8 @@ export interface SyncConfig {
   readonly max_attempts: number;
   /** Map storage_object_id → local path (same mapping used at capture time). */
   readonly local_path: (storage_object_id: string) => string;
+  /** S3 bucket for new storage_objects rows that don't inherit a bucket from inbound. */
+  readonly bucket?: string | undefined;
 }
 
 export interface SyncDeps {
@@ -52,6 +56,7 @@ interface EligibleUploadRow {
   storage_key: string;
   retention_class: string;
   mime_type: string | null;
+  sha256: string | null;
   error_json: string | null;
   attempt_count_json: string | null;
 }
@@ -73,7 +78,7 @@ export function selectEligibleUploads(db: DbHandle): EligibleUploadRow[] {
   return db
     .prepare<EligibleUploadRow, []>(
       `SELECT id, storage_backend, bucket, storage_key, retention_class,
-              mime_type, error_json,
+              mime_type, sha256, error_json,
               NULL AS attempt_count_json
        FROM storage_objects
        WHERE capture_status = 'captured'
@@ -133,6 +138,15 @@ export async function runUploadPass(deps: SyncDeps): Promise<UploadPassResult> {
       markUploadFailed(deps, row.id, `local_read_failed:${(e as Error).message}`);
       failed += 1;
       continue;
+    }
+    // HLD §12.2 step 1: verify sha256 before upload to avoid uploading corrupted content.
+    if (row.sha256) {
+      const actual = createHash("sha256").update(bytes).digest("hex");
+      if (actual !== row.sha256) {
+        markUploadFailed(deps, row.id, `hash_mismatch:expected=${row.sha256} actual=${actual}`);
+        failed += 1;
+        continue;
+      }
     }
     try {
       await deps.transport.put({

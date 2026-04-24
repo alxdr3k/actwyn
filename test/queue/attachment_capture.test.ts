@@ -60,7 +60,7 @@ function seedJobWithAttachment(args: {
      VALUES(?, 's3', 'bucket', ?, 'telegram', '100', ?, ?, 'user_upload', ?, 'pending', 'pending')`,
   ).run(
     args.objectId,
-    `users/user-1/objects/${args.objectId}/original.document`,
+    `objects/2026/04/23/${args.objectId}/capture_pending.bin`,
     args.jobId,
     args.file_id,
     args.retention_class ?? "session",

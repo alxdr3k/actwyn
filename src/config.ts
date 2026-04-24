@@ -25,6 +25,7 @@ export interface RuntimeFileConfig {
   readonly required_bun_version: string;
   readonly log: { readonly level: LogLevel };
   readonly redaction: RedactionConfig;
+  readonly claude_binary: string;
 }
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -44,6 +45,8 @@ export interface AppConfig {
   readonly runtime: RuntimeFileConfig;
   readonly env: "development" | "production" | "test";
   readonly config_path: string;
+  /** DEC-009: set via BOOTSTRAP_WHOAMI=true env var; never true in steady state. */
+  readonly bootstrap_whoami: boolean;
 }
 
 export class ConfigError extends Error {
@@ -98,6 +101,9 @@ export function loadConfig(
     );
   }
 
+  const bootstrapWhoami =
+    (env.BOOTSTRAP_WHOAMI ?? "").toLowerCase().trim() === "true";
+
   const cfg: AppConfig = {
     telegram: {
       bot_token: env.TELEGRAM_BOT_TOKEN!.trim(),
@@ -113,6 +119,7 @@ export function loadConfig(
     runtime,
     env: envMode,
     config_path: configPath,
+    bootstrap_whoami: bootstrapWhoami,
   };
   return deepFreeze(cfg);
 }
@@ -165,10 +172,16 @@ function parseRuntimeFile(path: string): RuntimeFileConfig {
     ),
   };
 
+  const claudeBinary =
+    typeof raw.claude_binary === "string" && raw.claude_binary.trim() !== ""
+      ? raw.claude_binary.trim()
+      : "claude";
+
   return {
     required_bun_version: requiredBun.trim(),
     log: { level: log.level as LogLevel },
     redaction: parsed,
+    claude_binary: claudeBinary,
   };
 }
 

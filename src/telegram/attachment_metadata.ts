@@ -15,6 +15,7 @@
 //
 // MUST NOT: call getFile, download bytes, or probe MIME.
 
+import { generateStorageKey } from "~/storage/objects.ts";
 import type {
   TelegramAudio,
   TelegramDocument,
@@ -61,6 +62,14 @@ export interface InboundAttachmentRow {
   readonly original_filename_redacted: string | null;
   readonly mime_type: string | null;
   readonly size_bytes: number | null;
+}
+
+export interface StorageKeyArgs {
+  readonly user_id: string;
+  readonly object_id: string;
+  readonly kind: AttachmentKind;
+  /** Creation timestamp used for the date hierarchy in the key (PRD §12.8.4). */
+  readonly date?: Date | undefined;
 }
 
 // ---------------------------------------------------------------
@@ -175,8 +184,10 @@ export function buildStorageObjectRow(args: {
   /** Filename is only persisted (redacted) if the redactor clears it. */
   filenameIsRedactionSafe: (filename: string) => boolean;
   /** Storage-key builder; §12.8.4 canonical pattern. */
-  storageKey: (args: { user_id: string; object_id: string; kind: AttachmentKind }) => string;
+  storageKey: (args: StorageKeyArgs) => string;
   bucket: string | null;
+  /** Timestamp for the date hierarchy in the provisional key. Defaults to now(). */
+  now?: Date | undefined;
 }): InboundAttachmentRow {
   const { descriptor, config } = args;
   const oversize =
@@ -209,6 +220,7 @@ export function buildStorageObjectRow(args: {
     user_id: args.user_id,
     object_id: args.storage_object_id,
     kind: descriptor.kind,
+    date: args.now,
   });
 
   return {
@@ -236,12 +248,16 @@ export function buildStorageObjectRow(args: {
   };
 }
 
-export function defaultStorageKey(args: {
-  user_id: string;
-  object_id: string;
-  kind: AttachmentKind;
-}): string {
-  // PRD §12.8.4 canonical pattern. Opaque, no user semantics in
-  // the path itself.
-  return `users/${args.user_id}/objects/${args.object_id}/original.${args.kind}`;
+/**
+ * PRD §12.8.4 provisional key (pre-capture, sha256 not yet known).
+ * Format: objects/{yyyy}/{mm}/{dd}/{object_id}/capture_pending.bin
+ * The key is finalized (sha256 inserted) by commitCaptureSuccess in
+ * src/telegram/attachment_capture.ts.
+ */
+export function defaultStorageKey(args: StorageKeyArgs): string {
+  return generateStorageKey({
+    date: args.date ?? new Date(),
+    object_id: args.object_id,
+    // sha256 omitted → provisional sentinel key
+  });
 }

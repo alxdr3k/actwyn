@@ -26,6 +26,7 @@ import { dirname } from "node:path";
 
 import type { DbHandle } from "~/db.ts";
 import type { EventEmitter } from "~/observability/events.ts";
+import { finalizeStorageKey } from "~/storage/objects.ts";
 
 // ---------------------------------------------------------------
 // Transport contract
@@ -241,10 +242,26 @@ export function commitCaptureSuccess(args: {
   events?: EventEmitter;
 }): { syncJobId: string | null } {
   return args.db.tx<{ syncJobId: string | null }>(() => {
+    // Compute the final PRD §12.8.4 storage_key now that sha256 is known.
+    // Read created_at from the existing row so the date hierarchy matches
+    // the row's creation date (not the capture date, which may differ).
+    const existing = args.db
+      .prepare<{ created_at: string }, [string]>(
+        "SELECT created_at FROM storage_objects WHERE id = ?",
+      )
+      .get(args.success.storage_object_id);
+    const createdAt = existing?.created_at ? new Date(existing.created_at) : new Date();
+    const finalKey = finalizeStorageKey({
+      date: createdAt,
+      object_id: args.success.storage_object_id,
+      sha256: args.success.sha256,
+      mime_type: args.success.mime_type,
+    });
+
     args.db
       .prepare<
         unknown,
-        [string, string, number, string]
+        [string, string, number, string, string]
       >(
         `UPDATE storage_objects
          SET capture_status = 'captured',
@@ -252,6 +269,7 @@ export function commitCaptureSuccess(args: {
              sha256 = ?,
              mime_type = ?,
              size_bytes = ?,
+             storage_key = ?,
              source_external_id = NULL,
              capture_error_json = NULL
          WHERE id = ? AND capture_status = 'pending'`,
@@ -260,6 +278,7 @@ export function commitCaptureSuccess(args: {
         args.success.sha256,
         args.success.mime_type,
         args.success.size_bytes,
+        finalKey,
         args.success.storage_object_id,
       );
 
@@ -271,8 +290,8 @@ export function commitCaptureSuccess(args: {
           unknown,
           [string, string, string]
         >(
-          `INSERT INTO jobs(id, status, job_type, request_json, idempotency_key)
-           VALUES(?, 'queued', 'storage_sync', ?, ?)
+          `INSERT INTO jobs(id, status, job_type, request_json, idempotency_key, safe_retry, max_attempts)
+           VALUES(?, 'queued', 'storage_sync', ?, ?, 1, 3)
            ON CONFLICT(job_type, idempotency_key) DO NOTHING`,
         )
         .run(

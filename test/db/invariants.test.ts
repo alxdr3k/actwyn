@@ -153,7 +153,7 @@ describe("invariant — memory_artifact_links FK resolution", () => {
          (id, storage_backend, bucket, storage_key, source_channel,
           artifact_type, retention_class, capture_status, status)
        VALUES(?, 's3', ?, ?, 'telegram', 'user_upload', 'long_term', 'captured', 'uploaded')`,
-    ).run("so-1", "bucket", "users/user-1/objects/so-1/original.bin");
+    ).run("so-1", "bucket", "objects/2026/04/23/so-1/pending.bin");
     db.prepare<unknown, [string, string, string, string, string]>(
       `INSERT INTO memory_artifact_links(id, storage_object_id, relation_type, provenance, turn_id)
        VALUES(?, ?, ?, ?, ?)`,
@@ -167,7 +167,7 @@ describe("invariant — memory_artifact_links FK resolution", () => {
          (id, storage_backend, bucket, storage_key, source_channel,
           artifact_type, retention_class, capture_status, status)
        VALUES(?, 's3', 'bucket', ?, 'system', 'memory_snapshot', 'session', 'pending', 'pending')`,
-    ).run("so-2", "users/user-1/objects/so-2/snap.md");
+    ).run("so-2", "objects/2026/04/23/so-2/pending.bin");
     expect(() =>
       db
         .prepare<unknown, [string, string, string, string]>(
@@ -204,7 +204,7 @@ describe("invariant — enum CHECKs reject out-of-set values", () => {
               artifact_type, retention_class, capture_status, status)
            VALUES(?, 's3', 'b', ?, 'telegram', 'user_upload', 'session', 'magical', 'pending')`,
         )
-        .run("so-x", "users/user-1/objects/so-x/x.bin", ""),
+        .run("so-x", "objects/2026/04/23/so-x/capture_pending.bin", ""),
     ).toThrow();
   });
 
@@ -214,7 +214,7 @@ describe("invariant — enum CHECKs reject out-of-set values", () => {
          (id, storage_backend, bucket, storage_key, source_channel,
           artifact_type, retention_class, capture_status, status)
        VALUES(?, 's3', 'b', ?, 'telegram', 'user_upload', 'session', 'captured', 'deletion_requested')`,
-    ).run("so-del", "users/user-1/objects/so-del/x.bin");
+    ).run("so-del", "objects/2026/04/23/so-del/capture_pending.bin");
     const row = db
       .prepare<{ status: string }, [string]>(
         `SELECT status FROM storage_objects WHERE id = ?`,

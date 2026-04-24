@@ -26,6 +26,9 @@
 //     no storage_sync job, provider_run still reaches a terminal
 //     status.
 
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+
 import type { DbHandle } from "~/db.ts";
 import type { EventEmitter } from "~/observability/events.ts";
 import type { Redactor } from "~/observability/redact.ts";
@@ -35,6 +38,20 @@ import type {
   AgentRequestAttachment,
   ProviderAdapter,
 } from "~/providers/types.ts";
+import { buildStatusReport, formatStatus } from "~/commands/status.ts";
+import { cancelJob } from "~/commands/cancel.ts";
+import { runDoctor, type DoctorDeps } from "~/commands/doctor.ts";
+import { correctMemory } from "~/commands/correct.ts";
+import { forgetArtifact, forgetLast, forgetMemory, forgetSession } from "~/commands/forget.ts";
+import { saveLastAttachment } from "~/commands/save.ts";
+import { switchProvider } from "~/commands/provider.ts";
+import { whoamiReply } from "~/commands/whoami.ts";
+import { endSession, enqueueSummaryJob } from "~/commands/summary.ts";
+import { shouldAutoTriggerSummary, writeSummary, SUMMARY_SYSTEM_IDENTITY, type SummaryOutput } from "~/memory/summary.ts";
+import { buildContext, type MemoryItemSlot, type TurnSlot } from "~/context/builder.ts";
+import { pack, renderAsMessage, serializeForProviderRun, PromptOverflowError } from "~/context/packer.ts";
+import { runUploadPass, runDeletePass, type SyncConfig } from "~/storage/sync.ts";
+import type { S3Transport } from "~/storage/s3.ts";
 import {
   captureOne,
   commitCaptureFailure,
@@ -47,6 +64,7 @@ import {
 import {
   createNotificationAndChunks,
   sendNotification,
+  splitForTelegram,
   type NotificationType,
   type OutboundTransport,
 } from "~/telegram/outbound.ts";
@@ -57,6 +75,15 @@ export interface WorkerConfig {
   readonly notifications?: {
     readonly chunk_size?: number | undefined;
   } | undefined;
+  /** Optional S3 sync config. When present, storage_sync jobs run the upload/delete pass. */
+  readonly sync?: SyncConfig | undefined;
+  /**
+   * Local directory for human-readable memory files.
+   * When set, summary_generation writes `memory/sessions/<session_id>.jsonl`
+   * under this base path (AC-MEM-001). Defaults to a `memory` sibling of the
+   * objects root when absent.
+   */
+  readonly memory_base_path?: string | undefined;
 }
 
 export interface WorkerDeps {
@@ -64,6 +91,8 @@ export interface WorkerDeps {
   readonly redactor: Redactor;
   readonly events: EventEmitter;
   readonly adapter: ProviderAdapter;
+  /** Optional: when set, used for summary_generation jobs (advisory profile). Falls back to adapter. */
+  readonly summaryAdapter?: ProviderAdapter | undefined;
   readonly transport: TelegramFileTransport;
   readonly mime: MimeProbe;
   readonly newId: () => string;
@@ -71,6 +100,10 @@ export interface WorkerDeps {
   readonly config: WorkerConfig;
   /** Optional: when set, terminal transitions enqueue an outbound notification and send it. */
   readonly outbound?: OutboundTransport | undefined;
+  /** Optional: when set, storage_sync jobs call runUploadPass/runDeletePass via this transport. */
+  readonly s3?: S3Transport | undefined;
+  /** Optional: when set, /doctor deep checks use these hooks. */
+  readonly doctor?: Omit<DoctorDeps, "db"> | undefined;
 }
 
 interface ClaimedJob {
@@ -207,29 +240,182 @@ export async function runOneClaimed(
   // Capture pass first.
   const capture = await runCapturePass(deps, job.id);
 
+  if (job.job_type === "storage_sync") {
+    return runStorageSyncJob(deps, job);
+  }
+
+  if (job.job_type === "notification_retry") {
+    return runNotificationRetryJob(deps, job);
+  }
+
   if (job.job_type !== "provider_run" && job.job_type !== "summary_generation") {
-    // Phase 4 only wires provider_run / summary_generation to an adapter.
-    // Other job types become succeeded no-ops here — Phase 9 wires
-    // storage_sync, Phase 5 wires notification_retry. Recording a
-    // provider_runs row for these would violate the invariant that
-    // only provider subprocess work lives there, so we commit a
-    // succeeded terminal without one.
+    // Future non-provider job types: no-op until explicitly wired.
     return commitSystemNoop(deps, job);
   }
 
-  const request = parseRequest(job, capture.attachments);
+  // System commands: handle locally without calling the Claude adapter.
+  if (job.job_type === "provider_run") {
+    const req = JSON.parse(job.request_json) as { command?: string | null; args?: string };
+    const cmd = req.command ?? null;
+    if (cmd && isSystemCommand(cmd)) {
+      return runSystemCommandJob(deps, job, cmd, req.args ?? "", signal);
+    }
+  }
+
+  // job_accepted notification (PRD §13.3 DEC-012): sent for non-system provider_run
+  // jobs when an outbound transport is available. Gives immediate feedback to the user
+  // while the AI run is pending.
+  if (
+    job.job_type === "provider_run" &&
+    deps.outbound &&
+    job.chat_id
+  ) {
+    const accepted = createNotificationAndChunks({
+      db: deps.db,
+      newId: deps.newId,
+      args: {
+        job_id: job.id,
+        chat_id: job.chat_id,
+        notification_type: "job_accepted",
+        text: `접수됨 · ${job.id.slice(0, 8)} · ${job.provider ?? "claude"} · 상태: queued`,
+        chunk_size: deps.config.notifications?.chunk_size,
+      },
+    });
+    let jobAcceptedRetryNeeded = false;
+    try {
+      const jobAcceptedResult = await sendNotification(
+        { db: deps.db, transport: deps.outbound, events: deps.events },
+        accepted.notification_id,
+        accepted.chunks,
+      );
+      jobAcceptedRetryNeeded = jobAcceptedResult.roll_up_status !== "sent";
+    } catch {
+      // Non-fatal: job_accepted delivery failure must not block the AI run.
+      jobAcceptedRetryNeeded = true;
+    }
+    if (jobAcceptedRetryNeeded) {
+      enqueueNotificationRetryJob(deps, accepted.notification_id, job.chat_id);
+    }
+  }
+
+  const isSummaryJob = job.job_type === "summary_generation";
+  const selectedAdapter = isSummaryJob && deps.summaryAdapter
+    ? deps.summaryAdapter
+    : deps.adapter;
+
+  // summary_generation always runs in replay_mode (fresh context, no resume).
+  // Also respect an explicit replay_mode in request_json (e.g. after a resume-fallback).
+  const requestRaw = JSON.parse(job.request_json) as { context_packing_mode?: string };
+  const forcedReplay = requestRaw.context_packing_mode === "replay_mode";
+  const priorSessionId = !isSummaryJob && !forcedReplay && job.session_id
+    ? queryPriorProviderSessionId(deps.db, job.session_id)
+    : null;
+  const baseRequest = parseRequest(job, capture.attachments, priorSessionId);
   const providerRunId = deps.newId();
+  const packingMode = priorSessionId ? "resume_mode" : "replay_mode";
+
+  // In replay_mode, inject the full packed context (memory + turns + summary)
+  // as the message so Claude receives the conversation history. In resume_mode
+  // Claude already has the history via --resume, so just send the user message.
+  let request = baseRequest;
+  let snapshotJson: string;
+  if (packingMode === "replay_mode" && job.session_id) {
+    let ctx: ContextBuildResult;
+    try {
+      ctx = buildContextForRun({
+        db: deps.db,
+        sessionId: job.session_id,
+        req: baseRequest,
+        redactor: deps.redactor,
+        // advisory profile: replace system_identity with schema instruction
+        systemIdentity: isSummaryJob ? SUMMARY_SYSTEM_IDENTITY : undefined,
+        // summary user message instructs Claude to produce structured output.
+        // On retry (attempts >= 2), append a stricter schema reminder per HLD §7.5 failure modes.
+        userMessage: isSummaryJob
+          ? job.attempts >= 2
+            ? "이 대화를 위의 JSON 스키마에 따라 요약해 주세요.\n\n반드시 유효한 JSON 객체만 반환하십시오. 마크다운 펜스나 설명 없이 JSON 객체 하나만 출력하세요. 이전 시도에서 스키마를 따르지 않은 것 같습니다."
+            : "이 대화를 위의 JSON 스키마에 따라 요약해 주세요."
+          : undefined,
+      });
+    } catch (e) {
+      if (e instanceof PromptOverflowError) {
+        // HLD §10.3 rule 2: minimum prompt doesn't fit; fail the job explicitly.
+        deps.db.tx<void>(() => {
+          deps.db
+            .prepare<unknown, [string, string]>(
+              `UPDATE jobs SET status = 'failed', finished_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+               error_json = ? WHERE id = ? AND status = 'running'`,
+            )
+            .run(JSON.stringify({ error_type: "prompt_overflow", detail: e.message }), job.id);
+        });
+        deps.events.warn("queue.job.prompt_overflow", { job_id: job.id, detail: e.message });
+        return { job_id: job.id, terminal: "failed", turn_id: null, provider_run_id: providerRunId };
+      }
+      throw e;
+    }
+    request = { ...baseRequest, message: ctx.packedMessage };
+    snapshotJson = ctx.snapshotJson;
+  } else {
+    snapshotJson = JSON.stringify({ mode: packingMode, session_id: job.session_id ?? "" });
+  }
+
   insertProviderRunStart({
     db: deps.db,
     id: providerRunId,
     jobId: job.id,
     sessionId: job.session_id ?? "",
-    provider: deps.adapter.name,
+    provider: selectedAdapter.name,
     req: request,
+    packingMode,
     redactor: deps.redactor,
+    snapshotJson,
   });
 
-  const outcome = await safeRun(deps.adapter, request, signal);
+  const outcome = await safeRun(selectedAdapter, request, signal, (pgid, pid) => {
+    deps.db
+      .prepare<unknown, [number, number, string]>(
+        `UPDATE provider_runs SET process_group_id = ?, process_id = ? WHERE id = ?`,
+      )
+      .run(pgid, pid, providerRunId);
+  });
+
+  // Resume-fallback (HLD §10.2): if a resume_mode attempt fails, re-queue
+  // the job in replay_mode without counting the failed attempt.
+  if (
+    outcome.kind === "failed" &&
+    request.context_packing_mode === "resume_mode" &&
+    outcome.response.exit_code !== 0
+  ) {
+    deps.db.tx<void>(() => {
+      deps.db
+        .prepare<unknown, [string, string]>(
+          `UPDATE provider_runs
+           SET status = 'failed',
+               error_type = 'resume_failed',
+               finished_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+               parser_status = ?
+           WHERE id = ?`,
+        )
+        .run(outcome.response.parser_status, providerRunId);
+      // Re-queue the job in replay_mode; decrement attempts so this doesn't count.
+      const existingReq = JSON.parse(job.request_json) as Record<string, unknown>;
+      const newRequestJson = JSON.stringify({ ...existingReq, context_packing_mode: "replay_mode" });
+      deps.db
+        .prepare<unknown, [string, string]>(
+          `UPDATE jobs
+           SET status = 'queued',
+               started_at = NULL,
+               finished_at = NULL,
+               attempts = MAX(0, attempts - 1),
+               result_json = json_object('resume_failed', 1),
+               request_json = ?
+           WHERE id = ? AND status = 'running'`,
+        )
+        .run(newRequestJson, job.id);
+    });
+    deps.events.info("queue.job.resume_fallback", { job_id: job.id, provider_run_id: providerRunId });
+    return { job_id: job.id, terminal: "failed", turn_id: null, provider_run_id: providerRunId };
+  }
 
   // Persist raw events for audit. Each payload must already be redacted by
   // the adapter (Claude adapter in Phase 7 will enforce line-by-line
@@ -266,25 +452,53 @@ export async function runOneClaimed(
 
   let turnId: string | null = null;
   const finalText = outcome.response.final_text;
+  const summaryResult = { sync: null as { summaryId: string; summaryData: SummaryOutput } | null };
+  let pendingNotification: { notification_id: string; chunks: readonly string[] } | null = null;
 
   deps.db.tx<void>(() => {
+    const providerSessionIdFromRun =
+      outcome.kind === "succeeded" && outcome.response.session_id
+        ? outcome.response.session_id
+        : null;
+    const usageJson = outcome.response.usage
+      ? JSON.stringify(outcome.response.usage)
+      : null;
+    const providerVersion = outcome.response.provider_version ?? null;
     deps.db
-      .prepare<unknown, [string, string | null, string | null, string]>(
+      .prepare<unknown, [string, string | null, string | null, string | null, string | null, string | null, string]>(
         `UPDATE provider_runs
          SET status = ?,
              error_type = ?,
              finished_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-             parser_status = ?
+             parser_status = ?,
+             provider_session_id = ?,
+             usage_json = ?,
+             provider_version = ?
          WHERE id = ?`,
       )
       .run(
         terminalRunStatus,
         outcome.response.error_type ?? null,
         outcome.response.parser_status,
+        providerSessionIdFromRun,
+        usageJson,
+        providerVersion,
         providerRunId,
       );
 
     if (finalText.length > 0 && job.session_id) {
+      // Insert user turn first (chronological order) for non-summary provider_run jobs.
+      // Summary generation is an internal operation and does not produce a user turn.
+      // Use baseRequest.message (raw user text), not the packed context sent to Claude.
+      if (!isSummaryJob && baseRequest.message.length > 0) {
+        const redactedUserMsg = deps.redactor.apply(baseRequest.message).text;
+        deps.db
+          .prepare<unknown, [string, string, string, string, string]>(
+            `INSERT INTO turns(id, session_id, job_id, provider_run_id, role, content_redacted, redaction_applied)
+             VALUES(?, ?, ?, ?, 'user', ?, 1)`,
+          )
+          .run(deps.newId(), job.session_id, job.id, providerRunId, redactedUserMsg);
+      }
       turnId = deps.newId();
       const redactedText = deps.redactor.apply(finalText).text;
       deps.db
@@ -312,14 +526,23 @@ export async function runOneClaimed(
             capture_failures: capture.failures,
           })
         : null;
+    // cancelled_after_start (HLD §14.5): set when the subprocess had begun
+    // producing output before teardown, indicating possible side effects.
+    const cancelledAfterStart =
+      (outcome.kind === "cancelled" || outcome.kind === "failed") &&
+      (outcome.response.raw_events.length > 0 || outcome.response.final_text.length > 0);
     const error_json =
       outcome.kind === "failed"
         ? JSON.stringify({
             error_type: outcome.error_type,
             exit_code: outcome.response.exit_code,
+            ...(cancelledAfterStart ? { cancelled_after_start: true } : {}),
           })
         : outcome.kind === "cancelled"
-          ? JSON.stringify({ error_type: "cancelled" })
+          ? JSON.stringify({
+              error_type: "cancelled",
+              ...(cancelledAfterStart ? { cancelled_after_start: true } : {}),
+            })
           : null;
     deps.db
       .prepare<
@@ -334,7 +557,76 @@ export async function runOneClaimed(
          WHERE id = ? AND status = 'running'`,
       )
       .run(terminalJobStatus, result_json, error_json, job.id);
+
+    // summary_generation: persist structured summary + optional /end session close.
+    if (
+      job.job_type === "summary_generation" &&
+      job.session_id
+    ) {
+      const summaryReq = JSON.parse(job.request_json) as { command?: string; trigger?: string };
+      const isEndTrigger = summaryReq.command === "/end" || summaryReq.trigger === "explicit_end";
+      if (terminalJobStatus === "succeeded") {
+        // Attempt to parse structured summary output from Claude's response.
+        let parsed = false;
+        if (finalText.length > 0) {
+          try {
+            const raw = JSON.parse(finalText) as SummaryOutput;
+            const summaryData: SummaryOutput = { ...raw, session_id: job.session_id };
+            const result = writeSummary({
+              db: deps.db,
+              newId: deps.newId,
+              summary: summaryData,
+            });
+            summaryResult.sync = { summaryId: result.summary_id, summaryData };
+            parsed = true;
+          } catch {
+            // Non-fatal: unstructured output is stored as a turn but not as a memory_summaries row.
+          }
+        }
+        // HLD §7.5 failure mode: /end on empty session → produce minimal summary.
+        if (!parsed && isEndTrigger) {
+          const minimalSummary: SummaryOutput = {
+            session_id: job.session_id,
+            summary_type: "session",
+            facts: [],
+            preferences: [],
+            decisions: [],
+            open_tasks: [],
+            cautions: [],
+            source_turn_ids: [],
+          };
+          const result = writeSummary({ db: deps.db, newId: deps.newId, summary: minimalSummary });
+          summaryResult.sync = { summaryId: result.summary_id, summaryData: minimalSummary };
+        }
+      }
+      // HLD §7.5: /end closes the session regardless of summary success or failure.
+      if (isEndTrigger) {
+        endSession(deps.db, job.session_id);
+      }
+    }
   });
+
+  // AC-MEM-001: write local snapshot file + enqueue storage_sync after summary succeeds.
+  // Runs outside the tx to avoid blocking I/O inside a transaction (HLD §7.10).
+  if (summaryResult.sync !== null && deps.config.sync) {
+    try {
+      await enqueueMemorySnapshotSync(deps, job.id, summaryResult.sync.summaryId, summaryResult.sync.summaryData);
+    } catch {
+      // Non-fatal: sync failure must not roll back the succeeded summary.
+    }
+  }
+
+  // Auto-trigger summary check (AC-MEM-005 / PRD §12.3 DEC-019).
+  // Only applies to successful conversational provider_run jobs.
+  if (
+    job.job_type === "provider_run" &&
+    outcome.kind === "succeeded" &&
+    job.session_id &&
+    job.user_id &&
+    job.chat_id
+  ) {
+    maybeEnqueueAutoSummary(deps, job.session_id, job.user_id, job.chat_id);
+  }
 
   deps.events.info("queue.job.terminal", {
     job_id: job.id,
@@ -343,18 +635,23 @@ export async function runOneClaimed(
     capture_failures: capture.failures,
   });
 
-  // Outbound notification (optional at the worker level; wired by
-  // Phase 5 tests + prod). Chunk creation is atomic with the
-  // parent row insert (HLD §6.3); the send pass itself is async
-  // and outside that txn.
+  // Outbound notification: create rows in their own txn immediately after T5 completes
+  // (HLD §7.10: notification creation uses its own transaction; T5 does not allow nesting
+  // because createNotificationAndChunks wraps inserts in db.tx() internally).
   if (deps.outbound && job.chat_id) {
-    const notificationType: NotificationType =
-      outcome.kind === "succeeded"
+    const notificationType: NotificationType = isSummaryJob && outcome.kind === "succeeded"
+      ? "summary"
+      : outcome.kind === "succeeded"
         ? "job_completed"
         : outcome.kind === "cancelled"
           ? "job_cancelled"
           : "job_failed";
-    const text = buildNotificationText(outcome.kind, outcome.response.final_text);
+    const notifText = (isSummaryJob && summaryResult.sync !== null)
+      ? buildSummaryNotificationText(summaryResult.sync.summaryData)
+      : buildNotificationText(outcome.kind, outcome.response.final_text, {
+          duration_ms: outcome.response.duration_ms,
+          provider: outcome.response.provider,
+        });
     const created = createNotificationAndChunks({
       db: deps.db,
       newId: deps.newId,
@@ -362,31 +659,41 @@ export async function runOneClaimed(
         job_id: job.id,
         chat_id: job.chat_id,
         notification_type: notificationType,
-        text,
+        text: notifText,
         chunk_size: deps.config.notifications?.chunk_size,
       },
     });
+    pendingNotification = { notification_id: created.notification_id, chunks: created.chunks };
+  }
+
+  // Send the notification (network I/O outside any transaction per HLD §7.10).
+  if (deps.outbound && job.chat_id && pendingNotification !== null) {
+    const { notification_id, chunks } = pendingNotification;
+    let retryNeeded = false;
     try {
-      await sendNotification(
+      const sendResult = await sendNotification(
         {
           db: deps.db,
           transport: deps.outbound,
           events: deps.events,
         },
-        created.notification_id,
-        created.chunks,
+        notification_id,
+        chunks,
       );
+      retryNeeded = sendResult.roll_up_status !== "sent";
     } catch (e) {
       deps.events.warn("telegram.outbound.pass_error", {
         job_id: job.id,
-        notification_id: created.notification_id,
+        notification_id,
         error_type: (e as Error).name,
         error_message: (e as Error).message,
       });
       // Do NOT roll back jobs.status or provider_runs.status here —
-      // the retry scheduler (Phase 5 notification_retry) will pick up
-      // the non-terminal chunk rows. Provider success stands
-      // independently of delivery (PRD AC-NOTIF-001, AC-STO-002).
+      // Provider success stands independently of delivery (AC-NOTIF-001).
+      retryNeeded = true;
+    }
+    if (retryNeeded) {
+      enqueueNotificationRetryJob(deps, notification_id, job.chat_id!);
     }
   }
 
@@ -399,17 +706,51 @@ export async function runOneClaimed(
   return { job_id: job.id, terminal, turn_id: turnId, provider_run_id: providerRunId };
 }
 
+function buildSummaryNotificationText(summary: SummaryOutput): string {
+  const counts: string[] = [];
+  if (summary.facts.length > 0) counts.push(`사실 ${summary.facts.length}개`);
+  if (summary.preferences.length > 0) counts.push(`선호도 ${summary.preferences.length}개`);
+  if (summary.decisions.length > 0) counts.push(`결정 ${summary.decisions.length}개`);
+  if (summary.open_tasks.length > 0) counts.push(`열린 작업 ${summary.open_tasks.length}개`);
+  if (summary.cautions.length > 0) counts.push(`주의사항 ${summary.cautions.length}개`);
+  const detail = counts.length > 0 ? ` (${counts.join(", ")})` : "";
+  return `요약이 완료됐습니다${detail}.`;
+}
+
 function buildNotificationText(
   kind: "succeeded" | "failed" | "cancelled",
   finalText: string,
+  meta?: { duration_ms?: number; provider?: string },
 ): string {
   if (kind === "succeeded") {
-    return finalText.length > 0 ? finalText : "(empty response)";
+    const base = finalText.length > 0 ? finalText : "(empty response)";
+    if (meta?.duration_ms !== undefined && meta.provider) {
+      const sec = (meta.duration_ms / 1000).toFixed(1);
+      return `${base}\n\n---\n${sec}s · ${meta.provider}`;
+    }
+    return base;
   }
   if (kind === "cancelled") {
     return "작업이 취소됐습니다.";
   }
   return finalText.length > 0 ? finalText : "작업이 실패했습니다. /status 를 확인하세요.";
+}
+
+function buildJobCompletedFooter(db: DbHandle, jobId: string): string {
+  try {
+    const row = db
+      .prepare<{ provider: string | null; result_json: string | null }, [string]>(
+        "SELECT provider, result_json FROM jobs WHERE id = ?",
+      )
+      .get(jobId);
+    if (!row?.result_json) return "";
+    const r = JSON.parse(row.result_json) as { duration_ms?: number };
+    if (r.duration_ms === undefined) return "";
+    const sec = (r.duration_ms / 1000).toFixed(1);
+    return `\n\n---\n${sec}s · ${row.provider ?? "claude"}`;
+  } catch {
+    return "";
+  }
 }
 
 // ---------------------------------------------------------------
@@ -463,9 +804,10 @@ async function safeRun(
   adapter: ProviderAdapter,
   req: AgentRequest,
   signal?: AbortSignal,
+  onSpawn?: (pgid: number, pid: number) => void,
 ): Promise<AgentOutcome> {
   try {
-    return await adapter.run(req, signal);
+    return await adapter.run(req, signal, onSpawn);
   } catch (e) {
     const msg = (e as Error).message ?? "adapter_threw";
     return {
@@ -488,6 +830,7 @@ async function safeRun(
 function parseRequest(
   job: ClaimedJob,
   attachments: readonly AgentRequestAttachment[],
+  priorProviderSessionId?: string | null,
 ): AgentRequest {
   const parsed = JSON.parse(job.request_json) as {
     text?: string;
@@ -504,8 +847,134 @@ function parseRequest(
     channel: job.chat_id ? `telegram:${job.chat_id}` : "",
     idempotency_key: job.idempotency_key,
     ...(attachments.length > 0 ? { attachments } : {}),
+    ...(priorProviderSessionId
+      ? {
+          context_packing_mode: "resume_mode" as const,
+          provider_session_id: priorProviderSessionId,
+        }
+      : { context_packing_mode: "replay_mode" as const }),
   };
   return req;
+}
+
+function queryPriorProviderSessionId(db: DbHandle, session_id: string): string | null {
+  const row = db
+    .prepare<{ provider_session_id: string }, [string]>(
+      `SELECT provider_session_id
+       FROM provider_runs
+       WHERE session_id = ? AND status = 'succeeded'
+         AND provider_session_id IS NOT NULL
+       ORDER BY finished_at DESC
+       LIMIT 1`,
+    )
+    .get(session_id);
+  return row?.provider_session_id ?? null;
+}
+
+interface ContextBuildResult {
+  /** Full packed message text: used as the actual prompt in replay_mode. */
+  readonly packedMessage: string;
+  /** JSON metadata for provider_runs.injected_snapshot_json. */
+  readonly snapshotJson: string;
+}
+
+/**
+ * Build and pack the context for a replay_mode provider run.
+ *
+ * Returns both the full rendered message (to pass to Claude) and the
+ * observability snapshot (to persist in injected_snapshot_json).
+ * In resume_mode the context is managed by Claude's session, so only
+ * the raw user message is used; this function still returns an
+ * appropriate snapshot for observability.
+ */
+function buildContextForRun(args: {
+  db: DbHandle;
+  sessionId: string;
+  req: AgentRequest;
+  redactor: Redactor;
+  /** Override the system_identity slot (e.g. advisory profile for summary_generation). */
+  systemIdentity?: string | undefined;
+  /** Override the user_message slot (e.g. schema prompt for summary_generation). */
+  userMessage?: string | undefined;
+}): ContextBuildResult {
+  const fallback: ContextBuildResult = {
+    packedMessage: args.userMessage ?? args.req.message,
+    snapshotJson: JSON.stringify({ mode: "replay_mode", session_id: args.sessionId ?? "" }),
+  };
+
+  if (!args.sessionId) return fallback;
+
+  const turns = args.db
+    .prepare<TurnSlot, [string]>(
+      `SELECT id, role, content_redacted, created_at
+       FROM turns
+       WHERE session_id = ?
+       ORDER BY created_at DESC
+       LIMIT 20`,
+    )
+    .all(args.sessionId)
+    .reverse();
+
+  const memItems = args.db
+    .prepare<MemoryItemSlot, [string]>(
+      `SELECT id, content, provenance, confidence, status
+       FROM memory_items
+       WHERE session_id = ? AND status = 'active'
+       ORDER BY created_at DESC
+       LIMIT 50`,
+    )
+    .all(args.sessionId);
+
+  const latestSummary = args.db
+    .prepare<{ facts_json: string | null; open_tasks_json: string | null; created_at: string }, [string]>(
+      `SELECT facts_json, open_tasks_json, created_at
+       FROM memory_summaries
+       WHERE session_id = ?
+       ORDER BY created_at DESC
+       LIMIT 1`,
+    )
+    .get(args.sessionId);
+
+  let currentSessionSummary: string | undefined;
+  if (latestSummary) {
+    const parts: string[] = [`[요약 기준: ${latestSummary.created_at}]`];
+    if (latestSummary.facts_json) {
+      try {
+        const facts = JSON.parse(latestSummary.facts_json) as Array<{ content: string }>;
+        if (facts.length > 0) parts.push(`사실: ${facts.map((f) => f.content).join("; ")}`);
+      } catch { /* ignore malformed JSON */ }
+    }
+    if (latestSummary.open_tasks_json) {
+      try {
+        const tasks = JSON.parse(latestSummary.open_tasks_json) as Array<{ content: string }>;
+        if (tasks.length > 0) parts.push(`미결: ${tasks.map((t) => t.content).join("; ")}`);
+      } catch { /* ignore */ }
+    }
+    currentSessionSummary = parts.join("\n");
+  }
+
+  const snap = buildContext({
+    mode: "replay_mode",
+    user_message: args.userMessage ?? args.req.message,
+    system_identity: args.systemIdentity ?? "actwyn personal agent",
+    recent_turns: turns,
+    memory_items: memItems,
+    ...(currentSessionSummary ? { current_session_summary: currentSessionSummary } : {}),
+  });
+
+  try {
+    const packed = pack(snap, { total_budget_tokens: 6000 });
+    return {
+      packedMessage: args.redactor.apply(renderAsMessage(packed)).text,
+      snapshotJson: args.redactor.apply(serializeForProviderRun(packed)).text,
+    };
+  } catch (e) {
+    // HLD §10.3 rule 2: PromptOverflowError must propagate so the caller can
+    // fail the job with a user-visible error. All other packing errors fall back
+    // to bare user message to avoid blocking the queue.
+    if (e instanceof PromptOverflowError) throw e;
+    return fallback;
+  }
 }
 
 function insertProviderRunStart(args: {
@@ -515,33 +984,84 @@ function insertProviderRunStart(args: {
   sessionId: string;
   provider: string;
   req: AgentRequest;
+  packingMode: "resume_mode" | "replay_mode";
   redactor: Redactor;
+  snapshotJson: string;
 }): void {
   const argvRedacted = JSON.stringify(args.redactor.applyToJson({
     message: args.req.message,
     channel: args.req.channel,
   }));
-  const snapshot = JSON.stringify(args.redactor.applyToJson({
-    attachments: args.req.attachments ?? [],
-    session_id: args.req.session_id,
-  }));
   args.db
     .prepare<
       unknown,
-      [string, string, string, string, string, string]
+      [string, string, string, string, string, string, string]
     >(
       `INSERT INTO provider_runs
          (id, job_id, session_id, provider, context_packing_mode, status,
           argv_json_redacted, cwd, injected_snapshot_json, parser_status)
-       VALUES(?, ?, ?, ?, 'replay_mode', 'started', ?, '.', ?, 'parsed')`,
+       VALUES(?, ?, ?, ?, ?, 'started', ?, '.', ?, 'parsed')`,
     )
-    .run(args.id, args.jobId, args.sessionId, args.provider, argvRedacted, snapshot);
+    .run(args.id, args.jobId, args.sessionId, args.provider, args.packingMode, argvRedacted, args.snapshotJson);
+}
+
+async function runStorageSyncJob(deps: WorkerDeps, job: ClaimedJob): Promise<RunResult> {
+  if (!deps.s3 || !deps.config.sync) {
+    // No S3 transport configured — noop so the queue keeps moving.
+    return commitSystemNoop(deps, job);
+  }
+
+  const syncDeps = {
+    db: deps.db,
+    transport: deps.s3,
+    events: deps.events,
+    config: deps.config.sync,
+  };
+
+  let uploadResult: { uploaded: number; failed: number; local_missing: number };
+  let deleteResult: { deleted: number; delete_failed: number; local_only_deleted: number };
+  try {
+    uploadResult = await runUploadPass(syncDeps);
+    deleteResult = await runDeletePass(syncDeps);
+  } catch (e) {
+    deps.db
+      .prepare<unknown, [string, string]>(
+        `UPDATE jobs
+         SET status = 'failed',
+             finished_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+             error_json = ?
+         WHERE id = ? AND status = 'running'`,
+      )
+      .run(JSON.stringify({ error_type: "sync_pass_threw", message: (e as Error).message.slice(0, 200) }), job.id);
+    return { job_id: job.id, terminal: "failed", turn_id: null, provider_run_id: "" };
+  }
+
+  const result_json = JSON.stringify({
+    uploaded: uploadResult.uploaded,
+    upload_failed: uploadResult.failed,
+    local_missing: uploadResult.local_missing,
+    deleted: deleteResult.deleted,
+    delete_failed: deleteResult.delete_failed,
+    local_only_deleted: deleteResult.local_only_deleted,
+  });
+  deps.db
+    .prepare<unknown, [string, string]>(
+      `UPDATE jobs
+       SET status = 'succeeded',
+           finished_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+           result_json = ?
+       WHERE id = ? AND status = 'running'`,
+    )
+    .run(result_json, job.id);
+  deps.events.info("queue.job.storage_sync", {
+    job_id: job.id,
+    uploaded: uploadResult.uploaded,
+    deleted: deleteResult.deleted,
+  });
+  return { job_id: job.id, terminal: "succeeded", turn_id: null, provider_run_id: "" };
 }
 
 function commitSystemNoop(deps: WorkerDeps, job: ClaimedJob): RunResult {
-  // Mark the job succeeded without a provider_runs row. Used by
-  // Phase 4 for non-provider job types (storage_sync, notification_retry)
-  // that haven't been wired yet — keeps the queue moving in tests.
   deps.db
     .prepare<unknown, [string]>(
       `UPDATE jobs
@@ -553,4 +1073,608 @@ function commitSystemNoop(deps: WorkerDeps, job: ClaimedJob): RunResult {
     .run(job.id);
   deps.events.info("queue.job.noop", { job_id: job.id, job_type: job.job_type });
   return { job_id: job.id, terminal: "succeeded", turn_id: null, provider_run_id: "" };
+}
+
+// ---------------------------------------------------------------
+// Auto-trigger summary (AC-MEM-005 / PRD §12.3)
+// ---------------------------------------------------------------
+
+function maybeEnqueueAutoSummary(
+  deps: WorkerDeps,
+  session_id: string,
+  user_id: string,
+  chat_id: string,
+): void {
+  try {
+    const counts = deps.db
+      .prepare<
+        {
+          total_turns: number;
+          user_turns: number;
+          total_chars: number;
+          session_age_seconds: number;
+          turns_since_last_summary: number;
+          user_turns_since_last_summary: number;
+        },
+        [string, string]
+      >(
+        `WITH last_sum AS (
+           SELECT COALESCE(MAX(created_at), '1970-01-01T00:00:00.000Z') AS ts
+           FROM memory_summaries WHERE session_id = ?
+         )
+         SELECT
+           COUNT(t.id) AS total_turns,
+           SUM(CASE WHEN t.role = 'user' THEN 1 ELSE 0 END) AS user_turns,
+           SUM(LENGTH(t.content_redacted)) AS total_chars,
+           CAST((JULIANDAY('now') - JULIANDAY(s.started_at)) * 86400 AS INTEGER) AS session_age_seconds,
+           SUM(CASE WHEN t.created_at > ls.ts THEN 1 ELSE 0 END) AS turns_since_last_summary,
+           SUM(CASE WHEN t.role = 'user' AND t.created_at > ls.ts THEN 1 ELSE 0 END) AS user_turns_since_last_summary
+         FROM turns t
+         JOIN sessions s ON s.id = t.session_id
+         CROSS JOIN last_sum ls
+         WHERE t.session_id = ?`,
+      )
+      .get(session_id, session_id);
+
+    if (!counts) return;
+
+    const decision = shouldAutoTriggerSummary({
+      turns_since_last_summary: counts.turns_since_last_summary ?? 0,
+      transcript_estimated_tokens: Math.ceil((counts.total_chars ?? 0) / 4),
+      session_age_seconds: counts.session_age_seconds ?? 0,
+      user_turns_since_last_summary: counts.user_turns_since_last_summary ?? 0,
+    });
+
+    if (!decision.trigger) return;
+
+    // Throttle: don't enqueue a second auto-summary if one is already pending.
+    const pending = deps.db
+      .prepare<{ n: number }, [string]>(
+        `SELECT COUNT(*) AS n FROM jobs
+         WHERE job_type = 'summary_generation' AND session_id = ?
+           AND status IN ('queued', 'running')`,
+      )
+      .get(session_id);
+    if ((pending?.n ?? 0) > 0) return;
+
+    enqueueSummaryJob({
+      db: deps.db,
+      newId: deps.newId,
+      session_id,
+      user_id,
+      chat_id,
+      trigger: "auto",
+    });
+    deps.events.info("queue.summary.auto_enqueued", { session_id, reason: decision.reason });
+  } catch (e) {
+    // Non-fatal: auto-trigger failure must not affect the parent job's terminal status.
+    deps.events.warn("queue.summary.auto_trigger_error", {
+      session_id,
+      error_message: (e as Error).message,
+    });
+  }
+}
+
+// ---------------------------------------------------------------
+// AC-MEM-001: memory snapshot → local file + storage_sync enqueue
+// ---------------------------------------------------------------
+
+async function enqueueMemorySnapshotSync(
+  deps: WorkerDeps,
+  jobId: string,
+  summaryId: string,
+  summary: SummaryOutput,
+): Promise<void> {
+  const sync = deps.config.sync!;
+  const content = JSON.stringify(summary) + "\n";
+  const bytes = new TextEncoder().encode(content);
+
+  const sha256Buf = await crypto.subtle.digest("SHA-256", bytes);
+  const sha256Hex = Array.from(new Uint8Array(sha256Buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+
+  const objectId = deps.newId();
+  const now = deps.now();
+  const yyyy = now.getUTCFullYear().toString();
+  const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(now.getUTCDate()).padStart(2, "0");
+  const storageKey = `objects/${yyyy}/${mm}/${dd}/${objectId}/${sha256Hex}.jsonl`;
+  const localPath = sync.local_path(objectId);
+
+  // Write S3 staging file (HLD §7.10: no blocking I/O inside transactions).
+  mkdirSync(dirname(localPath), { recursive: true });
+  writeFileSync(localPath, bytes);
+
+  // AC-MEM-001: write human-readable memory files per PRD §12 / HLD §11.2.
+  // memory/sessions/<session_id>.jsonl — append-only JSONL per session.
+  // memory/personal/YYYY-MM-DD.md — rolled-up daily markdown line.
+  if (summary.session_id) {
+    const memBase = deps.config.memory_base_path ?? dirname(sync.local_path("x")).replace(/\/[^/]+$/, "/memory");
+    const sessionDir = join(memBase, "sessions");
+    mkdirSync(sessionDir, { recursive: true });
+    appendFileSync(join(sessionDir, `${summary.session_id}.jsonl`), content);
+
+    const personalDir = join(memBase, "personal");
+    mkdirSync(personalDir, { recursive: true });
+    const mdLine = `<!-- ${yyyy}-${mm}-${dd} session=${summary.session_id} summary=${summaryId} -->\n`;
+    appendFileSync(join(personalDir, `${yyyy}-${mm}-${dd}.md`), mdLine);
+  }
+
+  const bucket = sync.bucket ?? null;
+
+  // Atomic: create storage_objects row + update summary FK + enqueue storage_sync.
+  deps.db.tx<void>(() => {
+    deps.db
+      .prepare<unknown, [string, string | null, string, number, string, string]>(
+        `INSERT INTO storage_objects
+           (id, storage_backend, bucket, storage_key, mime_type, size_bytes, sha256,
+            source_channel, source_job_id, artifact_type, retention_class,
+            capture_status, status, captured_at)
+         VALUES(?, 's3', ?, ?, 'application/jsonl', ?, ?,
+                'system', ?, 'memory_snapshot', 'long_term',
+                'captured', 'pending', strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
+      )
+      .run(objectId, bucket, storageKey, bytes.length, sha256Hex, jobId);
+
+    deps.db
+      .prepare<unknown, [string, string]>(
+        `UPDATE memory_summaries SET storage_key = ? WHERE id = ?`,
+      )
+      .run(storageKey, summaryId);
+
+    const syncJobId = deps.newId();
+    deps.db
+      .prepare<unknown, [string, string]>(
+        `INSERT INTO jobs(id, status, job_type, request_json, idempotency_key)
+         VALUES(?, 'queued', 'storage_sync', '{}', ?)
+         ON CONFLICT(job_type, idempotency_key) DO NOTHING`,
+      )
+      .run(syncJobId, `sync:${objectId}`);
+  });
+}
+
+// ---------------------------------------------------------------
+// System command dispatch (local, no Claude subprocess)
+// ---------------------------------------------------------------
+
+const SYSTEM_COMMANDS = new Set([
+  "/new",
+  "/chat",
+  "/help",
+  "/status",
+  "/cancel",
+  "/doctor",
+  "/whoami",
+  "/provider",
+  "/save_last_attachment",
+  "/forget_last",
+  "/forget_session",
+  "/forget_artifact",
+  "/forget_memory",
+  "/correct",
+]);
+
+function isSystemCommand(cmd: string): boolean {
+  return SYSTEM_COMMANDS.has(cmd);
+}
+
+async function runSystemCommandJob(
+  deps: WorkerDeps,
+  job: ClaimedJob,
+  command: string,
+  args: string,
+  _signal?: AbortSignal,
+): Promise<RunResult> {
+  let responseText: string;
+
+  try {
+    responseText = await dispatchSystemCommand(deps, job, command, args);
+  } catch (e) {
+    const errMsg = (e as Error).message;
+    deps.db
+      .prepare<unknown, [string, string]>(
+        `UPDATE jobs
+         SET status = 'failed',
+             finished_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+             error_json = ?
+         WHERE id = ? AND status = 'running'`,
+      )
+      .run(JSON.stringify({ error_type: "command_threw", message: errMsg.slice(0, 200) }), job.id);
+    return { job_id: job.id, terminal: "failed", turn_id: null, provider_run_id: "" };
+  }
+
+  // Persist a turn so the notification retry can reconstruct chunk texts.
+  let turnId: string | null = null;
+  if (job.session_id && responseText.length > 0) {
+    turnId = deps.newId();
+    const redacted = deps.redactor.apply(responseText).text;
+    deps.db
+      .prepare<unknown, [string, string, string, string]>(
+        `INSERT INTO turns(id, session_id, job_id, role, content_redacted, redaction_applied)
+         VALUES(?, ?, ?, 'assistant', ?, 0)`,
+      )
+      .run(turnId, job.session_id, job.id, redacted);
+  }
+
+  deps.db
+    .prepare<unknown, [string, string]>(
+      `UPDATE jobs
+       SET status = 'succeeded',
+           finished_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+           result_json = ?
+       WHERE id = ? AND status = 'running'`,
+    )
+    .run(JSON.stringify({ command, response_length: responseText.length }), job.id);
+
+  deps.events.info("queue.job.system_command", { job_id: job.id, command });
+
+  if (deps.outbound && job.chat_id && responseText.length > 0) {
+    // /doctor responses use the 'doctor' notification type (PRD §13.3 DEC-012).
+    const cmdNotifType: NotificationType = command === "/doctor" ? "doctor" : "job_completed";
+    const created = createNotificationAndChunks({
+      db: deps.db,
+      newId: deps.newId,
+      args: {
+        job_id: job.id,
+        chat_id: job.chat_id,
+        notification_type: cmdNotifType,
+        text: responseText,
+        chunk_size: deps.config.notifications?.chunk_size,
+      },
+    });
+    let retryNeeded = false;
+    try {
+      const sendResult = await sendNotification(
+        { db: deps.db, transport: deps.outbound, events: deps.events },
+        created.notification_id,
+        created.chunks,
+      );
+      retryNeeded = sendResult.roll_up_status !== "sent";
+    } catch {
+      retryNeeded = true;
+    }
+    if (retryNeeded) {
+      enqueueNotificationRetryJob(deps, created.notification_id, job.chat_id);
+    }
+  }
+
+  return { job_id: job.id, terminal: "succeeded", turn_id: turnId, provider_run_id: "" };
+}
+
+async function dispatchSystemCommand(
+  deps: WorkerDeps,
+  job: ClaimedJob,
+  command: string,
+  args: string,
+): Promise<string> {
+  switch (command) {
+    case "/new":
+    case "/chat": {
+      // End the current session so the next message starts a fresh one.
+      if (job.session_id) {
+        endSession(deps.db, job.session_id);
+      }
+      return "새 세션을 시작합니다. 다음 메시지부터 새 대화가 시작됩니다.";
+    }
+
+    case "/help": {
+      // Look up current session + provider for the header (PRD §8.1).
+      let sessionLine = "";
+      let providerLine = "";
+      if (job.session_id) {
+        sessionLine = `\nsession: ${job.session_id.slice(0, 6)}`;
+        const lastRun = deps.db
+          .prepare<{ provider: string; context_packing_mode: string }, [string]>(
+            `SELECT provider, context_packing_mode FROM provider_runs
+             WHERE session_id = ? ORDER BY started_at DESC LIMIT 1`,
+          )
+          .get(job.session_id);
+        if (lastRun) {
+          providerLine = `\nprovider: ${lastRun.provider} · ${lastRun.context_packing_mode}`;
+        }
+      }
+      return [
+        `사용 가능한 명령어:${sessionLine}${providerLine}`,
+        "/new · /chat — 새 세션 시작",
+        "/status — 큐 상태 확인",
+        "/cancel — 실행 중인 작업 취소",
+        "/summary — 현재 세션 요약 생성",
+        "/end — 세션 종료 및 요약",
+        "/provider <name> — provider 전환 (P0: claude만 활성)",
+        "/doctor — 시스템 상태 진단",
+        "/whoami — 내 Telegram user_id 확인",
+        "/save_last_attachment — 마지막 첨부파일을 long_term으로 저장",
+        "/forget_last — 직전 기억/파일 비활성화",
+        "/forget_session — 현재 세션 메모리 비활성화",
+        "/forget_artifact <id> — 특정 아티팩트 삭제",
+        "/forget_memory <id> — 특정 메모리 비활성화",
+        "/correct <id> <새 내용> — 메모리 정정",
+      ].join("\n");
+    }
+
+    case "/status": {
+      const report = buildStatusReport(deps.db, {
+        session_id: job.session_id,
+        chat_id: job.chat_id,
+        now: deps.now,
+      });
+      return formatStatus(report);
+    }
+
+    case "/cancel": {
+      const cancelArgs = job.session_id
+        ? { session_id: job.session_id }
+        : {};
+      const outcome = cancelJob(deps.db, cancelArgs);
+      // For a queued job that was just cancelled, enqueue a job_cancelled
+      // notification for the cancelled job (HLD §6.2 / PRD §13.3 DEC-012).
+      // The running-job case is handled by the worker when teardown completes.
+      if (outcome.kind === "cancelled_queued" && deps.outbound && job.chat_id) {
+        const cancelNotif = createNotificationAndChunks({
+          db: deps.db,
+          newId: deps.newId,
+          args: {
+            job_id: outcome.job_id,
+            chat_id: job.chat_id,
+            notification_type: "job_cancelled",
+            text: "작업이 취소됐습니다.",
+            chunk_size: deps.config.notifications?.chunk_size,
+          },
+        });
+        let cancelRetryNeeded = false;
+        try {
+          const cancelSendResult = await sendNotification(
+            { db: deps.db, transport: deps.outbound, events: deps.events },
+            cancelNotif.notification_id,
+            cancelNotif.chunks,
+          );
+          cancelRetryNeeded = cancelSendResult.roll_up_status !== "sent";
+        } catch {
+          cancelRetryNeeded = true;
+        }
+        if (cancelRetryNeeded) {
+          enqueueNotificationRetryJob(deps, cancelNotif.notification_id, job.chat_id!);
+        }
+      }
+      switch (outcome.kind) {
+        case "cancelled_queued": return `취소됐습니다 (job_id=${outcome.job_id}).`;
+        case "cancel_signalled": return `실행 중인 작업에 취소 신호를 보냈습니다 (job_id=${outcome.job_id}).`;
+        case "not_found": return "취소할 활성 작업이 없습니다.";
+        case "terminal": return `작업은 이미 종료됐습니다 (status=${outcome.status}).`;
+      }
+      break;
+    }
+
+    case "/doctor": {
+      const doctorDeps: DoctorDeps = {
+        db: deps.db,
+        required_bun_version: deps.doctor?.required_bun_version ?? Bun.version,
+        current_bun_version: deps.doctor?.current_bun_version ?? Bun.version,
+        bootstrap_whoami: deps.doctor?.bootstrap_whoami ?? false,
+        ...(deps.doctor?.expected_schema_version !== undefined
+          ? { expected_schema_version: deps.doctor.expected_schema_version } : {}),
+        ...(deps.doctor?.pinned_claude_version
+          ? { pinned_claude_version: deps.doctor.pinned_claude_version } : {}),
+        ...(deps.doctor?.stale_threshold_ms !== undefined
+          ? { stale_threshold_ms: deps.doctor.stale_threshold_ms } : {}),
+        ...(deps.doctor?.config_ok ? { config_ok: deps.doctor.config_ok } : {}),
+        ...(deps.doctor?.redaction_self_test
+          ? { redaction_self_test: deps.doctor.redaction_self_test } : {}),
+        ...(deps.doctor?.telegram_ping ? { telegram_ping: deps.doctor.telegram_ping } : {}),
+        ...(deps.doctor?.s3_ping ? { s3_ping: deps.doctor.s3_ping } : {}),
+        ...(deps.doctor?.claude_version ? { claude_version: deps.doctor.claude_version } : {}),
+        ...(deps.doctor?.disk_check ? { disk_check: deps.doctor.disk_check } : {}),
+        ...(deps.doctor?.claude_lockdown_smoke
+          ? { claude_lockdown_smoke: deps.doctor.claude_lockdown_smoke } : {}),
+        ...(deps.doctor?.subprocess_teardown_smoke
+          ? { subprocess_teardown_smoke: deps.doctor.subprocess_teardown_smoke } : {}),
+      };
+      const results = await runDoctor(doctorDeps);
+      const lines = results.map((r) => {
+        const icon = r.status === "ok" ? "✓" : r.status === "warn" ? "⚠" : "✗";
+        const detail = r.detail ? `: ${r.detail}` : "";
+        return `${icon} [${r.category}] ${r.name} (${r.duration_ms}ms)${detail}`;
+      });
+      return lines.join("\n");
+    }
+
+    case "/whoami": {
+      const reply = whoamiReply({
+        user_id: job.user_id,
+        chat_id: job.chat_id,
+        bootstrap: deps.doctor?.bootstrap_whoami ?? false,
+      });
+      return reply.text;
+    }
+
+    case "/provider": {
+      const result = switchProvider({ requested: args });
+      return result.message;
+    }
+
+    case "/save_last_attachment": {
+      if (!job.session_id) return "활성 세션이 없습니다.";
+      const result = saveLastAttachment({
+        db: deps.db,
+        newId: deps.newId,
+        session_id: job.session_id,
+        caption: args || undefined,
+      });
+      if (result.promoted && result.storage_object_id) {
+        const artType = result.artifact_type ?? "user_upload";
+        const shortId = result.storage_object_id.slice(0, 8);
+        return `저장함: ${artType} · ${shortId} · long_term`;
+      }
+      return "저장할 수 있는 첨부 파일이 없습니다.";
+    }
+
+    case "/forget_artifact": {
+      const id = args.trim();
+      if (!id) return "사용법: /forget_artifact <storage_object_id>";
+      const result = forgetArtifact(deps.db, id);
+      return result.affected > 0
+        ? `아티팩트(${id})를 삭제 예약했습니다.`
+        : "해당 아티팩트를 찾을 수 없거나 이미 삭제됐습니다.";
+    }
+
+    case "/forget_memory": {
+      const id = args.trim();
+      if (!id) return "사용법: /forget_memory <memory_id>";
+      const result = forgetMemory(deps.db, id);
+      return result.affected > 0 ? `메모리 항목(${id})을 취소했습니다.` : "해당 메모리 항목을 찾을 수 없습니다.";
+    }
+
+    case "/forget_session": {
+      if (!job.session_id) return "활성 세션이 없습니다.";
+      const result = forgetSession(deps.db, job.session_id);
+      return result.affected > 0 ? `세션의 모든 아티팩트를 삭제 예약했습니다.` : "삭제할 아티팩트가 없습니다.";
+    }
+
+    case "/forget_last": {
+      if (!job.session_id) return "활성 세션이 없습니다.";
+      const result = forgetLast(deps.db, job.session_id);
+      return result.affected > 0 ? `마지막 아티팩트를 삭제 예약했습니다.` : "삭제할 아티팩트가 없습니다.";
+    }
+
+    case "/correct": {
+      const parts = args.trim().split(/\s+/);
+      const oldId = parts[0];
+      if (!oldId) return "사용법: /correct <memory_id> <새로운 내용>";
+      const newContent = parts.slice(1).join(" ").trim();
+      if (!newContent) return "사용법: /correct <memory_id> <새로운 내용>";
+      const existing = deps.db
+        .prepare<
+          { session_id: string; item_type: string; provenance: string; confidence: number },
+          [string]
+        >("SELECT session_id, item_type, provenance, confidence FROM memory_items WHERE id = ?")
+        .get(oldId);
+      if (!existing) return `메모리 항목(${oldId})을 찾을 수 없습니다.`;
+      const sessionId = job.session_id ?? existing.session_id;
+      try {
+        const newMemId = deps.newId();
+        correctMemory(deps.db, {
+          old_id: oldId,
+          new_id: newMemId,
+          new_item: {
+            session_id: sessionId,
+            item_type: existing.item_type as import("~/memory/items.ts").ItemType,
+            content: newContent,
+            provenance: "user_stated",
+            confidence: 1.0,
+            source_turn_ids: [],
+          },
+        });
+        // PRD §8.4 footer: 정정함: <old_id> → <new_id>
+        return `정정함: ${oldId} → ${newMemId}`;
+      } catch (e) {
+        return `수정 실패: ${(e as Error).message}`;
+      }
+    }
+
+    default:
+      return `알 수 없는 시스템 명령: ${command}`;
+  }
+  return "";
+}
+
+// ---------------------------------------------------------------
+// Notification retry job dispatch
+// ---------------------------------------------------------------
+
+async function runNotificationRetryJob(deps: WorkerDeps, job: ClaimedJob): Promise<RunResult> {
+  if (!deps.outbound) {
+    return commitSystemNoop(deps, job);
+  }
+
+  const req = JSON.parse(job.request_json) as { notification_id?: string };
+  if (!req.notification_id) {
+    return commitSystemNoop(deps, job);
+  }
+
+  const notif = deps.db
+    .prepare<{ job_id: string; notification_type: string; payload_text: string | null; chat_id: string }, [string]>(
+      "SELECT job_id, notification_type, payload_text, chat_id FROM outbound_notifications WHERE id = ?",
+    )
+    .get(req.notification_id);
+  if (!notif) {
+    return commitSystemNoop(deps, job);
+  }
+
+  // Prefer the stored payload_text (added in migration 003). Fall back to
+  // reconstructing from the assistant turn only for job_completed rows
+  // written before the migration.
+  let chunks: string[];
+  if (notif.payload_text !== null) {
+    // Re-split with the same chunk_size config so indices match the existing rows.
+    chunks = splitForTelegram(notif.payload_text, deps.config.notifications?.chunk_size);
+  } else if (notif.notification_type === "job_completed") {
+    const turn = deps.db
+      .prepare<{ content_redacted: string }, [string]>(
+        "SELECT content_redacted FROM turns WHERE job_id = ? AND role = 'assistant' ORDER BY created_at ASC LIMIT 1",
+      )
+      .get(notif.job_id);
+    const footer = buildJobCompletedFooter(deps.db, notif.job_id);
+    chunks = turn ? splitForTelegram(turn.content_redacted + footer) : [];
+  } else {
+    chunks = [];
+  }
+
+  let rollUpStatus: "pending" | "sent" | "failed" = "pending";
+  if (chunks.length > 0) {
+    try {
+      const sendResult = await sendNotification(
+        { db: deps.db, transport: deps.outbound, events: deps.events },
+        req.notification_id,
+        chunks,
+      );
+      rollUpStatus = sendResult.roll_up_status;
+    } catch (e) {
+      deps.events.warn("telegram.outbound.retry_error", {
+        job_id: job.id,
+        notification_id: req.notification_id,
+        error_message: (e as Error).message,
+      });
+    }
+  }
+
+  // Re-enqueue if there are still unsent chunks so the next worker cycle retries.
+  // Use job.id as suffix so the new key doesn't collide with the currently-running
+  // retry row (which holds the base notif-retry:${id} key and is still in the table).
+  if (rollUpStatus !== "sent" && notif.chat_id) {
+    enqueueNotificationRetryJob(deps, req.notification_id, notif.chat_id, job.id);
+  }
+
+  deps.db
+    .prepare<unknown, [string, string]>(
+      `UPDATE jobs
+       SET status = 'succeeded',
+           finished_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+           result_json = ?
+       WHERE id = ? AND status = 'running'`,
+    )
+    .run(JSON.stringify({ notification_id: req.notification_id, chunks_attempted: chunks.length, roll_up_status: rollUpStatus }), job.id);
+  deps.events.info("queue.job.notification_retry", { job_id: job.id, notification_id: req.notification_id, roll_up_status: rollUpStatus });
+  return { job_id: job.id, terminal: "succeeded", turn_id: null, provider_run_id: "" };
+}
+
+function enqueueNotificationRetryJob(
+  deps: WorkerDeps,
+  notification_id: string,
+  chat_id: string,
+  from_job_id?: string,
+): void {
+  // When re-enqueuing from within a retry job, append the current job's id so the
+  // new key doesn't conflict with the completed retry row still in the jobs table.
+  const idempotencyKey = from_job_id
+    ? `notif-retry:${notification_id}:from:${from_job_id}`
+    : `notif-retry:${notification_id}`;
+  deps.db
+    .prepare<unknown, [string, string, string, string]>(
+      `INSERT INTO jobs(id, status, job_type, chat_id, request_json, idempotency_key)
+       VALUES(?, 'queued', 'notification_retry', ?, ?, ?)
+       ON CONFLICT(job_type, idempotency_key) DO NOTHING`,
+    )
+    .run(deps.newId(), chat_id, JSON.stringify({ notification_id }), idempotencyKey);
+  deps.events.info("queue.job.notification_retry.enqueued", { notification_id });
 }

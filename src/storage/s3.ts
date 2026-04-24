@@ -37,6 +37,77 @@ export class S3TransportError extends Error {
 }
 
 // ---------------------------------------------------------------
+// Production: Bun.S3Client wrapper
+// ---------------------------------------------------------------
+
+export interface BunS3Config {
+  readonly endpoint: string;
+  readonly bucket: string;
+  readonly region: string;
+  readonly access_key_id: string;
+  readonly secret_access_key: string;
+}
+
+export class BunS3Transport implements S3Transport {
+  private readonly client: InstanceType<typeof Bun.S3Client>;
+  private readonly bucket: string;
+
+  constructor(config: BunS3Config) {
+    this.bucket = config.bucket;
+    this.client = new Bun.S3Client({
+      endpoint: config.endpoint,
+      bucket: config.bucket,
+      region: config.region,
+      accessKeyId: config.access_key_id,
+      secretAccessKey: config.secret_access_key,
+    });
+  }
+
+  async put(args: S3PutArgs): Promise<void> {
+    const key = args.bucket !== this.bucket
+      ? `${args.bucket}/${args.key}`
+      : args.key;
+    try {
+      const file = this.client.file(key);
+      await file.write(args.bytes, args.content_type ? { type: args.content_type } : undefined);
+    } catch (e) {
+      throw new S3TransportError(
+        `put failed: ${(e as Error).message}`,
+        "retryable",
+        "put",
+      );
+    }
+  }
+
+  async delete(args: S3DeleteArgs): Promise<void> {
+    const key = args.bucket !== this.bucket
+      ? `${args.bucket}/${args.key}`
+      : args.key;
+    try {
+      await this.client.delete(key);
+    } catch (e) {
+      throw new S3TransportError(
+        `delete failed: ${(e as Error).message}`,
+        "retryable",
+        "delete",
+      );
+    }
+  }
+
+  /** Doctor smoke test: put + delete a sentinel object (PRD §12.8 / AC-OBS-001). */
+  async ping(): Promise<{ ok: boolean; detail?: string }> {
+    const sentinel = `_actwyn_ping_${Date.now()}`;
+    try {
+      await this.put({ bucket: this.bucket, key: sentinel, bytes: new Uint8Array([1]), content_type: "application/octet-stream" });
+      await this.delete({ bucket: this.bucket, key: sentinel });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, detail: (e as Error).message };
+    }
+  }
+}
+
+// ---------------------------------------------------------------
 // Stub (for tests)
 // ---------------------------------------------------------------
 

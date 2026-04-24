@@ -177,3 +177,97 @@ describe("writeSummary — schema-valid row", () => {
     expect(n).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------
+// writeSummary — promotes items to memory_items (HLD §6.5 / line 409)
+// ---------------------------------------------------------------
+
+describe("writeSummary — promotes summary items to memory_items rows", () => {
+  let idSeq = 0;
+  function nextId(): string { return `id-${++idSeq}`; }
+
+  beforeEach(() => { idSeq = 0; });
+
+  test("facts → memory_items with item_type='fact' and status='active'", () => {
+    writeSummary({
+      db,
+      newId: nextId,
+      summary: summary({
+        facts: [
+          { content: "user prefers Python", provenance: "observed", confidence: 0.7 },
+          { content: "user has a dog", provenance: "user_stated", confidence: 0.99 },
+        ],
+      }),
+    });
+    const items = db
+      .prepare<{ item_type: string; status: string; provenance: string; content: string }>(
+        "SELECT item_type, status, provenance, content FROM memory_items WHERE session_id = 'sess-1' ORDER BY created_at",
+      )
+      .all();
+    expect(items.length).toBe(2);
+    for (const it of items) {
+      expect(it.item_type).toBe("fact");
+      expect(it.status).toBe("active");
+    }
+    expect(items.map((i) => i.content)).toContain("user prefers Python");
+    expect(items.map((i) => i.content)).toContain("user has a dog");
+  });
+
+  test("provenance-gated preference (user_stated) → memory_items; inferred preference → dropped", () => {
+    const out = writeSummary({
+      db,
+      newId: nextId,
+      summary: summary({
+        preferences: [
+          { content: "prefers short replies", provenance: "user_stated", confidence: 0.9 },
+          { content: "prefers Python", provenance: "inferred", confidence: 0.4 },
+        ],
+      }),
+    });
+    expect(out.kept_preferences).toBe(1);
+    expect(out.dropped_preferences).toBe(1);
+    expect(out.memory_items_inserted).toBe(2); // 1 fact (from summary()) + 1 preference
+    const prefs = db
+      .prepare<{ item_type: string; content: string }>(
+        "SELECT item_type, content FROM memory_items WHERE item_type = 'preference'",
+      )
+      .all();
+    expect(prefs.length).toBe(1);
+    expect(prefs[0]!.content).toBe("prefers short replies");
+  });
+
+  test("open_tasks, decisions, cautions each produce memory_items rows", () => {
+    writeSummary({
+      db,
+      newId: nextId,
+      summary: summary({
+        facts: [],
+        open_tasks: [{ content: "buy coffee", provenance: "user_stated", confidence: 0.8 }],
+        decisions: [{ content: "use PostgreSQL", provenance: "observed", confidence: 0.6 }],
+        cautions: [{ content: "avoid peanuts", provenance: "user_stated", confidence: 1.0 }],
+      }),
+    });
+    const types = db
+      .prepare<{ item_type: string }>("SELECT item_type FROM memory_items WHERE session_id = 'sess-1'")
+      .all()
+      .map((r) => r.item_type);
+    expect(types).toContain("open_task");
+    expect(types).toContain("decision");
+    expect(types).toContain("caution");
+  });
+
+  test("memory_items_inserted count reflects total promoted items", () => {
+    const out = writeSummary({
+      db,
+      newId: nextId,
+      summary: summary({
+        facts: [{ content: "f1", provenance: "observed", confidence: 0.5 }],
+        open_tasks: [{ content: "t1", provenance: "user_stated", confidence: 0.8 }],
+        decisions: [{ content: "d1", provenance: "observed", confidence: 0.6 }],
+        preferences: [{ content: "p1", provenance: "user_stated", confidence: 0.9 }],
+        cautions: [{ content: "c1", provenance: "user_stated", confidence: 1.0 }],
+      }),
+    });
+    expect(out.memory_items_inserted).toBe(5);
+  });
+});

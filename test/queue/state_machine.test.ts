@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -9,6 +9,7 @@ import { createEmitter } from "../../src/observability/events.ts";
 import { createRedactor } from "../../src/observability/redact.ts";
 import { createFakeAdapter } from "../../src/providers/fake.ts";
 import { runWorkerOnce, type WorkerDeps } from "../../src/queue/worker.ts";
+import { StubS3Transport } from "../../src/storage/s3.ts";
 import type { MimeProbe, TelegramFileTransport } from "../../src/telegram/attachment_capture.ts";
 
 const MIGRATIONS = join(import.meta.dir, "..", "..", "migrations");
@@ -97,12 +98,17 @@ describe("state machine — queued → running → succeeded (fake adapter)", ()
     expect(prun.status).toBe("succeeded");
     expect(prun.parser_status).toBe("parsed");
 
-    const turn = row<{ role: string; content_redacted: string }>(
-      "SELECT role, content_redacted FROM turns WHERE job_id = ?",
-      ["j-ok"],
-    );
-    expect(turn.role).toBe("assistant");
-    expect(turn.content_redacted).toContain("echo: hello");
+    // Expect a user turn (message) followed by an assistant turn (response).
+    const turns = db
+      .prepare<{ role: string; content_redacted: string }, [string]>(
+        "SELECT role, content_redacted FROM turns WHERE job_id = ? ORDER BY created_at ASC",
+      )
+      .all("j-ok");
+    expect(turns.length).toBe(2);
+    expect(turns[0]!.role).toBe("user");
+    expect(turns[0]!.content_redacted).toBe("hello");
+    expect(turns[1]!.role).toBe("assistant");
+    expect(turns[1]!.content_redacted).toContain("hello");
   });
 });
 
@@ -220,5 +226,444 @@ describe("provider_raw_events are redacted at rest", () => {
       expect(r.redaction_applied).toBe(1);
       expect(r.redacted_payload).not.toContain("abcdef1234567890XYZ");
     }
+  });
+});
+
+// ---------------------------------------------------------------
+// /end command: summary_generation job marks session ended
+// ---------------------------------------------------------------
+
+describe("/end: summary_generation job marks session ended on success", () => {
+  test("session.status flips to 'ended' after the /end summary_generation job succeeds", async () => {
+    db.prepare<unknown, [string, string, string, string]>(
+      `INSERT INTO jobs
+         (id, status, job_type, session_id, user_id, chat_id, request_json, idempotency_key, provider)
+       VALUES(?, 'queued', 'summary_generation', ?, 'user-1', 'chat-1', ?, ?, 'fake')`,
+    ).run(
+      "j-end",
+      "sess-1",
+      JSON.stringify({ command: "/end", args: "", text: "", has_attachments: false }),
+      "telegram:end-test",
+    );
+
+    await runWorkerOnce(deps());
+
+    const job = db
+      .prepare<{ status: string }, [string]>("SELECT status FROM jobs WHERE id = ?")
+      .get("j-end")!;
+    expect(job.status).toBe("succeeded");
+
+    const sess = db
+      .prepare<{ status: string }>("SELECT status FROM sessions WHERE id = 'sess-1'")
+      .get()!;
+    expect(sess.status).toBe("ended");
+  });
+
+  test("/end on empty session (fake returns no JSON) still closes session + inserts minimal summary", async () => {
+    // Fake adapter returns empty text — no valid JSON summary.
+    db.prepare<unknown, [string, string, string, string]>(
+      `INSERT INTO jobs
+         (id, status, job_type, session_id, user_id, chat_id, request_json, idempotency_key, provider)
+       VALUES(?, 'queued', 'summary_generation', ?, 'user-1', 'chat-1', ?, ?, 'fake')`,
+    ).run(
+      "j-end-empty",
+      "sess-1",
+      JSON.stringify({ trigger: "explicit_end" }),
+      "telegram:end-empty",
+    );
+
+    await runWorkerOnce(deps({
+      summaryAdapter: {
+        name: "fake",
+        run: async () => ({
+          kind: "succeeded" as const,
+          response: {
+            provider: "fake",
+            session_id: "fake-session",
+            final_text: "",
+            raw_events: [],
+            duration_ms: 1,
+            exit_code: 0,
+            parser_status: "parsed" as const,
+          },
+        }),
+      },
+    }));
+
+    const sess = db
+      .prepare<{ status: string }>("SELECT status FROM sessions WHERE id = 'sess-1'")
+      .get()!;
+    expect(sess.status).toBe("ended");
+
+    // A minimal memory_summaries row should have been created (HLD §7.5 failure modes).
+    const sumRow = db
+      .prepare<{ id: string }>("SELECT id FROM memory_summaries WHERE session_id = 'sess-1' LIMIT 1")
+      .get();
+    expect(sumRow).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------
+// AC-MEM-001: summary_generation → local file + storage_sync job
+// ---------------------------------------------------------------
+
+describe("AC-MEM-001 — summary_generation writes local file + enqueues storage_sync", () => {
+  test("succeeded summary creates storage_objects row + local file + storage_sync job", async () => {
+    const summaryJson = JSON.stringify({
+      session_id: "sess-1",
+      summary_type: "session",
+      facts: [{ content: "fact", provenance: "observed", confidence: 0.8 }],
+      preferences: [],
+      open_tasks: [],
+      decisions: [],
+      cautions: [],
+      source_turn_ids: [],
+    });
+
+    db.prepare<unknown, [string, string, string, string]>(
+      `INSERT INTO jobs
+         (id, status, job_type, session_id, user_id, chat_id, request_json, idempotency_key, provider)
+       VALUES(?, 'queued', 'summary_generation', ?, 'user-1', 'chat-1', ?, ?, 'fake')`,
+    ).run(
+      "j-mem001",
+      "sess-1",
+      JSON.stringify({ text: "", command: "/summary", args: "", has_attachments: false }),
+      "telegram:mem001",
+    );
+
+    const localDir = join(workdir, "objects");
+    const memDir = join(workdir, "memory");
+    const syncDeps = deps({
+      summaryAdapter: {
+        name: "fake",
+        run: async () => ({
+          kind: "succeeded" as const,
+          response: {
+            provider: "fake",
+            session_id: "fake-session",
+            final_text: summaryJson,
+            raw_events: [],
+            duration_ms: 1,
+            exit_code: 0,
+            parser_status: "parsed" as const,
+          },
+        }),
+      },
+      config: {
+        capture: { max_download_size_bytes: 20 * 1024 * 1024, local_path: (id: string) => join(localDir, id) },
+        sync: { max_attempts: 3, local_path: (id: string) => join(localDir, id) },
+        memory_base_path: memDir,
+      },
+    });
+
+    await runWorkerOnce(syncDeps);
+
+    // memory_summaries row inserted
+    const sumRow = db
+      .prepare<{ id: string; storage_key: string | null }>(
+        "SELECT id, storage_key FROM memory_summaries WHERE session_id = 'sess-1' LIMIT 1",
+      )
+      .get();
+    expect(sumRow).not.toBeNull();
+    expect(typeof sumRow!.storage_key).toBe("string");
+    expect(sumRow!.storage_key).toMatch(/^objects\/\d{4}\/\d{2}\/\d{2}\//);
+
+    // storage_objects row created (memory_snapshot, long_term, captured, pending)
+    const so = db
+      .prepare<{ id: string; artifact_type: string; retention_class: string; capture_status: string; status: string; storage_key: string }>(
+        `SELECT id, artifact_type, retention_class, capture_status, status, storage_key
+         FROM storage_objects WHERE artifact_type = 'memory_snapshot' LIMIT 1`,
+      )
+      .get();
+    expect(so).not.toBeNull();
+    expect(so!.artifact_type).toBe("memory_snapshot");
+    expect(so!.retention_class).toBe("long_term");
+    expect(so!.capture_status).toBe("captured");
+    expect(so!.status).toBe("pending");
+    expect(so!.storage_key).toMatch(/^objects\/\d{4}\/\d{2}\/\d{2}\//);
+    // storage_key set on memory_summaries matches storage_objects
+    expect(sumRow!.storage_key).toBe(so!.storage_key);
+
+    // S3 staging file written at local_path(storage_object_id)
+    const localPath = join(localDir, so!.id);
+    expect(existsSync(localPath)).toBe(true);
+
+    // AC-MEM-001: human-readable session JSONL file written at memory/sessions/<session_id>.jsonl
+    const sessionJsonlPath = join(memDir, "sessions", "sess-1.jsonl");
+    expect(existsSync(sessionJsonlPath)).toBe(true);
+
+    // AC-MEM-001: daily markdown line appended to memory/personal/YYYY-MM-DD.md
+    const dailyMdPath = join(memDir, "personal", "2026-04-23.md");
+    expect(existsSync(dailyMdPath)).toBe(true);
+
+    // storage_sync job enqueued
+    const syncJob = db
+      .prepare<{ status: string }>(
+        "SELECT status FROM jobs WHERE job_type = 'storage_sync' LIMIT 1",
+      )
+      .get();
+    expect(syncJob).not.toBeNull();
+    expect(syncJob!.status).toBe("queued");
+  });
+});
+
+// ---------------------------------------------------------------
+// ---------------------------------------------------------------
+// summary_generation uses advisory profile prompt (PRD §12.3)
+// ---------------------------------------------------------------
+
+describe("summary_generation — advisory profile schema prompt injected", () => {
+  test("summary_generation job sends JSON schema instruction in packed message", async () => {
+    let capturedMessage: string | undefined;
+    db.prepare<unknown, [string, string, string, string]>(
+      `INSERT INTO jobs
+         (id, status, job_type, session_id, user_id, chat_id, request_json, idempotency_key, provider)
+       VALUES(?, 'queued', 'summary_generation', ?, 'user-1', 'chat-1', ?, ?, 'fake')`,
+    ).run(
+      "j-prompt",
+      "sess-1",
+      JSON.stringify({ text: "", command: "/summary", args: "" }),
+      "telegram:prompt-test",
+    );
+
+    await runWorkerOnce(deps({
+      summaryAdapter: {
+        name: "fake",
+        run: async (req) => {
+          capturedMessage = req.message;
+          return {
+            kind: "succeeded" as const,
+            response: {
+              provider: "fake",
+              session_id: "fake-session",
+              final_text: JSON.stringify({
+                session_id: "sess-1", summary_type: "session",
+                facts: [], preferences: [], open_tasks: [], decisions: [], cautions: [],
+                source_turn_ids: [],
+              }),
+              raw_events: [],
+              duration_ms: 1,
+              exit_code: 0,
+              parser_status: "parsed" as const,
+            },
+          };
+        },
+      },
+    }));
+
+    expect(capturedMessage).toContain("session summariser");
+    expect(capturedMessage).toContain("JSON");
+    expect(capturedMessage).toContain("facts");
+    expect(capturedMessage).toContain("이 대화를");
+  });
+});
+
+// ---------------------------------------------------------------
+// Context snapshot stored in provider_runs.injected_snapshot_json
+// ---------------------------------------------------------------
+
+describe("context snapshot — injected_snapshot_json contains packed context", () => {
+  test("injected_snapshot_json includes mode and slots from context builder", async () => {
+    seedProviderJob("j-snap", "k-snap", "what is 2+2?");
+    await runWorkerOnce(deps());
+
+    const prun = db
+      .prepare<{ injected_snapshot_json: string }, [string]>(
+        "SELECT injected_snapshot_json FROM provider_runs WHERE job_id = ?",
+      )
+      .get("j-snap")!;
+    const snap = JSON.parse(prun.injected_snapshot_json) as { mode?: string; slots?: unknown[] };
+    expect(snap.mode).toBe("replay_mode");
+    expect(Array.isArray(snap.slots)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------
+// storage_sync job dispatch
+// ---------------------------------------------------------------
+
+describe("storage_sync job dispatch — uploads pending storage_objects when s3 wired", () => {
+  test("storage_sync job triggers upload pass and marks job succeeded", async () => {
+    const objectId = "so-sync-1";
+    const objectKey = `objects/2026/04/23/${objectId}/deadbeef.bin`;
+    const bytes = new Uint8Array([1, 2, 3]);
+    const localDir = join(workdir, "objects");
+    mkdirSync(localDir, { recursive: true });
+    writeFileSync(join(localDir, objectId), bytes);
+
+    db.prepare<unknown, [string, string]>(
+      `INSERT INTO storage_objects
+         (id, storage_backend, bucket, storage_key, source_channel, source_message_id,
+          source_job_id, artifact_type, retention_class, capture_status, status, sha256)
+       VALUES(?, 's3', 'test-bucket', ?, 'system', '0', NULL, 'user_upload', 'long_term', 'captured', 'pending', '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81')`,
+    ).run(objectId, objectKey);
+
+    db.prepare<unknown, [string, string, string]>(
+      `INSERT INTO jobs
+         (id, status, job_type, request_json, idempotency_key)
+       VALUES(?, 'queued', 'storage_sync', ?, ?)`,
+    ).run(
+      "j-sync-1",
+      JSON.stringify({ storage_object_id: objectId }),
+      `sync:${objectId}`,
+    );
+
+    const stubTransport = new StubS3Transport();
+    const syncDeps = deps({
+      s3: stubTransport,
+      config: {
+        capture: { max_download_size_bytes: 20 * 1024 * 1024, local_path: (id) => join(localDir, id) },
+        sync: { max_attempts: 3, local_path: (id) => join(localDir, id) },
+      },
+    });
+    await runWorkerOnce(syncDeps);
+
+    const job = db
+      .prepare<{ status: string; result_json: string | null }, [string]>(
+        "SELECT status, result_json FROM jobs WHERE id = ?",
+      )
+      .get("j-sync-1")!;
+    expect(job.status).toBe("succeeded");
+    expect(job.result_json).toContain("uploaded");
+
+    const so = db
+      .prepare<{ status: string }, [string]>(
+        "SELECT status FROM storage_objects WHERE id = ?",
+      )
+      .get(objectId)!;
+    expect(so.status).toBe("uploaded");
+    expect(stubTransport.store.size).toBe(1);
+  });
+
+  test("storage_sync rejects upload when sha256 does not match stored hash", async () => {
+    const objectId = "so-sync-bad-hash";
+    const objectKey = `objects/2026/04/23/${objectId}/badhash.bin`;
+    const bytes = new Uint8Array([1, 2, 3]);
+    const localDir = join(workdir, "objects");
+    mkdirSync(localDir, { recursive: true });
+    writeFileSync(join(localDir, objectId), bytes);
+
+    db.prepare<unknown, [string, string]>(
+      `INSERT INTO storage_objects
+         (id, storage_backend, bucket, storage_key, source_channel, source_message_id,
+          source_job_id, artifact_type, retention_class, capture_status, status, sha256)
+       VALUES(?, 's3', 'test-bucket', ?, 'system', '0', NULL, 'user_upload', 'long_term', 'captured', 'pending', 'wronghash')`,
+    ).run(objectId, objectKey);
+
+    db.prepare<unknown, [string, string, string]>(
+      `INSERT INTO jobs
+         (id, status, job_type, request_json, idempotency_key)
+       VALUES(?, 'queued', 'storage_sync', ?, ?)`,
+    ).run("j-sync-bad", JSON.stringify({}), "sync:bad-hash");
+
+    const stubTransport = new StubS3Transport();
+    const syncDeps = deps({
+      s3: stubTransport,
+      config: {
+        capture: { max_download_size_bytes: 20 * 1024 * 1024, local_path: (id) => join(localDir, id) },
+        sync: { max_attempts: 3, local_path: (id) => join(localDir, id) },
+      },
+    });
+    await runWorkerOnce(syncDeps);
+
+    const so = db
+      .prepare<{ status: string; error_json: string | null }, [string]>(
+        "SELECT status, error_json FROM storage_objects WHERE id = ?",
+      )
+      .get(objectId)!;
+    expect(so.status).toBe("failed");
+    expect(so.error_json).toContain("hash_mismatch");
+    expect(stubTransport.store.size).toBe(0);
+  });
+
+  test("storage_sync without s3 dep → noop (succeeds without uploading)", async () => {
+    db.prepare<unknown, []>(
+      `INSERT INTO jobs
+         (id, status, job_type, request_json, idempotency_key)
+       VALUES('j-sync-noop', 'queued', 'storage_sync', '{}', 'sync:noop')`,
+    ).run();
+
+    await runWorkerOnce(deps());
+
+    const job = db
+      .prepare<{ status: string; result_json: string | null }, [string]>(
+        "SELECT status, result_json FROM jobs WHERE id = ?",
+      )
+      .get("j-sync-noop")!;
+    expect(job.status).toBe("succeeded");
+    expect(job.result_json).toContain("noop");
+  });
+});
+
+// ---------------------------------------------------------------
+// System command dispatch — worker handles /status locally
+// ---------------------------------------------------------------
+
+describe("system command dispatch — /status handled locally by worker", () => {
+  test("/status command produces succeeded job and a turn with queue info", async () => {
+    db.prepare<unknown, [string, string, string, string]>(
+      `INSERT INTO jobs
+         (id, status, job_type, session_id, user_id, chat_id, request_json, idempotency_key, provider)
+       VALUES(?, 'queued', 'provider_run', ?, 'user-1', 'chat-1', ?, ?, 'claude')`,
+    ).run(
+      "j-status",
+      "sess-1",
+      JSON.stringify({ command: "/status", args: "", text: "", has_attachments: false }),
+      "telegram:status-test",
+    );
+
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+
+    const job = db
+      .prepare<{ status: string; result_json: string | null }, [string]>(
+        "SELECT status, result_json FROM jobs WHERE id = ?",
+      )
+      .get("j-status")!;
+    expect(job.status).toBe("succeeded");
+
+    // A turn should be created with the status response.
+    const turn = db
+      .prepare<{ role: string; content_redacted: string }, [string]>(
+        "SELECT role, content_redacted FROM turns WHERE job_id = ?",
+      )
+      .get("j-status");
+    expect(turn).not.toBeNull();
+    expect(turn!.role).toBe("assistant");
+    expect(turn!.content_redacted).toContain("queue:");
+  });
+});
+
+// ---------------------------------------------------------------
+// Auto-trigger summary (AC-MEM-005 / PRD §12.3 DEC-019)
+// ---------------------------------------------------------------
+
+describe("auto-trigger summary — enqueues summary_generation after threshold", () => {
+  test("20 turns (10 user) since last summary → auto summary_generation job created", async () => {
+    // Insert 20 turns directly (10 user, 10 assistant) to simulate long conversation.
+    for (let i = 0; i < 10; i++) {
+      db.prepare<unknown, []>(
+        `INSERT INTO turns(id, session_id, job_id, role, content_redacted, redaction_applied)
+         VALUES('turn-u-${i}', 'sess-1', NULL, 'user', 'message', 0)`,
+      ).run();
+      db.prepare<unknown, []>(
+        `INSERT INTO turns(id, session_id, job_id, role, content_redacted, redaction_applied)
+         VALUES('turn-a-${i}', 'sess-1', NULL, 'assistant', 'reply', 0)`,
+      ).run();
+    }
+
+    // Now run a provider_run job that succeeds — should trigger auto-summary.
+    seedProviderJob("j-auto-sum", "k-auto-sum", "trigger check");
+    await runWorkerOnce(deps());
+
+    // A summary_generation job should have been enqueued.
+    const sumJob = db
+      .prepare<{ job_type: string; status: string }>(
+        "SELECT job_type, status FROM jobs WHERE job_type = 'summary_generation' LIMIT 1",
+      )
+      .get();
+    expect(sumJob).not.toBeNull();
+    expect(sumJob!.job_type).toBe("summary_generation");
+    expect(sumJob!.status).toBe("queued");
   });
 });

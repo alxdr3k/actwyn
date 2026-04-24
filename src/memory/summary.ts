@@ -18,7 +18,38 @@
 // the structured output.
 
 import type { DbHandle } from "~/db.ts";
+import { insertMemoryItem, type ItemType } from "~/memory/items.ts";
 import { mayPromoteToLongTerm, type Provenance } from "~/memory/provenance.ts";
+
+// ---------------------------------------------------------------
+// Advisory profile prompt (PRD §12.3, HLD §11.2 step 3)
+// ---------------------------------------------------------------
+
+/**
+ * System identity string for summary_generation jobs (advisory/lockdown profile).
+ * Tells Claude to produce structured JSON; injected as the system_identity slot
+ * in the packed context so the schema instruction always precedes the turns.
+ */
+export const SUMMARY_SYSTEM_IDENTITY = `actwyn session summariser (advisory profile)
+
+Analyse the conversation below and produce a single JSON object — no prose, no markdown fences.
+
+Required schema:
+{
+  "facts":        [ { "content": string, "provenance": "user_stated"|"user_confirmed"|"observed"|"inferred"|"tool_output"|"assistant_generated", "confidence": number } ],
+  "preferences":  [ { "content": string, "provenance": "user_stated"|"user_confirmed"|"observed"|"inferred"|"tool_output"|"assistant_generated", "confidence": number } ],
+  "decisions":    [ { "content": string, "provenance": "user_stated"|"user_confirmed"|"observed"|"inferred"|"tool_output"|"assistant_generated", "confidence": number } ],
+  "open_tasks":   [ { "content": string, "provenance": "user_stated"|"user_confirmed"|"observed"|"inferred"|"tool_output"|"assistant_generated", "confidence": number } ],
+  "cautions":     [ { "content": string, "provenance": "user_stated"|"user_confirmed"|"observed"|"inferred"|"tool_output"|"assistant_generated", "confidence": number } ],
+  "summary_type": "session",
+  "source_turn_ids": []
+}
+
+Rules:
+- Only "user_stated" or "user_confirmed" items are eligible as durable personal preferences.
+- confidence ∈ [0.0, 1.0].
+- Omit empty arrays; use [] rather than null.
+- Respond ONLY with the JSON object — no explanation.`;
 
 export interface TriggerInput {
   readonly turns_since_last_summary: number;
@@ -125,6 +156,7 @@ export interface WriteSummaryResult {
   readonly summary_id: string;
   readonly kept_preferences: number;
   readonly dropped_preferences: number;
+  readonly memory_items_inserted: number;
 }
 
 export function writeSummary(args: {
@@ -187,10 +219,39 @@ export function writeSummary(args: {
       JSON.stringify(args.summary.source_turn_ids),
     );
 
+  // Promote summary items to individual memory_items rows (HLD §6.5, HLD §4.8 line 409).
+  // Each item is inserted with status='active' so the context packer can inject it.
+  let itemsInserted = 0;
+
+  function promoteItems(items: readonly { content: string; provenance: Provenance; confidence: number }[], itemType: ItemType): void {
+    for (const item of items) {
+      try {
+        insertMemoryItem(args.db, args.newId(), {
+          session_id: args.summary.session_id,
+          item_type: itemType,
+          content: item.content,
+          provenance: item.provenance,
+          confidence: item.confidence,
+          source_turn_ids: args.summary.source_turn_ids,
+        });
+        itemsInserted += 1;
+      } catch {
+        // MemoryProvenanceError: skip the item silently; summary row is still valid.
+      }
+    }
+  }
+
+  promoteItems(args.summary.facts, "fact");
+  promoteItems(kept, "preference"); // already provenance-gated above
+  promoteItems(args.summary.open_tasks, "open_task");
+  promoteItems(args.summary.decisions, "decision");
+  promoteItems(args.summary.cautions, "caution");
+
   return {
     summary_id: id,
     kept_preferences: kept.length,
     dropped_preferences: dropped,
+    memory_items_inserted: itemsInserted,
   };
 }
 

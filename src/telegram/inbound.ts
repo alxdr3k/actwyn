@@ -29,6 +29,8 @@ import {
   type InboundAttachmentConfig,
 } from "~/telegram/attachment_metadata.ts";
 import type { TelegramMessage, TelegramUpdate } from "~/telegram/types.ts";
+import { parseSaveIntent } from "~/commands/save.ts";
+import { parseCorrection } from "~/commands/correct.ts";
 
 // ---------------------------------------------------------------
 // Classification (pure)
@@ -44,7 +46,8 @@ export type Classification =
   | { kind: "skip"; reason: SkipReason }
   | { kind: "text"; text: string; has_attachments: boolean }
   | { kind: "command"; command: string; args: string; has_attachments: boolean }
-  | { kind: "whoami_bootstrap" };
+  | { kind: "whoami_bootstrap" }
+  | { kind: "nl_correction"; old_hint: string; new_value: string; original_text: string };
 
 export interface ClassifyOptions {
   readonly authorized_user_ids: ReadonlySet<number>;
@@ -88,6 +91,28 @@ export function classifyUpdate(
     };
   }
 
+  // Natural-language save intent (ADR-0006): "save this", "저장해", etc.
+  const saveIntent = hasAttachments ? null : parseSaveIntent(text);
+  if (saveIntent) {
+    return {
+      kind: "command",
+      command: "/save_last_attachment",
+      args: saveIntent.caption ?? "",
+      has_attachments: false,
+    };
+  }
+
+  // Natural-language correction intent (DEC-007 / US-09): "정정: X가 아니라 Y야", "not X but Y".
+  const correction = !hasAttachments ? parseCorrection(text) : null;
+  if (correction) {
+    return {
+      kind: "nl_correction",
+      old_hint: correction.old_hint,
+      new_value: correction.new_value,
+      original_text: text,
+    };
+  }
+
   if (text.length > 0 || hasAttachments) {
     return { kind: "text", text, has_attachments: hasAttachments };
   }
@@ -106,6 +131,9 @@ function parseCommand(text: string): { command: string; args: string } | null {
   // Strip optional `@botname` suffix.
   const command = head.split("@", 1)[0]!;
   const KNOWN = new Set<string>([
+    "/new",
+    "/chat",
+    "/help",
     "/status",
     "/cancel",
     "/summary",
@@ -258,22 +286,55 @@ export function classifyAndCommit(
 
   const session = ensureActiveSession(deps, { chat_id, user_id });
 
+  // NL correction: try to resolve old_hint → memory item ID (DEC-007 / US-09).
+  // Falls back to regular text if no matching memory item is found.
+  let resolvedClassification: typeof classification = classification;
+  if (classification.kind === "nl_correction") {
+    const match = deps.db
+      .prepare<{ id: string }, [string, string]>(
+        `SELECT id FROM memory_items
+         WHERE session_id = ? AND status = 'active'
+           AND content LIKE ?
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(session.id, `%${classification.old_hint}%`);
+    if (match) {
+      resolvedClassification = {
+        kind: "command",
+        command: "/correct",
+        args: `${match.id} ${classification.new_value}`,
+        has_attachments: false,
+      };
+    } else {
+      resolvedClassification = {
+        kind: "text",
+        text: classification.original_text,
+        has_attachments: false,
+      };
+    }
+  }
+
   const jobId = deps.newId();
-  const commandField = classification.kind === "command" ? classification.command : null;
+  // resolvedClassification is always "command" or "text" here (nl_correction was resolved above).
+  const isCmd = resolvedClassification.kind === "command";
+  const isTxt = resolvedClassification.kind === "text";
+  const commandField = isCmd ? (resolvedClassification as { command: string }).command : null;
   const requestPayload = {
     command: commandField,
-    args: classification.kind === "command" ? classification.args : "",
-    text: classification.kind === "text" ? classification.text : "",
-    has_attachments: classification.has_attachments,
+    args: isCmd ? (resolvedClassification as { args: string }).args : "",
+    text: isTxt ? (resolvedClassification as { text: string }).text : "",
+    has_attachments: (resolvedClassification as { has_attachments?: boolean }).has_attachments ?? false,
   };
   const requestJson = JSON.stringify(deps.redactor.applyToJson(requestPayload));
 
-  // `/summary` is the only inbound classification that maps to a
-  // non-provider job type at Phase 3. Everything else becomes a
-  // provider_run job; Phase 10 commands dispatcher reads
-  // request_json.command to differentiate further.
+  // `/summary` and `/end` map to summary_generation; all other
+  // commands and text messages map to provider_run. The worker checks
+  // request_json.command to differentiate /end (mark session ended)
+  // from /summary (summary only, session stays active).
   const jobType =
-    commandField === "/summary" ? "summary_generation" : "provider_run";
+    commandField === "/summary" || commandField === "/end"
+      ? "summary_generation"
+      : "provider_run";
   const idempotencyKey = `telegram:${update.update_id}`;
 
   const insertRes = deps.db
@@ -281,8 +342,9 @@ export function classifyAndCommit(
       unknown,
       [string, string, string, string, string, string, string, string]
     >(
-      `INSERT INTO jobs(id, status, job_type, session_id, user_id, chat_id, request_json, idempotency_key, provider)
-       VALUES(?, 'queued', ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO jobs(id, status, job_type, session_id, user_id, chat_id, request_json,
+                        idempotency_key, provider, safe_retry, max_attempts)
+       VALUES(?, 'queued', ?, ?, ?, ?, ?, ?, ?, 1, 2)
        ON CONFLICT(job_type, idempotency_key) DO NOTHING`,
     )
     .run(
@@ -309,7 +371,7 @@ export function classifyAndCommit(
 
   // Attachments: metadata-only insert, NO network I/O.
   const storageIds: string[] = [];
-  if (classification.has_attachments) {
+  if (requestPayload.has_attachments) {
     const descriptors = classifyAttachments(msg);
     for (const descriptor of descriptors) {
       const objectId = deps.newId();
@@ -322,6 +384,7 @@ export function classifyAndCommit(
         filenameIsRedactionSafe: (fn) => !deps.redactor.detect(fn).matched,
         storageKey: defaultStorageKey,
         bucket: deps.config.s3_bucket,
+        now: deps.now(),
       });
       deps.db
         .prepare<

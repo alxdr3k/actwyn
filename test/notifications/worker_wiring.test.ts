@@ -70,6 +70,21 @@ function buildDeps(
 }
 
 describe("worker → outbound wiring", () => {
+  test("provider_run → job_accepted sent before job_completed (PRD §13.3 DEC-012)", async () => {
+    seedJob("j-accepted", "hi");
+    const transport = new StubOutboundTransport();
+    await runWorkerOnce(buildDeps(transport));
+
+    const accepted = db
+      .prepare<{ notification_type: string; status: string }, [string]>(
+        "SELECT notification_type, status FROM outbound_notifications WHERE job_id = ? AND notification_type = 'job_accepted'",
+      )
+      .get("j-accepted");
+    expect(accepted).not.toBeNull();
+    expect(accepted!.notification_type).toBe("job_accepted");
+    expect(accepted!.status).toBe("sent");
+  });
+
   test("succeeded provider_run → one job_completed notification; all chunks sent; ids recorded", async () => {
     seedJob("j-ok", "hello");
     const transport = new StubOutboundTransport();
@@ -80,7 +95,7 @@ describe("worker → outbound wiring", () => {
         { id: string; notification_type: string; status: string; chunk_count: number },
         []
       >(
-        "SELECT id, notification_type, status, chunk_count FROM outbound_notifications LIMIT 1",
+        "SELECT id, notification_type, status, chunk_count FROM outbound_notifications WHERE notification_type = 'job_completed' LIMIT 1",
       )
       .get()!;
     expect(notif.notification_type).toBe("job_completed");
@@ -110,7 +125,7 @@ describe("worker → outbound wiring", () => {
       .prepare<
         { notification_type: string; status: string },
         []
-      >("SELECT notification_type, status FROM outbound_notifications LIMIT 1")
+      >("SELECT notification_type, status FROM outbound_notifications WHERE notification_type = 'job_failed' LIMIT 1")
       .get()!;
     expect(row.notification_type).toBe("job_failed");
     expect(row.status).toBe("sent");
@@ -133,5 +148,60 @@ describe("worker → outbound wiring", () => {
       )
       .get()!;
     expect(prun.status).toBe("succeeded");
+  });
+
+  test("chunk send failure enqueues a notification_retry job", async () => {
+    seedJob("j-retry-enq", "hello retry");
+    // Fake adapter echoes the full packed message (system_identity + user message).
+    const planText = "echo: [system_identity]\nactwyn personal agent\n\nhello retry";
+    const transport = new StubOutboundTransport({
+      plan: new Map([[planText, "fail_once"]]),
+    });
+    await runWorkerOnce(buildDeps(transport));
+
+    // A notification_retry job should be queued.
+    const retryJob = db
+      .prepare<{ job_type: string; status: string; request_json: string }>(
+        "SELECT job_type, status, request_json FROM jobs WHERE job_type = 'notification_retry' LIMIT 1",
+      )
+      .get();
+    expect(retryJob).not.toBeNull();
+    expect(retryJob!.job_type).toBe("notification_retry");
+    expect(retryJob!.status).toBe("queued");
+    const req = JSON.parse(retryJob!.request_json) as { notification_id?: string };
+    expect(typeof req.notification_id).toBe("string");
+  });
+
+  test("notification_retry job dispatch retries chunks and marks job succeeded", async () => {
+    seedJob("j-retry-run", "retry me");
+    // Fake adapter echoes the full packed message (system_identity + user message).
+    const planText = "echo: [system_identity]\nactwyn personal agent\n\nretry me";
+    // Fail on first attempt, succeed on second.
+    const transport = new StubOutboundTransport({
+      plan: new Map([[planText, "fail_once"]]),
+    });
+    // Run the provider job (creates notification_retry job in queue).
+    await runWorkerOnce(buildDeps(transport));
+
+    // Run again to pick up the notification_retry job.
+    await runWorkerOnce(buildDeps(transport));
+
+    const retryJob = db
+      .prepare<{ status: string; result_json: string | null }>(
+        "SELECT status, result_json FROM jobs WHERE job_type = 'notification_retry' LIMIT 1",
+      )
+      .get()!;
+    expect(retryJob.status).toBe("succeeded");
+
+    // The chunk should now be sent.
+    const chunkStatus = db
+      .prepare<{ status: string }>(
+        `SELECT c.status FROM outbound_notification_chunks c
+         JOIN outbound_notifications n ON c.outbound_notification_id = n.id
+         WHERE n.job_id = 'j-retry-run'
+         ORDER BY c.chunk_index ASC LIMIT 1`,
+      )
+      .get()!;
+    expect(chunkStatus.status).toBe("sent");
   });
 });

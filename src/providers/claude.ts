@@ -50,6 +50,14 @@ export interface ClaudeAdapterOptions {
   readonly max_turns?: number;
   readonly grace_ms?: number;
   readonly hard_kill_ms?: number;
+  /** Maximum wall-clock ms for the whole run (HLD §14.2). Triggers teardown when exceeded. */
+  readonly max_runtime_ms?: number;
+  /** Max ms of stream silence before treating as subprocess stall (HLD §14.2). */
+  readonly stall_timeout_ms?: number;
+  /** Max total stdout+stderr bytes before teardown (HLD §14.3). */
+  readonly max_output_bytes?: number;
+  /** Max prompt byte length; job fails before spawn if exceeded (AC-PROV-013). */
+  readonly max_prompt_bytes?: number;
   readonly redactor: Redactor;
   readonly now?: () => Date;
   /** Host cwd for the subprocess. */
@@ -63,11 +71,22 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): ProviderAdapter
   async function run(
     req: AgentRequest,
     signal?: AbortSignal,
+    onSpawn?: (pgid: number, pid: number) => void,
   ): Promise<AgentOutcome> {
     const started = now().getTime();
     let argv: string[];
     let child;
     try {
+      // AC-PROV-013: fail before spawn if message exceeds max_prompt_bytes.
+      if (opts.max_prompt_bytes !== undefined && req.message.length > opts.max_prompt_bytes) {
+        return failed({
+          provider: "claude",
+          error_type: "prompt_too_large",
+          message: `prompt length ${req.message.length} exceeds max_prompt_bytes ${opts.max_prompt_bytes}`,
+          started,
+          now,
+        });
+      }
       argv = buildArgv({
         binary: opts.binary,
         profile,
@@ -75,6 +94,8 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): ProviderAdapter
         session_id: req.session_id,
         max_turns: opts.max_turns ?? 12,
         extra: opts.extra_argv ?? [],
+        ...(req.context_packing_mode ? { context_packing_mode: req.context_packing_mode } : {}),
+        ...(req.provider_session_id ? { provider_session_id: req.provider_session_id } : {}),
       });
       ensureNoForbidden(argv);
       child = spawnDetached({
@@ -83,6 +104,7 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): ProviderAdapter
         ...(opts.grace_ms !== undefined ? { grace_ms: opts.grace_ms } : {}),
         ...(opts.hard_kill_ms !== undefined ? { hard_kill_ms: opts.hard_kill_ms } : {}),
       });
+      onSpawn?.(child.process_group_id, child.pid);
     } catch (e) {
       const error_type =
         e instanceof SubprocessError ? `spawn_${e.phase}` :
@@ -104,8 +126,44 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): ProviderAdapter
       signal?.addEventListener("abort", () => resolve("cancel"), { once: true });
     });
 
+    // max_runtime_ms: absolute wall-clock limit (HLD §14.2 / §14.3).
+    const maxRuntimePromise: Promise<"timeout_max_runtime"> = opts.max_runtime_ms !== undefined
+      ? new Promise((resolve) => setTimeout(() => resolve("timeout_max_runtime"), opts.max_runtime_ms))
+      : new Promise(() => { /* never */ });
+
+    // stall_timeout_ms: silence detection (HLD §14.2). Timer resets on each output line.
+    let stallTimer: ReturnType<typeof setTimeout> | null = null;
+    let resolveStall: ((v: "timeout_stall") => void) | null = null;
+    const stallPromise: Promise<"timeout_stall"> = opts.stall_timeout_ms !== undefined
+      ? new Promise((resolve) => {
+          resolveStall = resolve;
+          stallTimer = setTimeout(() => resolve("timeout_stall"), opts.stall_timeout_ms);
+        })
+      : new Promise(() => { /* never */ });
+
+    function resetStall(): void {
+      if (opts.stall_timeout_ms === undefined || stallTimer === null) return;
+      clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => resolveStall!("timeout_stall"), opts.stall_timeout_ms);
+    }
+
+    // max_output_bytes: total stdout+stderr byte cap (HLD §14.3). Triggers teardown when exceeded.
+    let totalOutputBytes = 0;
+    let resolveOutputLimit: ((v: "timeout_output_limit") => void) | null = null;
+    const outputLimitPromise: Promise<"timeout_output_limit"> = opts.max_output_bytes !== undefined
+      ? new Promise((resolve) => { resolveOutputLimit = resolve; })
+      : new Promise(() => { /* never */ });
+
+    function trackOutputBytes(line: string): void {
+      if (opts.max_output_bytes === undefined || resolveOutputLimit === null) return;
+      totalOutputBytes += line.length;
+      if (totalOutputBytes > opts.max_output_bytes) resolveOutputLimit("timeout_output_limit");
+    }
+
     const stdoutTask = (async () => {
       for await (const line of readLines(child.stdout)) {
+        resetStall();
+        trackOutputBytes(line);
         const redacted = opts.redactor.apply(line).text;
         assembler.push(redacted, "stdout");
       }
@@ -113,18 +171,36 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): ProviderAdapter
 
     const stderrTask = (async () => {
       for await (const line of readLines(child.stderr)) {
+        resetStall();
+        trackOutputBytes(line);
         const redacted = opts.redactor.apply(line).text;
         assembler.push(redacted, "stderr");
       }
     })();
 
-    // Race subprocess exit vs cancel.
-    const finish = await Promise.race([
+    // Race subprocess exit vs cancel vs timeouts.
+    type FinishKind =
+      | { kind: "exit"; code: number }
+      | "cancel"
+      | "timeout_max_runtime"
+      | "timeout_stall"
+      | "timeout_output_limit";
+
+    const finish: FinishKind = await Promise.race([
       child.exited.then((code) => ({ kind: "exit" as const, code })),
       cancelPromise,
+      maxRuntimePromise,
+      stallPromise,
+      outputLimitPromise,
     ]);
 
-    if (finish === "cancel") {
+    // Clear stall timer so it doesn't fire after the race resolves.
+    if (stallTimer !== null) clearTimeout(stallTimer);
+
+    const isTimeout =
+      finish === "timeout_max_runtime" || finish === "timeout_stall" || finish === "timeout_output_limit";
+
+    if (finish === "cancel" || isTimeout) {
       try {
         await child.teardown(signal ?? new AbortController().signal);
       } catch {
@@ -133,11 +209,12 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): ProviderAdapter
       }
     }
 
-    // Drain streams either way — even under cancel, readers must
+    // Drain streams either way — even under cancel/timeout, readers must
     // terminate cleanly so we don't leak listeners.
     await Promise.allSettled([stdoutTask, stderrTask]);
 
-    const exitCode = finish === "cancel" ? await child.exited : finish.code;
+    const exitCode =
+      finish === "cancel" || isTimeout ? await child.exited : finish.code;
     const assembled = assembler.finish({ subprocess_exit_code: exitCode });
 
     const base: AgentResponse = {
@@ -157,6 +234,14 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): ProviderAdapter
         error_type: "cancelled",
       };
       return { kind: "cancelled", response };
+    }
+
+    if (isTimeout) {
+      const error_type = finish === "timeout_stall" ? "stall_timeout"
+        : finish === "timeout_output_limit" ? "output_limit_exceeded"
+        : "timeout";
+      const response: AgentResponse = { ...base, error_type };
+      return { kind: "failed", response, error_type };
     }
 
     if (exitCode !== 0) {
@@ -187,9 +272,13 @@ function buildArgv(args: {
   session_id: string;
   max_turns: number;
   extra: readonly string[];
+  context_packing_mode?: "resume_mode" | "replay_mode";
+  provider_session_id?: string;
 }): string[] {
   const out: string[] = [args.binary, args.message];
-  if (args.session_id) {
+  if (args.context_packing_mode === "resume_mode" && args.provider_session_id) {
+    out.push("--resume", args.provider_session_id);
+  } else if (args.session_id) {
     out.push("--session-id", args.session_id);
   }
   out.push("--output-format", "stream-json");

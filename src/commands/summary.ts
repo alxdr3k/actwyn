@@ -18,7 +18,7 @@ export interface EnqueueSummaryArgs {
   readonly session_id: string;
   readonly chat_id: string;
   readonly user_id: string;
-  readonly trigger: "explicit_summary" | "explicit_end";
+  readonly trigger: "explicit_summary" | "explicit_end" | "auto";
 }
 
 export interface EnqueueResult {
@@ -49,8 +49,8 @@ export function enqueueSummaryJob(args: EnqueueSummaryArgs): EnqueueResult {
     >(
       `INSERT INTO jobs
          (id, status, job_type, session_id, user_id, chat_id, request_json,
-          idempotency_key, provider)
-       VALUES(?, 'queued', 'summary_generation', ?, ?, ?, ?, ?, 'claude')
+          idempotency_key, provider, safe_retry, max_attempts)
+       VALUES(?, 'queued', 'summary_generation', ?, ?, ?, ?, ?, 'claude', 1, 2)
        ON CONFLICT(job_type, idempotency_key) DO NOTHING`,
     )
     .run(jobId, args.session_id, args.user_id, args.chat_id, request_json, idempotencyKey);
