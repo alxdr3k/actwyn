@@ -8,6 +8,7 @@ import { migrate } from "../../src/db/migrator.ts";
 import { finalizeStorageKey, generateStorageKey } from "../../src/storage/objects.ts";
 import {
   StubS3Transport,
+  S3TransportError,
 } from "../../src/storage/s3.ts";
 import {
   runDeletePass,
@@ -349,5 +350,109 @@ describe("independence — storage failure does NOT touch provider_runs/jobs", (
       )
       .get("job-a")!;
     expect(job.status).toBe("succeeded");
+  });
+});
+
+// ---------------------------------------------------------------
+// TEST-STO-DELETE-RETRY: delete_failed → retry_scheduler → deletion_requested
+// ---------------------------------------------------------------
+
+describe("delete_failed retry path (Blocker 4)", () => {
+  function seedDeleteFailed(id: string, attempts = 1): void {
+    db.prepare<unknown, [string]>(
+      `INSERT INTO storage_objects
+         (id, storage_backend, bucket, storage_key, source_channel, source_message_id,
+          source_job_id, artifact_type, retention_class, capture_status, status, error_json)
+       VALUES(?, 's3', 'actwyn-test', 'key/x.bin', 'system', '0', NULL, 'user_upload',
+              'long_term', 'captured', 'delete_failed',
+              json_object('delete_attempts', ${attempts}, 'delete_reason', 'transient'))`,
+    ).run(id);
+  }
+
+  test("delete_failed row under max_attempts → deletion_requested after runRetryScheduler", () => {
+    seedDeleteFailed("so-df-1", 1);
+    const result = runRetryScheduler({
+      db,
+      config: { max_attempts: 3 },
+    });
+    expect(result.delete_repended).toBe(1);
+    expect(result.delete_exhausted).toBe(0);
+
+    const status = db
+      .prepare<{ status: string }>("SELECT status FROM storage_objects WHERE id = 'so-df-1'")
+      .get()!;
+    expect(status.status).toBe("deletion_requested");
+  });
+
+  test("delete_failed row at max_attempts → stays delete_failed (exhausted)", () => {
+    seedDeleteFailed("so-df-2", 3);
+    const result = runRetryScheduler({
+      db,
+      config: { max_attempts: 3 },
+    });
+    expect(result.delete_exhausted).toBe(1);
+    expect(result.delete_repended).toBe(0);
+
+    const status = db
+      .prepare<{ status: string }>("SELECT status FROM storage_objects WHERE id = 'so-df-2'")
+      .get()!;
+    expect(status.status).toBe("delete_failed");
+  });
+});
+
+// ---------------------------------------------------------------
+// TEST-S3-BUCKET-MISMATCH: bucket mismatch → non_retryable S3TransportError
+// ---------------------------------------------------------------
+
+describe("S3 StubS3Transport — bucket key semantics and S3TransportError contract (Blocker 6)", () => {
+  test("S3TransportError carries non_retryable category on mismatch", () => {
+    const err = new S3TransportError("bucket mismatch: expected prod, got staging", "non_retryable", "put");
+    expect(err.category).toBe("non_retryable");
+    expect(err.op).toBe("put");
+    expect(err.name).toBe("S3TransportError");
+    expect(err.message).toContain("mismatch");
+  });
+
+  test("StubS3Transport fail_non_retryable → throws S3TransportError non_retryable", async () => {
+    const transport = new StubS3Transport(
+      new Map([["actwyn-test/key/bad.bin", "fail_non_retryable"]]),
+    );
+    let thrown: unknown;
+    try {
+      await transport.put({ bucket: "actwyn-test", key: "key/bad.bin", bytes: new Uint8Array([1]) });
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(S3TransportError);
+    expect((thrown as S3TransportError).category).toBe("non_retryable");
+  });
+
+  test("runUploadPass marks row failed when S3 returns non_retryable error", async () => {
+    const bytes = new Uint8Array([7]);
+    const sha = sha256Hex(bytes);
+    const key = finalizeStorageKey({ date: new Date("2026-04-23T00:00:00Z"), object_id: "so-nm", sha256: sha, mime_type: null });
+    const localDir = join(workdir, "objects-nm");
+    mkdirSync(localDir, { recursive: true });
+    writeFileSync(join(localDir, "so-nm"), bytes);
+
+    db.prepare<unknown, [string, string, string]>(
+      `INSERT INTO storage_objects
+         (id, storage_backend, bucket, storage_key, source_channel, source_message_id,
+          source_job_id, artifact_type, retention_class, capture_status, status, sha256)
+       VALUES(?, 's3', 'actwyn-test', ?, 'system', '0', NULL, 'user_upload', 'long_term', 'captured', 'pending', ?)`,
+    ).run("so-nm", key, sha);
+
+    const transport = new StubS3Transport(
+      new Map([[`actwyn-test/${key}`, "fail_non_retryable"]]),
+    );
+    await runUploadPass({
+      db,
+      transport,
+      config: { max_attempts: 3, local_path: (id) => join(localDir, id) },
+    });
+    const row = db
+      .prepare<{ status: string }>("SELECT status FROM storage_objects WHERE id = 'so-nm'")
+      .get()!;
+    expect(row.status).toBe("failed");
   });
 });

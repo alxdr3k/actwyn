@@ -175,6 +175,9 @@ export function formatStatus(report: StatusReport): string {
   );
   lines.push(`S3: ${report.s3_health}`);
   lines.push(`last completed: ${report.last_completed_rel ?? "—"}`);
+  if (report.attachment_capture_failures > 0) {
+    lines.push(`capture_failed: ${report.attachment_capture_failures} (/doctor storage 로 상세 확인)`);
+  }
   if (report.last_issue) {
     lines.push(`last issue: ${report.last_issue}`);
   }

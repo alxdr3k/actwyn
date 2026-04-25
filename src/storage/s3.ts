@@ -64,11 +64,15 @@ export class BunS3Transport implements S3Transport {
   }
 
   async put(args: S3PutArgs): Promise<void> {
-    const key = args.bucket !== this.bucket
-      ? `${args.bucket}/${args.key}`
-      : args.key;
+    if (args.bucket !== this.bucket) {
+      throw new S3TransportError(
+        `bucket mismatch: expected ${this.bucket}, got ${args.bucket}`,
+        "non_retryable",
+        "put",
+      );
+    }
     try {
-      const file = this.client.file(key);
+      const file = this.client.file(args.key);
       await file.write(args.bytes, args.content_type ? { type: args.content_type } : undefined);
     } catch (e) {
       throw new S3TransportError(
@@ -80,11 +84,15 @@ export class BunS3Transport implements S3Transport {
   }
 
   async delete(args: S3DeleteArgs): Promise<void> {
-    const key = args.bucket !== this.bucket
-      ? `${args.bucket}/${args.key}`
-      : args.key;
+    if (args.bucket !== this.bucket) {
+      throw new S3TransportError(
+        `bucket mismatch: expected ${this.bucket}, got ${args.bucket}`,
+        "non_retryable",
+        "delete",
+      );
+    }
     try {
-      await this.client.delete(key);
+      await this.client.delete(args.key);
     } catch (e) {
       throw new S3TransportError(
         `delete failed: ${(e as Error).message}`,

@@ -110,9 +110,21 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): ProviderAdapter
         ...(req.provider_session_id ? { provider_session_id: req.provider_session_id } : {}),
       });
       ensureNoForbidden(argv);
+      // High Priority 7: provide a curated env rather than inheriting nothing.
+      // Bun spawn with an empty/absent env may omit PATH/HOME/USER which Claude
+      // CLI needs to locate its binary, auth tokens, and session files. We pass
+      // a whitelist so that secrets present only in process.env are not leaked
+      // into the subprocess (defence-in-depth alongside the redactor).
+      const curatedEnv: Record<string, string> = {};
+      const envKeys = ["PATH", "HOME", "USER", "SHELL", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "TMPDIR", "TERM"] as const;
+      for (const k of envKeys) {
+        const v = process.env[k];
+        if (v !== undefined) curatedEnv[k] = v;
+      }
       child = spawnDetached({
         argv,
         cwd: opts.cwd,
+        env: curatedEnv,
         ...(opts.grace_ms !== undefined ? { grace_ms: opts.grace_ms } : {}),
         ...(opts.hard_kill_ms !== undefined ? { hard_kill_ms: opts.hard_kill_ms } : {}),
       });
@@ -168,7 +180,9 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): ProviderAdapter
 
     function trackOutputBytes(line: string): void {
       if (opts.max_output_bytes === undefined || resolveOutputLimit === null) return;
-      totalOutputBytes += line.length;
+      // Medium 9: use byte length (UTF-8 encoded) to correctly enforce limits
+      // for Korean / CJK / emoji output where char length < byte length.
+      totalOutputBytes += new TextEncoder().encode(line).byteLength;
       if (totalOutputBytes > opts.max_output_bytes) resolveOutputLimit("timeout_output_limit");
     }
 
