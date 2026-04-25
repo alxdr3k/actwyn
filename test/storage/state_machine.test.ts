@@ -365,7 +365,7 @@ describe("delete_failed retry path (Blocker 4)", () => {
           source_job_id, artifact_type, retention_class, capture_status, status, error_json)
        VALUES(?, 's3', 'actwyn-test', 'key/x.bin', 'system', '0', NULL, 'user_upload',
               'long_term', 'captured', 'delete_failed',
-              json_object('attempts', ${attempts}, 'reason', 'transient'))`,
+              json_object('delete_attempts', ${attempts}, 'delete_reason', 'transient'))`,
     ).run(id);
   }
 

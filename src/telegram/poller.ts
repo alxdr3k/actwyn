@@ -54,15 +54,29 @@ export async function pollOnce(deps: PollerDeps): Promise<BatchResult> {
 
   // Control-plane instant responses (e.g. /cancel handled without a job):
   // send notifications outside the inbound txn (zero-network invariant).
+  // These updates are already in terminal state so Telegram will not
+  // re-deliver them; a single transient failure would permanently suppress
+  // the user-visible confirmation. One retry after a short delay reduces
+  // (but cannot eliminate) that risk without requiring schema changes.
   if (deps.outbound) {
     for (const outcome of result.processed) {
       if (!outcome.instant_response) continue;
       const { chat_id, text } = outcome.instant_response;
-      deps.outbound.send({ chat_id, text }).catch((e) => {
+      const outbound = deps.outbound;
+      outbound.send({ chat_id, text }).catch((e) => {
         deps.events.warn("telegram.instant_response.send_error", {
           chat_id,
           error_message: (e as Error).message,
+          retry: true,
         });
+        setTimeout(() => {
+          outbound.send({ chat_id, text }).catch((e2) => {
+            deps.events.warn("telegram.instant_response.send_failed_final", {
+              chat_id,
+              error_message: (e2 as Error).message,
+            });
+          });
+        }, 3_000);
       });
     }
   }

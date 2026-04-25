@@ -245,7 +245,7 @@ export function runRetryScheduler(deps: SyncDeps): { repended: number; exhausted
   let delete_repended = 0;
   let delete_exhausted = 0;
   for (const r of deleteRows) {
-    const attempts = parseAttempts(r.error_json);
+    const attempts = parseDeleteAttempts(r.error_json);
     if (attempts >= deps.config.max_attempts) {
       delete_exhausted += 1;
       continue;
@@ -266,6 +266,20 @@ function parseAttempts(error_json: string | null): number {
   try {
     const obj = JSON.parse(error_json);
     const v = obj.attempts;
+    return typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0;
+  } catch {
+    return 0;
+  }
+}
+
+// Upload and delete attempt counters are tracked in separate error_json keys
+// so that a row with prior upload failures (error_json.attempts > 0) does not
+// consume delete retry budget on its first actual S3 delete failure.
+function parseDeleteAttempts(error_json: string | null): number {
+  if (!error_json) return 0;
+  try {
+    const obj = JSON.parse(error_json);
+    const v = obj.delete_attempts;
     return typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0;
   } catch {
     return 0;
@@ -329,18 +343,24 @@ export async function runDeletePass(deps: SyncDeps): Promise<DeletePassResult> {
       ).run(row.id);
       deleted += 1;
     } catch (e) {
-      // Track delete attempt count in error_json so the retry scheduler can
-      // enforce max_attempts (same pattern as upload failures).
+      // Track delete attempt count under 'delete_attempts' — a key separate
+      // from 'attempts' (upload counter). Using the same key would cause rows
+      // with prior upload failures to exhaust their delete retry budget on the
+      // very first S3 delete attempt.
       const existing = deps.db
         .prepare<{ error_json: string | null }, [string]>(
           "SELECT error_json FROM storage_objects WHERE id = ?",
         )
         .get(row.id);
-      const attempts = parseAttempts(existing?.error_json ?? null) + 1;
+      const attempts = parseDeleteAttempts(existing?.error_json ?? null) + 1;
+      const existingObj = (() => {
+        try { return JSON.parse(existing?.error_json ?? "{}") as Record<string, unknown>; } catch { return {}; }
+      })();
       const err = JSON.stringify({
-        reason: (e as Error).message,
-        ts: new Date().toISOString(),
-        attempts,
+        ...existingObj,
+        delete_attempts: attempts,
+        delete_reason: (e as Error).message,
+        delete_ts: new Date().toISOString(),
       });
       deps.db.prepare<unknown, [string, string]>(
         `UPDATE storage_objects
