@@ -331,7 +331,7 @@ describe("AC-OBS-001 / Blocker 8 — s3_endpoint_smoke attributes failures to st
     const results = await runDoctor({
       db,
       ...BASE_DEPS,
-      s3_ping: async () => ({ ok: false, detail: "list did not return sentinel under prefix '_actwyn_ping_'" }),
+      s3_ping: async () => ({ ok: false, detail: "list did not return sentinel under prefix '_actwyn_ping_1700000000000_abc123'" }),
     });
     const check = results.find((r) => r.name === "s3_endpoint_smoke")!;
     expect(check.status).toBe("fail");

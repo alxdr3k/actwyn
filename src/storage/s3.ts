@@ -106,7 +106,6 @@ export class BunS3Transport implements S3Transport {
    */
   async ping(): Promise<{ ok: boolean; detail?: string }> {
     const sentinelKey = `_actwyn_ping_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const prefix = "_actwyn_ping_";
     const payload = new Uint8Array([0xac, 0x74, 0x77, 0x79, 0x6e]); // "actwyn"
 
     let stage: "put" | "get" | "stat" | "list" | "delete" = "put";
@@ -136,15 +135,20 @@ export class BunS3Transport implements S3Transport {
         return { ok: false, detail: `stat size mismatch: ${stat.size} vs ${payload.byteLength}` };
       }
 
-      // list — prefix visibility
+      // list — prefix visibility.
+      // Reviewer follow-up: scope the prefix to the unique sentinel key
+      // itself rather than the broad "_actwyn_ping_" namespace. S3Client.list
+      // is paginated (up to 1,000 keys/page), so if a bucket has accumulated
+      // many old probe objects, the just-written sentinel could fall outside
+      // the first page and produce a false failure on a healthy backend.
       stage = "list";
-      const listing = await this.client.list({ prefix });
+      const listing = await this.client.list({ prefix: sentinelKey });
       const contents = (listing?.contents ?? []) as Array<{ key?: string }>;
       const seen = contents.some((o) => o.key === sentinelKey);
       if (!seen) {
         // Attempt cleanup before reporting, but keep the original signal.
         try { await this.delete({ bucket: this.bucket, key: sentinelKey }); } catch { /* ignore */ }
-        return { ok: false, detail: `list did not return sentinel under prefix '${prefix}'` };
+        return { ok: false, detail: `list did not return sentinel under prefix '${sentinelKey}'` };
       }
 
       // delete
