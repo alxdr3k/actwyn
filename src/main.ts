@@ -238,6 +238,7 @@ async function main(): Promise<void> {
         newId: () => crypto.randomUUID(),
         now: () => new Date(),
         doctor: doctorDeps,
+        runningCancelHandles: new Map(),
         config: {
           capture: {
             max_download_size_bytes: 20 * 1024 * 1024,

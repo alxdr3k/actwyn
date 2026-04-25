@@ -81,8 +81,11 @@ export function saveLastAttachment(args: {
     // Find the most recent captured attachment row owned by a
     // job in this session.
     const row = args.db
-      .prepare<{ id: string; artifact_type: string }, [string]>(
-        `SELECT so.id, so.artifact_type
+      .prepare<
+        { id: string; artifact_type: string; storage_backend: string; status: string },
+        [string]
+      >(
+        `SELECT so.id, so.artifact_type, so.storage_backend, so.status
          FROM storage_objects so
          JOIN jobs j ON j.id = so.source_job_id
          WHERE j.session_id = ?
@@ -100,6 +103,20 @@ export function saveLastAttachment(args: {
          WHERE id = ?`,
       )
       .run(row.id);
+
+    // Review Blocker 4: promoting retention_class to long_term must enqueue
+    // a storage_sync job so the uploader actually pushes the bytes to S3.
+    // Without this enqueue the row stays status='pending' forever and the
+    // user sees "saved" but the bytes never leave the host.
+    if (row.storage_backend === "s3" && row.status === "pending") {
+      args.db
+        .prepare<unknown, [string, string]>(
+          `INSERT INTO jobs(id, status, job_type, request_json, idempotency_key)
+           VALUES(?, 'queued', 'storage_sync', '{}', ?)
+           ON CONFLICT(job_type, idempotency_key) DO NOTHING`,
+        )
+        .run(args.newId(), `sync:${row.id}`);
+    }
 
     // Create a memory_artifact_links row with user_stated
     // provenance (the user explicitly asked to save).

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createRedactor } from "../../src/observability/redact.ts";
-import { createClaudeAdapter } from "../../src/providers/claude.ts";
+import { buildClaudeArgv, createClaudeAdapter } from "../../src/providers/claude.ts";
 import type { AgentRequest } from "../../src/providers/types.ts";
 
 const IS_POSIX = process.platform !== "win32";
@@ -41,6 +41,47 @@ function req(overrides: Partial<AgentRequest> = {}): AgentRequest {
     ...overrides,
   };
 }
+
+describe("claude adapter — argv shape (print mode)", () => {
+  test("argv uses print mode: -p precedes message, message precedes other flags", () => {
+    const argv = buildClaudeArgv({
+      binary: "claude",
+      profile: "conversational",
+      message: "hello",
+      session_id: "sess-1",
+      max_turns: 12,
+      extra: [],
+    });
+    expect(argv[0]).toBe("claude");
+    expect(argv[1]).toBe("-p");
+    expect(argv[2]).toBe("hello");
+    expect(argv).toContain("-p");
+    expect(argv).toContain("--output-format");
+    expect(argv).toContain("stream-json");
+    // -p must come before --output-format so the CLI enters print mode first.
+    expect(argv.indexOf("-p")).toBeLessThan(argv.indexOf("--output-format"));
+    // Print-mode message must precede all flags.
+    expect(argv.indexOf("hello")).toBeLessThan(argv.indexOf("--output-format"));
+    expect(argv.indexOf("hello")).toBeLessThan(argv.indexOf("--session-id"));
+  });
+
+  test("argv resume_mode still uses -p and --resume, never --session-id", () => {
+    const argv = buildClaudeArgv({
+      binary: "claude",
+      profile: "conversational",
+      message: "hello",
+      session_id: "sess-1",
+      max_turns: 12,
+      extra: [],
+      context_packing_mode: "resume_mode",
+      provider_session_id: "pvs-abc",
+    });
+    expect(argv[1]).toBe("-p");
+    expect(argv).toContain("--resume");
+    expect(argv).toContain("pvs-abc");
+    expect(argv).not.toContain("--session-id");
+  });
+});
 
 describe.skipIf(!IS_POSIX)("claude adapter — end-to-end via stream-json stub", () => {
   test("stream of text + end → succeeded with final_text + parser_status='parsed'", async () => {
@@ -292,6 +333,51 @@ exit 0
       if (outcome.kind === "failed") {
         expect(outcome.error_type).toBe("stall_timeout");
       }
+    } finally {
+      rmSync(workdir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe.skipIf(!IS_POSIX)("claude adapter — max_prompt_bytes is BYTE length (Medium 10)", () => {
+  test("Korean prompt whose char count is under cap but byte length exceeds it → prompt_too_large", async () => {
+    const workdir = mkdtempSync(join(tmpdir(), "actwyn-claude-bytes-"));
+    try {
+      const stub = makeStub(workdir, `exit 0\n`);
+      // 50 Hangul characters = 50 chars but 150 UTF-8 bytes.
+      const koreanPrompt = "가".repeat(50);
+      expect(koreanPrompt.length).toBe(50);
+      expect(new TextEncoder().encode(koreanPrompt).byteLength).toBe(150);
+
+      const adapter = createClaudeAdapter({
+        binary: stub,
+        redactor: redactor(),
+        cwd: workdir,
+        max_prompt_bytes: 100, // chars=50 < 100, but bytes=150 > 100
+      });
+      const outcome = await adapter.run(req({ message: koreanPrompt }));
+      expect(outcome.kind).toBe("failed");
+      if (outcome.kind === "failed") {
+        expect(outcome.error_type).toBe("prompt_too_large");
+      }
+    } finally {
+      rmSync(workdir, { recursive: true, force: true });
+    }
+  });
+
+  test("ASCII prompt at exact byte limit is still accepted", async () => {
+    const workdir = mkdtempSync(join(tmpdir(), "actwyn-claude-bytes-ok-"));
+    try {
+      const stub = makeStub(workdir, `printf '{"event":"end"}\\n'\nexit 0\n`);
+      const prompt = "a".repeat(100); // 100 chars = 100 bytes
+      const adapter = createClaudeAdapter({
+        binary: stub,
+        redactor: redactor(),
+        cwd: workdir,
+        max_prompt_bytes: 100,
+      });
+      const outcome = await adapter.run(req({ message: prompt }));
+      expect(outcome.kind).not.toBe("failed");
     } finally {
       rmSync(workdir, { recursive: true, force: true });
     }

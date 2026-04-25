@@ -123,6 +123,31 @@ describe("/cancel", () => {
     expect(c.signal.aborted).toBe(true);
   });
 
+  test("running job without registered handle → cancel_unavailable (not a false success)", () => {
+    db.prepare<unknown, [string, string, string]>(
+      `INSERT INTO jobs(id, status, job_type, chat_id, request_json, idempotency_key, provider, session_id)
+       VALUES(?, 'running', 'provider_run', ?, '{}', ?, 'fake', 'sess-1')`,
+    ).run("j-nohandle", "chat-1", "ikey-nohandle");
+    const handles = new Map<string, AbortController>();
+    const r = cancelJob(db, {
+      job_id: "j-nohandle",
+      deps: { running_cancel_handles: handles },
+    });
+    expect(r.kind).toBe("cancel_unavailable");
+    // Crucial: must NOT claim the job was signalled.
+    expect(r.kind).not.toBe("cancel_signalled");
+  });
+
+  test("running job with empty handle registry → cancel_unavailable", () => {
+    db.prepare<unknown, [string, string, string]>(
+      `INSERT INTO jobs(id, status, job_type, chat_id, request_json, idempotency_key, provider, session_id)
+       VALUES(?, 'running', 'provider_run', ?, '{}', ?, 'fake', 'sess-1')`,
+    ).run("j-noreg", "chat-1", "ikey-noreg");
+    // No deps at all — previously this silently returned cancel_signalled.
+    const r = cancelJob(db, { job_id: "j-noreg" });
+    expect(r.kind).toBe("cancel_unavailable");
+  });
+
   test("unknown id → not_found", () => {
     const r = cancelJob(db, { job_id: "nope" });
     expect(r.kind).toBe("not_found");

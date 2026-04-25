@@ -94,15 +94,71 @@ export class BunS3Transport implements S3Transport {
     }
   }
 
-  /** Doctor smoke test: put + delete a sentinel object (PRD §12.8 / AC-OBS-001). */
+  /**
+   * Doctor smoke test: put → get → stat → list → delete on a sentinel object
+   * (PRD §12.8 / AC-OBS-001, review Blocker 8).
+   *
+   * Previously this only exercised put+delete, so path-style vs virtual-hosted
+   * misconfigurations, read permissions, and list/prefix issues could slip
+   * through a green /doctor. The deep check now covers every operation that
+   * the sync worker actually uses, and attributes failures to the specific
+   * stage so deployment gates aren't falsely green.
+   */
   async ping(): Promise<{ ok: boolean; detail?: string }> {
-    const sentinel = `_actwyn_ping_${Date.now()}`;
+    const sentinelKey = `_actwyn_ping_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const payload = new Uint8Array([0xac, 0x74, 0x77, 0x79, 0x6e]); // "actwyn"
+
+    let stage: "put" | "get" | "stat" | "list" | "delete" = "put";
     try {
-      await this.put({ bucket: this.bucket, key: sentinel, bytes: new Uint8Array([1]), content_type: "application/octet-stream" });
-      await this.delete({ bucket: this.bucket, key: sentinel });
+      // put
+      stage = "put";
+      await this.put({
+        bucket: this.bucket,
+        key: sentinelKey,
+        bytes: payload,
+        content_type: "application/octet-stream",
+      });
+
+      const file = this.client.file(sentinelKey);
+
+      // get — round-trip verification
+      stage = "get";
+      const read = new Uint8Array(await file.arrayBuffer());
+      if (read.byteLength !== payload.byteLength) {
+        return { ok: false, detail: `get returned ${read.byteLength} bytes; expected ${payload.byteLength}` };
+      }
+
+      // stat — HEAD / metadata
+      stage = "stat";
+      const stat = await file.stat();
+      if (typeof stat?.size === "number" && stat.size !== payload.byteLength) {
+        return { ok: false, detail: `stat size mismatch: ${stat.size} vs ${payload.byteLength}` };
+      }
+
+      // list — prefix visibility.
+      // Reviewer follow-up: scope the prefix to the unique sentinel key
+      // itself rather than the broad "_actwyn_ping_" namespace. S3Client.list
+      // is paginated (up to 1,000 keys/page), so if a bucket has accumulated
+      // many old probe objects, the just-written sentinel could fall outside
+      // the first page and produce a false failure on a healthy backend.
+      stage = "list";
+      const listing = await this.client.list({ prefix: sentinelKey });
+      const contents = (listing?.contents ?? []) as Array<{ key?: string }>;
+      const seen = contents.some((o) => o.key === sentinelKey);
+      if (!seen) {
+        // Attempt cleanup before reporting, but keep the original signal.
+        try { await this.delete({ bucket: this.bucket, key: sentinelKey }); } catch { /* ignore */ }
+        return { ok: false, detail: `list did not return sentinel under prefix '${sentinelKey}'` };
+      }
+
+      // delete
+      stage = "delete";
+      await this.delete({ bucket: this.bucket, key: sentinelKey });
       return { ok: true };
     } catch (e) {
-      return { ok: false, detail: (e as Error).message };
+      // Best-effort cleanup so repeated smoke tests don't leave garbage behind.
+      try { await this.delete({ bucket: this.bucket, key: sentinelKey }); } catch { /* ignore */ }
+      return { ok: false, detail: `${stage} failed: ${(e as Error).message}` };
     }
   }
 }

@@ -12,6 +12,13 @@ import { runWorkerOnce, type WorkerDeps } from "../../src/queue/worker.ts";
 import { StubS3Transport } from "../../src/storage/s3.ts";
 import type { MimeProbe, TelegramFileTransport } from "../../src/telegram/attachment_capture.ts";
 
+async function sha256HexUint8(bytes: Uint8Array): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 const MIGRATIONS = join(import.meta.dir, "..", "..", "migrations");
 
 let workdir: string;
@@ -257,6 +264,63 @@ describe("/end: summary_generation job marks session ended on success", () => {
       .prepare<{ status: string }>("SELECT status FROM sessions WHERE id = 'sess-1'")
       .get()!;
     expect(sess.status).toBe("ended");
+  });
+
+  test("Blocker 9: summary_generation does NOT insert an assistant conversation turn", async () => {
+    const summaryJson = JSON.stringify({
+      session_id: "sess-1",
+      summary_type: "session",
+      facts: [{ content: "fact", provenance: "observed", confidence: 0.8 }],
+      preferences: [],
+      decisions: [],
+      open_tasks: [],
+      cautions: [],
+      source_turn_ids: [],
+    });
+    db.prepare<unknown, [string, string, string, string]>(
+      `INSERT INTO jobs
+         (id, status, job_type, session_id, user_id, chat_id, request_json, idempotency_key, provider)
+       VALUES(?, 'queued', 'summary_generation', ?, 'user-1', 'chat-1', ?, ?, 'fake')`,
+    ).run(
+      "j-summary-no-turn",
+      "sess-1",
+      JSON.stringify({ command: "/summary", args: "", text: "", has_attachments: false }),
+      "telegram:summary-no-turn",
+    );
+
+    const turnsBefore = db
+      .prepare<{ n: number }>("SELECT COUNT(*) AS n FROM turns WHERE session_id = 'sess-1'")
+      .get()!.n;
+
+    await runWorkerOnce(deps({
+      summaryAdapter: {
+        name: "fake",
+        run: async () => ({
+          kind: "succeeded" as const,
+          response: {
+            provider: "fake",
+            session_id: "fake-session",
+            final_text: summaryJson,
+            raw_events: [],
+            duration_ms: 1,
+            exit_code: 0,
+            parser_status: "parsed" as const,
+          },
+        }),
+      },
+    }));
+
+    const turnsAfter = db
+      .prepare<{ n: number }>("SELECT COUNT(*) AS n FROM turns WHERE session_id = 'sess-1'")
+      .get()!.n;
+    // No new conversation turn rows from the summary job.
+    expect(turnsAfter).toBe(turnsBefore);
+
+    // The structured summary payload DID land in memory_summaries.
+    const sumRow = db
+      .prepare<{ id: string }>("SELECT id FROM memory_summaries WHERE session_id = 'sess-1' LIMIT 1")
+      .get();
+    expect(sumRow).not.toBeNull();
   });
 
   test("/end on empty session (fake returns no JSON) still closes session + inserts minimal summary", async () => {
@@ -574,6 +638,68 @@ describe("storage_sync job dispatch — uploads pending storage_objects when s3 
     expect(so.status).toBe("failed");
     expect(so.error_json).toContain("hash_mismatch");
     expect(stubTransport.store.size).toBe(0);
+  });
+
+  test("Medium 12: storage_sync job invokes retry scheduler so failed rows get retried", async () => {
+    const objectId = "so-retry-1";
+    const objectKey = `objects/2026/04/23/${objectId}/retry.bin`;
+    const bytes = new Uint8Array([9, 9, 9]);
+    const localDir = join(workdir, "objects");
+    mkdirSync(localDir, { recursive: true });
+    writeFileSync(join(localDir, objectId), bytes);
+
+    // Seed as a previously-failed row (attempts=1, still below max_attempts=3).
+    // On a fresh storage_sync pass, the retry scheduler must flip this back
+    // to 'pending' so the upload pass can retry it.
+    const sha = "a6419fb3e46b9317e5302ecb12090c9c09d0ddc8a36e6e47e2a0f9d6d4d5fe3d";
+    db.prepare<unknown, [string, string, string]>(
+      `INSERT INTO storage_objects
+         (id, storage_backend, bucket, storage_key, source_channel, source_message_id,
+          source_job_id, artifact_type, retention_class, capture_status, status, sha256,
+          error_json)
+       VALUES(?, 's3', 'test-bucket', ?, 'system', '0', NULL, 'user_upload', 'long_term',
+              'captured', 'failed', ?, json_object('attempts', 1, 'reason', 'transient'))`,
+    ).run(objectId, objectKey, sha);
+
+    db.prepare<unknown, [string, string, string]>(
+      `INSERT INTO jobs
+         (id, status, job_type, request_json, idempotency_key)
+       VALUES(?, 'queued', 'storage_sync', ?, ?)`,
+    ).run("j-sync-retry", JSON.stringify({ storage_object_id: objectId }), `sync:${objectId}`);
+
+    // Transport that always succeeds — upload should now succeed since the
+    // scheduler re-pended the failed row.
+    const stubTransport = new StubS3Transport();
+    const syncDeps = deps({
+      s3: stubTransport,
+      config: {
+        capture: { max_download_size_bytes: 20 * 1024 * 1024, local_path: (id) => join(localDir, id) },
+        sync: { max_attempts: 3, local_path: (id) => join(localDir, id) },
+      },
+    });
+    // We use the bytes' true sha instead; recompute.
+    const actualSha = await sha256HexUint8(bytes);
+    db.prepare<unknown, [string, string]>(
+      "UPDATE storage_objects SET sha256 = ? WHERE id = ?",
+    ).run(actualSha, objectId);
+
+    await runWorkerOnce(syncDeps);
+
+    const job = db
+      .prepare<{ status: string; result_json: string | null }, [string]>(
+        "SELECT status, result_json FROM jobs WHERE id = ?",
+      )
+      .get("j-sync-retry")!;
+    expect(job.status).toBe("succeeded");
+    // The result_json must report the scheduler stats, confirming it was invoked.
+    expect(job.result_json).toContain("retry_scheduler_repended");
+
+    const so = db
+      .prepare<{ status: string }, [string]>(
+        "SELECT status FROM storage_objects WHERE id = ?",
+      )
+      .get(objectId)!;
+    expect(so.status).toBe("uploaded");
   });
 
   test("storage_sync without s3 dep → noop (succeeds without uploading)", async () => {
