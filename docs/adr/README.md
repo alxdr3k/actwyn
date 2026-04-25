@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-> Status: living index · Owner: project lead · Last updated: 2026-04-22
+> Status: living index · Owner: project lead · Last updated: 2026-04-26
 
 This directory holds **architecture-level decisions**: choices that
 are hard to reverse, have broad blast radius, or shape the system's
@@ -69,3 +69,4 @@ Register (`DEC-###`), not here.
 | ADR-0006 | Explicit memory and attachment promotion                  | accepted |
 | ADR-0007 | Provider session is a cache; internal session is truth    | accepted |
 | ADR-0008 | Durable Telegram inbound / outbound ledgers               | accepted |
+| ADR-0009 | DB-native, AI-first Judgment System                       | accepted |

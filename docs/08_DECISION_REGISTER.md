@@ -1,6 +1,6 @@
 # Decision Register
 
-> Status: living document · Owner: project lead · Last updated: 2026-04-22
+> Status: living document · Owner: project lead · Last updated: 2026-04-26
 >
 > Small, confirmed decisions that shape the project but are not
 > architecture-level. Architecture-level decisions live under
@@ -69,6 +69,8 @@ deployment shape). Everything else is a `DEC-###`.
 | DEC-019 | Summary auto-trigger conditions                                | accepted |
 | DEC-020 | Telegram message chunking at 3,800 chars                       | accepted |
 | DEC-021 | CJK-safer token estimator rule                                 | accepted |
+| DEC-022 | second-brain GitHub repo는 actwyn judgment의 canonical 아님    | accepted |
+| DEC-023 | `JudgmentItem.kind` v1 도입 enum 범위 (5-6개부터 시작)         | accepted |
 
 Decisions that were previously `D01`..`D05` in the flat log have
 been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
@@ -616,6 +618,74 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
   `prompt_overflow` unexpectedly, or we ship a real tokenizer.
 - Supersedes / superseded by: —
 - Refs: Q-025.
+
+## DEC-022 — second-brain GitHub repo는 actwyn judgment의 canonical store가 아니다
+
+- Date: 2026-04-26.
+- Status: accepted.
+- Context: 사용자가 Round 7에서 (a) Obsidian 미사용, (b) GitHub PR
+  write-back 마찰 거부, (c) second-brain repo를 사람이 직접 편집하지
+  않고 AI를 통해서만 조회 / 편집한다는 조건을 명시. 이 조건들 위에서
+  Markdown vault canonical 전제는 깨진다. ADR-0009가 핵심 architectural
+  결정을 codify했지만, "second-brain repo는 어떤 역할로 남는가"라는
+  운영 차원의 결정이 별도로 trace 가능해야 한다.
+- Decision: second-brain GitHub repo (`alxdr3k/second-brain`)는
+  actwyn judgment system의 canonical store **아니다**. 역할 4가지로
+  한정한다: (1) seed corpus — 기존에 누적된 생각 / 대화의 import
+  source, (2) human-readable export — 가끔 읽기 좋은 Markdown
+  snapshot, (3) backup / archive — Git history, (4) publishing
+  layer — 일부 지식의 블로그 / 공개 문서 승격. **canonical이 아닌
+  것**: 실시간 memory write path, current truth source, agent
+  runtime retrieval primary DB, Obsidian vault, PR 기반 memory
+  manager.
+- Alternatives considered: second-brain repo를 canonical로 유지하고
+  Markdown frontmatter `judgment_role` optional 필드 도입; second-brain
+  repo를 deprecate / archive; second-brain repo를 actwyn judgment
+  system으로 흡수.
+- Impacted docs: ADR-0009 §1; `docs/JUDGMENT_SYSTEM.md` §What this is /
+  §Refs.
+- Risks / mitigations: seed corpus import 형식이 미정 — Phase 1
+  schema 결정 시 함께 정의. second-brain repo의 기존 정책 문서
+  (SOURCE_OF_TRUTH / INGESTION_RULES / PROMPTING_GUIDE 등) 처분은 별
+  결정 (Q-030).
+- Review trigger: 사용자가 외부 PKM (Obsidian / Logseq / 별 repo)을
+  다시 도입할 때, 또는 seed corpus 외 다른 use case가 등장할 때.
+- Supersedes / superseded by: —
+- Refs: ADR-0009; second-brain Ideation 노트 Round 7 결정 #2;
+  Q-030.
+
+## DEC-023 — `JudgmentItem.kind` v1 도입 enum 범위 (5-6개부터 시작)
+
+- Date: 2026-04-26.
+- Status: accepted.
+- Context: ADR-0009 / `docs/JUDGMENT_SYSTEM.md`가 `JudgmentItem.kind`
+  10개 (`fact` / `preference` / `claim` / `principle` /
+  `hypothesis` / `experiment` / `result` / `decision` /
+  `current_state` / `procedure` / `caution`)를 카탈로그로 정의했다.
+  Phase 1 schema 첫 도입에서 10개를 모두 enforce하면 사용자 측
+  모델링 비용 / classification 비용이 크고, 실제로 actwyn P0 use
+  case에 모두 필요하다는 evidence는 아직 없다. Open question Q-028
+  (kind v1 enum 범위)에 대한 commitment 단계의 출발점이 필요하다.
+- Decision: Phase 1 (P0.5) 첫 schema 도입은 **5-6개 핵심 kind**에서
+  시작한다: `fact` / `preference` / `decision` / `current_state` /
+  `procedure` / `caution`. 나머지 4개 (`claim` / `principle` /
+  `hypothesis` / `experiment` / `result`)는 evidence가 모일 때 별
+  마이그레이션 / DEC로 추가한다. 단, schema 자체는 enum 확장이 비
+  파괴적으로 가능한 형태 (TEXT NOT NULL + 검증)로 작성한다.
+- Alternatives considered: 처음부터 10개 모두 도입; 더 좁게 4개
+  (`fact` / `preference` / `decision` / `caution`)부터; Phase 2
+  (typed tool) 도입 시점까지 enum 범위 미정.
+- Impacted docs: `docs/JUDGMENT_SYSTEM.md` §Enum catalog,
+  §Phase 0-5 roadmap; ADR-0009 §Risks (enum rigidity).
+- Risks / mitigations: 후속 enum 확장 시 마이그레이션 필요 —
+  enum은 TEXT column + 응용 검증으로 확장 비용 최소화. Eval harness
+  결과가 추가 kind 필요성을 surface (Q-031).
+- Review trigger: Phase 1 schema 구현 중 5-6개로 부족하다는 use
+  case 등장; user가 명시적으로 `experiment` / `result` 같은 kind를
+  요청; eval harness가 missing kind를 기록.
+- Supersedes / superseded by: —
+- Refs: ADR-0009; second-brain Ideation 노트 Round 7 + Appendix
+  A.3 (enum 카탈로그); Q-028.
 
 ---
 

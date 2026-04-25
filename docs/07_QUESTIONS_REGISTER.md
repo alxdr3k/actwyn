@@ -1,6 +1,6 @@
 # Personal Agent — Questions Register
 
-> Status: living document · Owner: project lead · Last updated: 2026-04-22
+> Status: living document · Owner: project lead · Last updated: 2026-04-26
 >
 > This file is the **question ledger**: it captures questions, proposed
 > answers, and the promotion pointers that route each decided answer
@@ -690,7 +690,118 @@ task loops, client-side encryption). An entry here signals "we
 expect to need this eventually"; promote to an ADR when scope is
 committed for a later milestone.
 
-*No entries yet.*
+### Q-027 — `memory_items`(ADR-0006)와 새 `judgment_items` 관계: 통합 / 분리 / 단계적 마이그레이션 중 무엇?
+
+- **Section**: Future Architecture
+- **Status**: open (2026-04-26).
+- **Top 10 priority**: —
+- **Owner**: Staff Eng + Product
+- **Proposed answer**: ADR-0009 Phase 0에서는 **분리** 방향으로
+  commit (memory layer는 그대로 유지, judgment layer는 별 schema로
+  추가). Phase 1 schema 구현 시 다음 중 결정:
+  - Option A — 영구 분리. `memory_items`는 session summary candidate
+    중심, `judgment_items`는 source-grounded judgment 중심.
+  - Option B — 단계적 마이그레이션. `memory_items`의 `user_stated` /
+    `user_confirmed` row를 source-grounded judgment로 promotion.
+    `memory_items`는 deprecation track.
+  - Option C — 통합. 한 테이블로 합치고 `kind` / `epistemic_status`로
+    구분.
+  현 commitment는 Option A. Phase 1에서 evidence 기반 재결정.
+- **Decision**: ADR-0009 (Phase 0 commit), Phase 1에서 별 ADR / DEC
+  필요.
+- **Impacted docs**: ADR-0006, ADR-0009; PRD §12.1a Taxonomy;
+  `docs/JUDGMENT_SYSTEM.md` §Relationship to memory layer.
+- **Follow-up**: Phase 1 schema PR에서 결정.
+- **History**: 2026-04-26 ADR-0009 채택 시 분리 방향으로 출발점
+  설정 (second-brain Ideation 노트 Open Question Q4 import).
+
+### Q-028 — `JudgmentItem.kind` v1 enum 범위는 어디까지인가?
+
+- **Section**: Future Architecture
+- **Status**: decided (2026-04-26, 잠정 출발점).
+- **Top 10 priority**: —
+- **Owner**: Staff Eng + Product
+- **Proposed answer**: Phase 1 schema 첫 도입은 5-6개 핵심 kind
+  (`fact` / `preference` / `decision` / `current_state` /
+  `procedure` / `caution`)에서 시작. 나머지 (`claim` / `principle` /
+  `hypothesis` / `experiment` / `result`)는 evidence 기반 후속 추가.
+- **Decision**: DEC-023.
+- **Impacted docs**: `docs/JUDGMENT_SYSTEM.md` §Enum catalog.
+- **Follow-up**: Phase 1 schema PR에서 enum TEXT validation 형태
+  확정. Phase 2 typed tool에서 누락 kind surface 시 별 DEC.
+- **History**: 2026-04-26 ADR-0009 + DEC-023과 함께 출발점 결정
+  (second-brain Ideation 노트 Open Question Q3 import).
+
+### Q-029 — Phase 1 schema에서 SQLite FTS5만 vs 처음부터 sqlite-vec leave-room?
+
+- **Section**: Future Architecture
+- **Status**: open (2026-04-26).
+- **Top 10 priority**: —
+- **Owner**: Staff Eng
+- **Proposed answer**: Phase 1은 **FTS5만**으로 시작. embedding
+  projection은 Phase 4 trigger (`source_grounding_rate` /
+  `current_truth_accuracy` eval metric이 부족 evidence를 줄 때).
+  단, schema와 module structure는 embedding projection이 추가되어도
+  비파괴적으로 들어올 수 있는 형태로 작성 (`judgment.project` 모듈
+  분리, projection table 별도 권장).
+- **Decision**: ADR-0009 §6 (vector / graph는 derived projection,
+  본 ADR에서 채택 결정 안 함).
+- **Impacted docs**: ADR-0003; `docs/JUDGMENT_SYSTEM.md` §SQL schema
+  sketch / §Phase 4.
+- **Follow-up**: Phase 1 schema PR에서 projection seam 확정. Phase
+  4 trigger 시 별 ADR (sqlite-vec vs pgvector vs Qdrant).
+- **History**: 2026-04-26 (second-brain Ideation 노트 Open Question
+  Q5 import).
+
+### Q-030 — second-brain repo의 기존 정책 문서는 어떻게 되는가?
+
+- **Section**: Future Architecture
+- **Status**: open (2026-04-26).
+- **Top 10 priority**: —
+- **Owner**: Product + Staff Eng (cross-repo)
+- **Proposed answer**: ADR-0009 + DEC-022는 second-brain repo의
+  **canonical 역할 박탈**과 **새 4가지 역할** (seed corpus /
+  human-readable export / backup / publishing layer)을 결정했지만,
+  기존 정책 문서 (SOURCE_OF_TRUTH / INGESTION_RULES / PROMPTING_GUIDE
+  / IDEATION_GUIDE / VAULT_MANIFEST 등)의 처분은 미정. 후보:
+  - Option A — 그대로 유지 (seed corpus 운영용 문서로 남김).
+  - Option B — Deprecate (Markdown vault canonical 전제 위에서만
+    의미 있는 문서들을 archive).
+  - Option C — actwyn judgment system으로 흡수 (개념 / 정책을
+    `docs/JUDGMENT_SYSTEM.md` 또는 후속 spec으로 import).
+  본 결정은 second-brain repo 측의 별 PR에서 처리. actwyn 측에서는
+  ADR-0009 + DEC-022로 충분.
+- **Decision**: —  (cross-repo, second-brain repo 측 결정 대기).
+- **Impacted docs**: (second-brain repo) `_System/AI/*.md`,
+  `_System/Schemas/*.md`. actwyn 쪽은 영향 없음.
+- **Follow-up**: second-brain repo에서 별도 PR / 결정.
+- **History**: 2026-04-26 (second-brain Ideation 노트 Open Question
+  Q6 import; cross-ref).
+
+### Q-031 — Eval harness 도입 시점은?
+
+- **Section**: Future Architecture
+- **Status**: open (2026-04-26).
+- **Top 10 priority**: —
+- **Owner**: Staff Eng + Product
+- **Proposed answer**: 단계적 도입.
+  - Phase 0 (지금): 평가 질문 세트만 명문화 (`docs/JUDGMENT_SYSTEM.md`
+    §Eval harness — Core 10 + Security 5).
+  - Phase 2 (typed tool): tool round-trip + judgment commit /
+    supersede / explain 자동 평가 시작 (CI에서 기본 평가 세트
+    실행).
+  - Phase 4 (embedding projection): RAGAS metric 통합 + actwyn 추가
+    metric (`current_truth_accuracy` / `supersede_respect_rate` /
+    `source_grounding_rate` / `negative_knowledge_recall` /
+    `memory_poisoning_rejection_rate` / `decision_explainability`).
+  Law 12 (No eval, no intelligence) 준수 — 자동화 시점이 늦더라도
+  평가 질문 세트는 Phase 0에서 명문화.
+- **Decision**: ADR-0009 (Phase 0 명문화), 후속 Phase별 별 ADR /
+  DEC 필요.
+- **Impacted docs**: `docs/JUDGMENT_SYSTEM.md` §Eval harness.
+- **Follow-up**: Phase 2 PR에서 자동화 trigger / CI 통합 결정.
+- **History**: 2026-04-26 (second-brain Ideation 노트 Open Question
+  Q8 import).
 
 ---
 
