@@ -1,14 +1,18 @@
 # actwyn Judgment System
 
 > Status: living spec (Phase 0 commitment) · Owner: project lead ·
-> Last updated: 2026-04-26 · Architectural authority: [ADR-0009](./adr/0009-db-native-judgment-system.md)
+> Last updated: 2026-04-26 · Architectural authority:
+> [ADR-0009](./adr/0009-db-native-judgment-system.md) +
+> [ADR-0010](./adr/0010-cognitive-extension-of-judgment-system.md)
 >
 > 본 문서는 actwyn Judgment System의 architectural commitment
 > spec이다. Phase 0(지금)은 결정 명문화만 — schema / typed tool /
 > migration 구현은 Phase 1+에서 별 ADR / 별 PR로 진행한다.
 >
 > Import source: [second-brain Ideation 노트](https://github.com/alxdr3k/second-brain/blob/main/Ideation/second-brain-as-judgment-layer.md)
-> Round 7 + Appendix A.1 ~ A.17 (GPT-5, 2026-04-25).
+> Round 7 + Appendix A.1 ~ A.17 (GPT-5, 2026-04-25). Cognitive
+> extension(§Cognitive Architecture Extension)은 같은 노트의 Round 9 +
+> Appendix A.18 ~ A.19 import.
 
 ## What this is
 
@@ -710,6 +714,11 @@ src/judgment/
 별 ADR + schema migration PR. SQLite에 5 tables (위 SQL schema sketch
 참조). embedding 없음.
 
+> **ADR-0010 정합**: P0.5 범위는 본 5 tables 외에 cognitive 최소형
+> (Goal / Workspace / Reflection 최소형 + JudgmentItem 신규 optional
+> 필드 9개)을 포함한다. 자세히는 §Cognitive Architecture Extension의
+> Phase 재구성 sub-section 참조.
+
 검색:
 
 - exact ID
@@ -790,6 +799,374 @@ specialized:    Qdrant
 
 이 시점에 Graphiti / Neo4j 검토.
 
+## Cognitive Architecture Extension (ADR-0010)
+
+> Architectural authority: [ADR-0010](./adr/0010-cognitive-extension-of-judgment-system.md).
+> ADR-0009를 supersede하지 않는 **확장**이다. Phase 0(지금)은 명문화만,
+> schema / 신규 객체 / typed tool은 P0.5 / P1 schema PR에서 별 ADR /
+> DEC로 도입한다.
+>
+> Import source: [second-brain Ideation 노트 Round 9](https://github.com/alxdr3k/second-brain/blob/main/Ideation/second-brain-as-judgment-layer.md)
+> + Appendix A.18 ~ A.19 (GPT-5, 2026-04-25 ~ 26).
+
+### Why extend
+
+ADR-0009는 actwyn judgment system을 source-grounded, scoped, temporal,
+supersedable **memory substrate**로 잡았다. 인간 인지 기능 10종에 대해
+Round 9에서 평가한 결과는 다음과 같다.
+
+| 인간 인지 기능 | 현 ADR-0009 반영도 | 보강 방향 |
+|---------------|-------------------|----------|
+| Episodic memory (사건 기억) | 높음 — event ledger / source 기반 | — |
+| Semantic memory (사실 / 의미) | 중간~높음 — judgment / principle | — |
+| Procedural memory (방법 / 규칙) | 중간 — `kind: 'procedure'` 있음, library 부족 | Skill library (P1) |
+| Working memory (작업 기억) | 낮음~중간 — context packet은 있으나 약함 | Workspace 모델 (P0.5) |
+| Attention (주의) | 낮음 — retrieval ranking만 | Attention scoring (P1) |
+| Value / affect (가치 / 정서) | 낮음 — priority / utility 없음 | Stakes / risk / valence 필드 (P0.5) |
+| Metacognition (자기 인지) | 낮음 — confidence / explain만 | would_change_if / missing_evidence (P0.5) |
+| Consolidation (강화 / 통합) | 중간 — supersede chain 있음, reflection 부족 | Reflection 최소형 (P0.5) |
+| Forgetting / decay (망각) | 낮음 — revoke만 | 5종 policy: delete / expire / supersede / archive / compress (P1) |
+| Active inference (능동 검증) | 낮음 — `experiment` kind만, planner 부족 | Experiment loop (P1) |
+
+이 표가 본 섹션의 motivation 전부다. 본 spec은 cognitive science의
+biological replica가 아니라 **engineering approximation**이다 — see
+§Disclaimers.
+
+### Cognitive loop
+
+actwyn Judgment System을 단순 store가 아니라 **cognitive loop**로
+다시 정의한다.
+
+```
+capture → attend → retrieve → deliberate → decide → act → observe → reflect → consolidate
+   │        │         │           │           │        │        │         │           │
+   ▼        ▼         ▼           ▼           ▼        ▼        ▼         ▼           ▼
+ event    workspace  packet    options      judgment  tool    result    lesson    judgment
+ ledger    구성     (Letta     /tradeoffs   commit  invoke   /metric  / caution   schema
+            (Goal     core       /uncert.   (typed             /reflex.   추가 /
+            stack +   memory)               tool)             /retro)    update
+            scope)
+```
+
+기존 ADR-0009 §6-stage pipeline(capture / extract / classify / ground /
+conflict / policy / commit / project)은 그대로 — 본 loop는 그 위에서
+사용자 turn을 어떻게 cognitive 자원에 매핑할지 명시한 view다.
+
+### 12-layer cognitive architecture
+
+| # | Layer | 역할 | 도입 시점 | ADR-0009 매핑 |
+|---|-------|------|-----------|---------------|
+| 1 | Event Memory | raw transcript / file / tool output / metric | P0(이미) | event ledger |
+| 2 | Episodic Memory | episode summary / situation / outcome | P0.5 | `memory_summaries` (ADR-0006) |
+| 3 | Semantic Memory | fact / preference / project knowledge / concept | P0.5 | `memory_items` + `judgment_items` |
+| 4 | Procedural Memory | rule / workflow / skill / policy | P0.5(enum), P1(library) | `kind: 'procedure'` |
+| 5 | Judgment Ledger | decision / hypothesis / principle / caution / current_state | P0.5 | `judgment_items` |
+| 6 | Goal / Value Layer | active goal / priority / stakes / criterion | P0.5(최소형) | **신규** |
+| 7 | Attention / Retrieval | "지금 무엇이 중요한가" — relevance + scope + recency + impact | P1 | retrieval 우선순위 강화 |
+| 8 | Working Memory / Workspace | 현재 task packet, 매 요청 1회 구성 | P0.5(최소형) | **신규** (context packet 확장) |
+| 9 | Deliberation | option / tradeoff / counterargument / uncertainty | P1 | typed tool로 부분 표현 |
+| 10 | Action / Experiment | question / plan / test / execution | P1 | `kind: 'experiment'` 확장 |
+| 11 | Reflection / Consolidation | 무엇을 배웠고 무엇을 principle로 승격하는가 | P0.5(최소형), P1(자동) | Reflexion / Voyager 패턴 |
+| 12 | Evaluation | 고정 평가 질문 + metric | P0(이미) | §Eval harness |
+
+### JudgmentItem schema extension
+
+ADR-0009 §Core data model의 `JudgmentItem`에 다음 필드를 **모두 optional**로
+추가한다(P0.5 schema PR에서 enum value만 지정, 강제는 P1+).
+
+```ts
+type JudgmentItemExtension = {
+  // value / affect / salience
+  stakes?: "low" | "medium" | "high"
+  risk?: "low" | "medium" | "high"
+  valence?: "positive" | "negative" | "mixed"
+  user_emphasis?: "casual" | "important" | "strong_preference"
+
+  // metacognition
+  confidence_reason?: string
+  missing_evidence?: string[]
+  would_change_if?: string[]
+  review_trigger?: string[]
+  uncertainty_notes?: string
+}
+```
+
+기존 `importance: 1 | 2 | 3 | 4 | 5`는 ADR-0009에 이미 있다. 본 확장의
+`stakes` / `risk`는 importance와 직교한다(중요해도 risk는 낮을 수 있다).
+
+### Goal model
+
+```ts
+type Goal = {
+  id: string
+  statement: string
+  priority: number              // 1 (highest) ~ 5 (lowest)
+  horizon: "now" | "week" | "month" | "long_term"
+  status: "active" | "paused" | "done"
+  scope?: {
+    user_id: string
+    project_id?: string
+    area?: string
+  }
+  created_at: string
+  updated_at: string
+}
+```
+
+예시.
+
+- "actwyn MVP를 빨리 완성한다" — priority 1, horizon `month`,
+  status `active`.
+- "장기적으로 world-class personal AI를 만든다" — priority 2, horizon
+  `long_term`, status `active`.
+- "second-brain repo의 정책 문서 정리" — priority 3, horizon `week`,
+  status `paused` (scope: actwyn 외부).
+
+복수 active goal이 동시에 존재할 수 있다. Workspace 구성 시
+`goal_stack`으로 packing.
+
+### DecisionCriterion model
+
+```ts
+type DecisionCriterion = {
+  id: string
+  scope: Scope
+  criterion: string
+  weight: number                // 0.0 ~ 1.0
+  source_ids?: string[]
+  status: "active" | "deprecated"
+  created_at: string
+  updated_at: string
+}
+```
+
+예시(actwyn 현 시점).
+
+- "actwyn MVP scope를 늘리지 않을 것" — weight 0.9.
+- "GitHub write-back 마찰을 피할 것" — weight 0.8.
+- "토큰 비용이 폭발하지 않을 것" — weight 0.7.
+- "한국어 / 영어 모두 자연스러울 것" — weight 0.6.
+
+decision support task 시 Workspace에 `decision_criteria` 슬롯으로
+inject. eval harness가 이 criterion 위반 여부를 자동 평가에 사용
+가능(P1+).
+
+### Workspace model
+
+```ts
+type Workspace = {
+  id: string
+  task: string
+  goal_stack: Goal[]                       // 현 task와 관련 active goal
+  active_scope: Scope                      // user / project / area / entity
+  current_state: JudgmentItem[]            // current_state projection
+  relevant_memory: JudgmentItem[]          // attention layer가 고른 것
+  active_constraints: JudgmentItem[]       // active caution / principle
+  candidate_actions: string[]              // deliberation 후보
+  uncertainty: string[]                    // missing evidence / open question
+  decision_criteria: DecisionCriterion[]
+  created_at: string
+}
+```
+
+핵심 사용 패턴: **매 요청마다 전체 DB를 읽지 않고 작은 작업공간을
+구성**한다. Letta core memory blocks vs archival search 패턴을
+generalize. Global Workspace Theory 근거.
+
+P0.5 최소형은 `task` / `goal_stack` / `active_scope` / `current_state` /
+`relevant_memory` / `decision_criteria`만 채우고, `candidate_actions` /
+`uncertainty`는 P1.
+
+### Attention scoring
+
+```
+attention_score(item, query, workspace) =
+    semantic_relevance(item, query)
+  + current_scope_match(item, workspace.active_scope)
+  + recency(item.updated_at)
+  + importance(item)
+  + user_emphasis(item)
+  + decision_impact(item, workspace.goal_stack)
+  + risk_level(item)
+  + uncertainty_reduction(item, workspace.uncertainty)
+  - superseded_penalty(item)
+  - expired_penalty(item)
+  - low_confidence_penalty(item)
+```
+
+P0.5는 ADR-0009 §Read path의 retrieval 우선순위 / scope filter / FTS5만으로
+충분 — 본 formula는 P1 implementation. 가중치 정적 vs 학습 기반은 별
+결정(Q-034).
+
+### Metacognition fields
+
+| 필드 | 의미 | 사용 패턴 |
+|------|------|----------|
+| `confidence_reason` | 왜 이 confidence level을 선택했는가 | explain API에서 source / evidence와 함께 노출 |
+| `missing_evidence` | 더 자신있게 결정하려면 어떤 evidence가 필요한가 | active experiment trigger |
+| `would_change_if` | 이 판단을 뒤집을 조건 | review trigger, eval harness 자동 검증 |
+| `review_trigger` | 언제 / 무슨 일이 일어나면 다시 보는가 | revisit_at과 결합, scheduled review |
+| `uncertainty_notes` | 일반적인 자기 의심 / 한계 메모 | reflection layer가 lesson으로 승격 후보 |
+
+사용자 실제 예시(ADR-0009 commit 시점).
+
+```yaml
+judgment: "second-brain GitHub repo는 actwyn judgment의 canonical 아니다."
+status: active
+confidence: high
+
+confidence_reason: "사용자가 Round 7에서 Obsidian 미사용, GitHub PR
+  write-back 마찰 거부, AI-only query/edit 조건을 명시. 3가지 조건
+  모두 만족."
+missing_evidence:
+  - "사용자가 실제 Obsidian을 시도해 본 기간 / 빈도 데이터."
+  - "PR write-back UX의 실측 마찰 시간."
+would_change_if:
+  - "사용자가 Obsidian 사용을 시작."
+  - "GitHub write-back이 자동 승인 UX를 갖춤."
+  - "actwyn P2에서 PR-based publishing이 1차 목표가 됨."
+review_trigger:
+  - "사용자가 외부 PKM(Logseq / Obsidian / 별 repo)을 다시 도입할 때."
+  - "actwyn가 P2로 진입할 때."
+```
+
+### Skill / Procedure library
+
+ADR-0009 enum의 `kind: 'procedure'`를 first-class skill library로 다룬다
+(Voyager 패턴 적용). reusable judgment-action procedure를 procedure row로
+명시 보존한다.
+
+P0.5는 enum 보존 + ad-hoc procedure 작성만. 본격 library API / retrieval /
+re-use는 P1(별 ADR / DEC, Q-033 trigger).
+
+procedure 예시 3개.
+
+```yaml
+- statement: "사용자가 압도된 톤으로 'X를 하려고 해'를 말하면, 결정 공간을
+    먼저 압축한 뒤 구현 디테일을 제안한다."
+  kind: procedure
+  source_ids: [src_user_pattern_2026_04_25]
+  scope: { user_id: alxdr3k }
+
+- statement: "새 storage backend를 추천하기 전에 product semantics와
+    storage engine 선택을 분리해서 제시한다."
+  kind: procedure
+  source_ids: [src_round7_lesson]
+  scope: { user_id: alxdr3k, project_id: actwyn }
+
+- statement: "MVP scope를 결정할 때 PRD non-goals를 먼저 확인한다."
+  kind: procedure
+  source_ids: [src_prd_p0_nongoals]
+  scope: { user_id: alxdr3k }
+```
+
+procedure는 `epistemic_status`로 `user_confirmed` 또는 `system-authored`만
+허용(ADR-0009 §Security invariants 그대로). assistant_generated /
+inferred procedure는 절대 active로 commit되지 않는다.
+
+### Forgetting / decay / consolidation policy
+
+5종 policy. ADR-0009 §Tool contract의 `judgment.supersede` /
+`judgment.revoke`와 정합.
+
+| Policy | 의미 | 도입 시점 | 정합 도구 |
+|--------|------|-----------|----------|
+| `delete` | 완전 삭제(privacy 요청, GDPR) | P0(이미) | DEC-006 `/forget` |
+| `expire` | 시간 기반 자동 inactive(`valid_until` / `revisit_at`) | P0.5 | `judgment_items.status = expired` |
+| `supersede` | 더 나은 판단으로 교체, 이전 row 보존 | P0(이미) | `judgment.supersede` |
+| `archive` | 근거 / 학습용 보존, current context 제외 | P1 | 별 status / view |
+| `compress` | 원문 보존 + summary 사용으로 토큰 절약 | P1 | `compressed_summary` 필드 |
+
+근거: Complementary Learning Systems(McClelland 1995). 망각은 결함이
+아니라 기능 — fast hippocampal learning과 slow cortical consolidation이
+분리되어야 catastrophic interference 회피.
+
+### Phase 재구성
+
+ADR-0009 §Phase 0-5 roadmap을 본 ADR-0010 commitment 위에서 재구성한다.
+
+#### Phase 0(지금) — architectural commitment
+
+산출물(추가).
+
+- ADR-0010 (본 commitment).
+- 본 §Cognitive Architecture Extension 섹션.
+- DEC-024 (P0.5 cognitive scope).
+- DEC-025 (JudgmentItem metacognitive 필드 도입 정책).
+- Q-032 ~ Q-035.
+
+코드 / schema / migration 변경 **없음**(ADR-0009 Phase 0 정합).
+
+#### Phase 1 / P0.5 — structured judgment store + cognitive 최소형
+
+기존 ADR-0009 Phase 1 범위(`judgment_*` 5 tables, FTS5)에 다음을 추가.
+
+- `JudgmentItem`에 신규 optional column 9개(stakes / risk / valence /
+  user_emphasis / confidence_reason / missing_evidence / would_change_if /
+  review_trigger / uncertainty_notes).
+- 신규 table 또는 view: `goals` / `decision_criteria` / `workspaces`(?).
+  schema 형태는 P0.5 schema PR에서 결정.
+- Reflection 최소형: turn 종료 시 lesson candidate를 `judgment_events`에
+  append. 자동 commit 안 함(ADR-0006 explicit-save-first 정합).
+
+Q-027 / Q-028 / Q-029 결정. Q-032(P0.5 layer 우선순위) 결정.
+
+#### Phase 2 / P1 — AI tool write path + cognitive 본격
+
+ADR-0009 Phase 2 범위(8 typed tool)에 다음을 추가.
+
+- Attention scoring formula 도입(Q-034 결정).
+- Procedure / Skill library API(Q-033 결정).
+- Active experiment loop — `experiment` kind + scheduled review.
+- Consolidation loop — daily / weekly reflection job, lesson 승격.
+- Forgetting policy 4-5(`archive` / `compress`).
+
+#### Phase 3+ / P2+ — context compiler + projection + advanced cognition
+
+ADR-0009 Phase 3-5(context compiler / embedding / temporal graph)에 다음을
+추가.
+
+- Self-evaluation 자동화 — eval harness가 judgment를 자동 검증, low
+  score면 `review_trigger` 자동 활성화.
+- Multi-step planning — Workspace에 `plan_tree` 도입.
+- Robust metacognition — confidence calibration over time.
+
+### Comparison with existing services / research
+
+| Service / 연구 | 핵심 패턴 | actwyn 채택 / 비채택 |
+|---------------|----------|-----------|
+| **CoALA** (Sumers 2023) | semantic / episodic / procedural memory + structured action | ✓ Layer 분리 채택 — 본 12-layer가 CoALA 기반 |
+| **Generative Agents** (Park 2023) | reflection + planning loop | ✓ Reflection 최소형(P0.5) 채택 |
+| **Reflexion** (Shinn 2023) | verbal self-reflection을 lesson으로 | ✓ Consolidation loop(P1) 채택 |
+| **Voyager** (Wang 2023) | skill library, automatic curriculum | ✓ Procedure library(P1) 채택, automatic curriculum은 미채택 |
+| **MemGPT / Letta** (Packer 2023) | core vs archival memory tier(OS-style) | ✓ Workspace 모델 차용. tier 운영은 P3+ |
+| **Mem0** | persistent self-improving memory | △ 자기개선 자동화는 P2+ trigger 후 검토 |
+| **Zep / Graphiti** | temporal knowledge graph | △ ADR-0009 Phase 5(graph projection)에서 검토 |
+| **LangGraph / LangMem** | memory type 구분 + workflow graph | △ workflow graph는 advisory mode와 결이 다름 — 미채택 |
+| **ACT-R / Soar** | classical production system + procedural memory | △ inspiration, 운영 채택 안 함(LLM이 production engine 역할) |
+
+### Disclaimers
+
+본 spec은 _engineering approximation_이다.
+
+- **Biological replica가 아님.** 인간 뇌 구조 / 신경전달 / 의식의
+  hard problem과 무관. cognitive science 용어는 빠진 layer를 surface
+  하기 위한 framing 도구.
+- **Consciousness / qualia / subjective experience를 만드는 것이
+  목표 아님.** Workspace는 Global Workspace Theory에서 차용한 _용어_지만,
+  의식 모델로 주장하지 않는다.
+- **Emotion / affect를 복제하는 것이 목표 아님.** `valence` /
+  `user_emphasis` 필드는 사용자 톤 / 강도를 retrieval ranking에 반영하기
+  위한 engineering 신호일 뿐, 시스템에 정서가 있다고 주장하지 않는다.
+- **Intuition을 흉내내는 것이 목표 아님.** "추론 없이 옳은 답"은 spec
+  대상이 아니다. 모든 active judgment는 source / evidence 기반.
+- **Anthropomorphic 표현은 communication 편의용이다.** "actwyn이
+  믿는다 / 판단한다"는 비유. 실제로는 typed tool로 row를 commit하는
+  것뿐.
+
+사용자에게 actwyn을 설명할 때 cognitive terminology와 engineering
+terminology 중 무엇을 우선할지는 별도 결정(Q-035).
+
 ## What this isn't
 
 명시적 scope clarification (Round 7 사용자 조건 정합).
@@ -815,20 +1192,26 @@ specialized:    Qdrant
 
 ## Refs
 
-- Architectural authority: [ADR-0009](./adr/0009-db-native-judgment-system.md).
+- Architectural authority: [ADR-0009](./adr/0009-db-native-judgment-system.md)
+  + [ADR-0010](./adr/0010-cognitive-extension-of-judgment-system.md).
 - Import source: [second-brain Ideation 노트](https://github.com/alxdr3k/second-brain/blob/main/Ideation/second-brain-as-judgment-layer.md)
   — Round 7 + Appendix A.1 ~ A.17 (전체 architecture spec).
 - 정합 ADR: ADR-0003 (SQLite canonical), ADR-0004 (S3 archive only),
   ADR-0006 (explicit memory promotion), ADR-0008 (durable ledgers).
 - 정합 DEC: DEC-006 (`/forget` 명령 set), DEC-007 (correction via
   supersede), DEC-010 (P0 redaction pattern list), DEC-022
-  (second-brain not canonical), DEC-023 (kind v1 enum 범위).
+  (second-brain not canonical), DEC-023 (kind v1 enum 범위), DEC-024
+  (P0.5 cognitive scope), DEC-025 (JudgmentItem metacognitive 필드
+  도입 정책).
 - 정합 PRD: §12.1a Taxonomy, §12.2 Provenance, §12.2a Corrections /
   Supersedence, §12.5 Context Injection.
 - 정합 HLD: §6.5 (`memory_items.status` state machine).
 - Open questions: Q-027 (memory ↔ judgment 관계), Q-028 (kind v1
   enum 범위), Q-029 (FTS5 vs sqlite-vec leave-room), Q-030
-  (second-brain repo 정책 문서 처분), Q-031 (eval harness 도입 시점).
+  (second-brain repo 정책 문서 처분), Q-031 (eval harness 도입 시점),
+  Q-032 (P0.5 layer 우선순위), Q-033 (procedure library 운영 형태),
+  Q-034 (attention_score formula 가중치), Q-035 (cognitive analogy
+  communication).
 - 외부 근거:
   - CoALA (Cognitive Architectures for Language Agents) — semantic /
     episodic / procedural memory 분리.
@@ -839,3 +1222,9 @@ specialized:    Qdrant
   - 2026 Memory Poisoning 연구 (arXiv) — query-only oxidation 가능성.
   - pgvector / sqlite-vec / Qdrant 문서 — embedding projection 옵션.
   - Microsoft Event Sourcing pattern 문서 — write / read 분리.
+  - Cognitive extension(§Cognitive Architecture Extension) 외부 근거 —
+    Generative Agents (Park 2023), MemGPT (Packer 2023), Complementary
+    Learning Systems (McClelland 1995), Global Workspace Theory
+    (PMC8660103), Damasio somatic marker hypothesis (MRC CBU),
+    Metacognition review (PMC3318764), Free Energy Principle
+    (PMC8871280), ACT-R / Soar.

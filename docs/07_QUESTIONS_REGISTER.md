@@ -803,6 +803,119 @@ committed for a later milestone.
 - **History**: 2026-04-26 (second-brain Ideation 노트 Open Question
   Q8 import).
 
+### Q-032 — 12-layer 중 P0.5에 들어갈 layer 우선순위는?
+
+- **Section**: Future Architecture
+- **Status**: decided (2026-04-26, 잠정 출발점).
+- **Top 10 priority**: —
+- **Owner**: Staff Eng + Product
+- **Proposed answer**: ADR-0010 §12-layer cognitive architecture가
+  12 layer를 카탈로그로 식별했다. P0.5에는 다음 6 layer만 도입:
+  (1) Event Memory(이미 P0), (2) Episodic(ADR-0006 `memory_summaries`),
+  (3) Semantic(`memory_items` + `judgment_items`), (4) Judgment Ledger
+  (`judgment_items` 5 tables), (5) Goal / Value 최소형, (6) Working
+  Memory / Workspace 최소형. Reflection 최소형은 운영 layer라기보다
+  flow(turn 종료 시 lesson candidate append)이므로 6 layer에는
+  포함하지 않지만 P0.5 산출물에는 들어간다. 나머지 layer(Attention /
+  Deliberation / Action+Experiment / Procedural library / Forgetting
+  policy 4-5)는 P1.
+- **Decision**: DEC-024 (P0.5 cognitive scope).
+- **Impacted docs**: `docs/JUDGMENT_SYSTEM.md` §Cognitive Architecture
+  Extension §Phase 재구성; ADR-0010 §Decision 6.
+- **Follow-up**: Phase 1 schema PR에서 Goal / Workspace 객체의 schema
+  형태(별 table vs view vs in-memory) 결정. eval harness가 layer
+  gap을 surface하면 P0.5 layer 추가 trigger.
+- **History**: 2026-04-26 ADR-0010 + DEC-024와 함께 출발점 결정
+  (second-brain Ideation 노트 Round 9 + Appendix A.18 import).
+
+### Q-033 — `kind: 'procedure'` skill library 운영 형태는?
+
+- **Section**: Future Architecture
+- **Status**: open (2026-04-26).
+- **Top 10 priority**: —
+- **Owner**: Staff Eng + Product
+- **Proposed answer**: ADR-0010 §Skill / Procedure library가 P1
+  도입을 commit했다. 운영 형태 후보.
+  - Option A — **단일 enum + 기존 `judgment_items`에 row.** 가장
+    단순, schema 변경 없음. 검색은 FTS5 + `kind = 'procedure'`
+    필터.
+  - Option B — **별 schema(`procedures` table) 분리.** procedure는
+    judgment보다 더 엄격한 provenance / scope / preconditions /
+    expected_outcome 필드가 필요할 수 있음. 차원이 다르면 분리.
+  - Option C — **LLM에 inject되는 system prompt block.** Letta
+    core memory blocks 패턴. retrieval 없이 매 turn 자동 inject.
+    procedure 수가 늘면 토큰 비용 폭발.
+  - Hybrid — A로 시작, evidence 누적 시 B로 마이그레이션, 일부
+    high-priority procedure는 C 형태로 inject.
+  현 commitment는 A 출발점. P1에서 evidence 기반 결정.
+- **Decision**: ADR-0010 (Phase 0 commit), Phase 1에서 별 ADR / DEC
+  필요.
+- **Impacted docs**: `docs/JUDGMENT_SYSTEM.md` §Skill / Procedure
+  library; ADR-0010 §Decision 5.
+- **Follow-up**: P1 procedure library PR에서 결정. 사용자 procedure
+  활용 빈도 / hallucination 발생률이 trigger.
+- **History**: 2026-04-26 (second-brain Ideation 노트 Round 9 +
+  Appendix A.19 import).
+
+### Q-034 — Attention scoring formula 가중치는 정적 vs 학습 기반?
+
+- **Section**: Future Architecture
+- **Status**: open (2026-04-26).
+- **Top 10 priority**: —
+- **Owner**: Staff Eng
+- **Proposed answer**: ADR-0010 §Attention scoring이 10개 항목
+  (semantic_relevance / current_scope_match / recency / importance /
+  user_emphasis / decision_impact / risk_level / uncertainty_reduction /
+  superseded_penalty / expired_penalty / low_confidence_penalty)을
+  formula로 spec했다. 가중치 결정 방식 후보.
+  - Option A — **정적 가중치 + 휴리스틱 튜닝.** P1 시작점으로 단순.
+  - Option B — **사용자 행동 기반 학습.** 사용자가 retrieval 결과를
+    explicit feedback / silent ignore로 분리해서 가중치를 점진
+    조정. 단일 사용자 데이터가 적어 RL이 불안정할 수 있음.
+  - Option C — **task-conditioned 가중치.** query classifier(현재
+    7 task) 별로 다른 가중치 set. 단순한 다중 정적 가중치.
+  현 commitment는 P1 implementation 시 A로 시작, eval metric
+  (`source_grounding_rate` / `current_truth_accuracy`)가 부족 evidence를
+  주면 C로 확장. B(학습 기반)는 multi-user / 풍부 telemetry가 생긴
+  P2+에서 검토.
+- **Decision**: —  (P1 Attention scoring PR에서 결정).
+- **Impacted docs**: `docs/JUDGMENT_SYSTEM.md` §Attention scoring;
+  ADR-0010 §Decision 2 (Attention layer P1).
+- **Follow-up**: P1 Attention scoring PR. eval harness가 가중치 후보
+  비교를 자동화.
+- **History**: 2026-04-26 (second-brain Ideation 노트 Round 9 +
+  Appendix A.19 import).
+
+### Q-035 — Cognitive analogy를 사용자에게 어떻게 설명하나(psychology vs engineering terminology)?
+
+- **Section**: Product
+- **Status**: open (2026-04-26).
+- **Top 10 priority**: —
+- **Owner**: Product + project lead
+- **Proposed answer**: ADR-0010이 actwyn judgment system을 cognitive
+  architecture로 framing 확장하면서 _engineering approximation_임을
+  명시했다. 그러나 사용자 communication / docs / onboarding에서 어떤
+  용어를 우선할지는 미정.
+  - Option A — **Engineering 용어 우선** (judgment / source / evidence /
+    typed tool / projection / retrieval). 정확하지만 차별화 narrative
+    약함.
+  - Option B — **Psychology / cognitive 용어 우선** (memory / attention /
+    reflection / metacognition / working memory / goal stack). 사용자
+    framing("AI 판단 기관")과 일치하지만 anthropomorphic 오해 위험.
+  - Option C — **Hybrid**: 내부 spec(본 문서)은 cognitive 용어,
+    사용자-facing UI / docs는 engineering 용어. 마케팅 narrative만
+    cognitive 용어("개인 AI의 판단 기관")로.
+  현 출발점은 C(hybrid). 본 spec은 cognitive 용어로 작성하되 §Disclaimers
+  에 anthropomorphic 한계를 명시. 사용자 product copy / onboarding은
+  engineering 용어로 시작.
+- **Decision**: —  (별 PR에서 결정).
+- **Impacted docs**: 향후 product copy / onboarding doc / `docs/JUDGMENT_SYSTEM.md`
+  §Disclaimers.
+- **Follow-up**: P1 사용자-facing copy PR. 사용자 피드백 / 외부
+  blog / 사용자 ideation에서 cognitive analogy 채택 빈도가 trigger.
+- **History**: 2026-04-26 (second-brain Ideation 노트 Round 9 +
+  Appendix A.19 import; ADR-0010 framing 확장).
+
 ---
 
 ## Deferred

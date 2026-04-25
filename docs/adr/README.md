@@ -70,3 +70,4 @@ Register (`DEC-###`), not here.
 | ADR-0007 | Provider session is a cache; internal session is truth    | accepted |
 | ADR-0008 | Durable Telegram inbound / outbound ledgers               | accepted |
 | ADR-0009 | DB-native, AI-first Judgment System                       | accepted |
+| ADR-0010 | Cognitive extension of Judgment System (goal/workspace/attention/metacognition) | accepted |

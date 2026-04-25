@@ -71,6 +71,8 @@ deployment shape). Everything else is a `DEC-###`.
 | DEC-021 | CJK-safer token estimator rule                                 | accepted |
 | DEC-022 | second-brain GitHub repo는 actwyn judgment의 canonical 아님    | accepted |
 | DEC-023 | `JudgmentItem.kind` v1 도입 enum 범위 (5-6개부터 시작)         | accepted |
+| DEC-024 | P0.5 cognitive scope (Goal / Workspace / Reflection 최소형)    | accepted |
+| DEC-025 | JudgmentItem metacognitive 필드는 P0.5 schema에 optional 도입  | accepted |
 
 Decisions that were previously `D01`..`D05` in the flat log have
 been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
@@ -686,6 +688,81 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
 - Supersedes / superseded by: —
 - Refs: ADR-0009; second-brain Ideation 노트 Round 7 + Appendix
   A.3 (enum 카탈로그); Q-028.
+
+## DEC-024 — P0.5 cognitive scope: Judgment Ledger + Goal / Workspace / Reflection 최소형 + Eval 질문 세트
+
+- Date: 2026-04-26.
+- Status: accepted.
+- Context: ADR-0010이 actwyn Judgment System을 cognitive architecture로
+  framing 확장하면서 12-layer를 식별했다. Phase 1(P0.5) 도입 시
+  12-layer 전체를 한 번에 다루면 scope creep / over-engineering 위험이
+  있다. ADR-0010 Decision 6이 P0.5 / P1 / P2+ 분할을 commitment 수준에서
+  잡았으나, "P0.5에 정확히 어떤 cognitive 자원이 들어가는가"는 별
+  trace 가능한 결정이 필요하다.
+- Decision: P0.5 cognitive scope는 다음 6개 layer로 한정한다.
+  (1) Event Memory(이미 P0), (2) Episodic Memory(`memory_summaries`,
+  ADR-0006), (3) Semantic Memory(`memory_items` + `judgment_items`),
+  (4) Judgment Ledger(`judgment_items` 5 tables), (5) Goal / Value
+  Layer **최소형**(Goal table 또는 view, decision_criteria 별 객체
+  형태는 schema PR에서), (6) Working Memory / Workspace **최소형**
+  (task / goal_stack / active_scope / current_state / relevant_memory /
+  decision_criteria 슬롯만). 추가로 Reflection / Consolidation
+  **최소형**(turn 종료 시 lesson candidate를 `judgment_events`에
+  append, 자동 commit 안 함). 본격 Attention scoring formula /
+  Procedure library / Active experiment loop / Forgetting policy
+  4-5(`archive` / `compress`)는 P1로 분리.
+- Alternatives considered: 12-layer 전체를 P0.5에 도입; Goal /
+  Workspace 없이 ADR-0009 Phase 1 그대로 유지하고 모두 P1로 미룸;
+  Reflection을 P1로 미루고 P0.5는 Goal / Workspace만.
+- Impacted docs: `docs/JUDGMENT_SYSTEM.md` §Cognitive Architecture
+  Extension §Phase 재구성 / §12-layer cognitive architecture; ADR-0010
+  §Decision 6.
+- Risks / mitigations: "최소형"의 정의가 모호 — Phase 1 schema PR에서
+  명시. ADR-0010 Consequences가 schema 결정 항목을 catalog. eval harness
+  결과가 부족 evidence 시 layer 추가 trigger.
+- Review trigger: Phase 1 schema PR에서 6 layer로 부족하다는 use case;
+  사용자가 procedure library / attention scoring을 P0.5로 당겨달라고
+  요청; eval harness가 layer gap을 surface.
+- Supersedes / superseded by: —
+- Refs: ADR-0010 §Decision 6 / §Phase 재구성; second-brain Ideation
+  노트 Round 9; Q-032.
+
+## DEC-025 — JudgmentItem metacognitive 필드 (`would_change_if` / `missing_evidence` / `review_trigger`)는 P0.5 schema에 optional 도입
+
+- Date: 2026-04-26.
+- Status: accepted.
+- Context: ADR-0010 Decision 3이 `JudgmentItem`에 9개 신규 필드(stakes /
+  risk / valence / user_emphasis / confidence_reason / missing_evidence /
+  would_change_if / review_trigger / uncertainty_notes)를 spec했다.
+  P0.5 schema PR에서 모두 required로 도입하면 사용자 / AI 입력 비용이
+  급격히 늘고, 실제 retrieval / explain API에서 필요한지 evidence가
+  아직 없다. 그러나 일부 필드(특히 `would_change_if` / `missing_evidence` /
+  `review_trigger`)는 explain API 품질을 결정하는 핵심 metacognitive
+  자원이다.
+- Decision: 9개 필드 모두 **P0.5 schema에 optional column / nullable
+  field로 도입**한다. 강제(required)는 아님. 단, 다음 3개 필드는
+  **권장 채우기**로 spec한다(필수는 아님): `would_change_if` /
+  `missing_evidence` / `review_trigger`. 나머지 6개(stakes / risk /
+  valence / user_emphasis / confidence_reason / uncertainty_notes)는
+  필요 시에만 채운다. P1+에서 eval harness가 metacognitive 필드 누락이
+  답변 품질을 떨어뜨린다는 evidence를 surface하면 일부를 required로
+  승격(별 ADR / DEC 필요).
+- Alternatives considered: 9개 모두 required로 도입; 9개 모두 단순
+  optional로 도입(권장 표시 없음); P0.5는 metacognitive 필드 전체 미도입,
+  P1로 이월.
+- Impacted docs: `docs/JUDGMENT_SYSTEM.md` §JudgmentItem schema
+  extension / §Metacognition fields; ADR-0010 §Decision 3 / §Risks.
+- Risks / mitigations: 권장 / 필수 경계가 모호 — Phase 1 schema PR에서
+  CHECK constraint 또는 응용 검증으로 명시. assistant_generated /
+  inferred judgment에서 metacognitive 필드를 hallucinate할 위험 — explain
+  API에서 source-grounding 검증, eval harness가 자동 체크.
+- Review trigger: eval harness가 metacognitive 필드 누락이 explain
+  API / would_change_if 검증 / scheduled review 품질을 떨어뜨린다는
+  evidence를 surface; 사용자가 명시적으로 강제(required) 요청; metacognitive
+  hallucination incident 발생.
+- Supersedes / superseded by: —
+- Refs: ADR-0010 §Decision 3 / §Metacognition fields; second-brain
+  Ideation 노트 Round 9 + Appendix A.19; Q-032.
 
 ---
 

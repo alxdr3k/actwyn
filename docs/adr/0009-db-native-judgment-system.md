@@ -175,6 +175,9 @@ single source로 관리한다.
 - HLD §6.5 (`memory_items.status` state machine).
 - ADR-0003 (SQLite is canonical), ADR-0004 (S3 archive only),
   ADR-0006 (explicit memory promotion), ADR-0008 (durable ledgers).
+- ADR-0010 (cognitive extension of Judgment System) — **확장**.
+  Goal / Workspace / Attention / Metacognition / Forgetting layer를
+  추가하며 본 ADR을 supersede하지 않는다.
 - DEC-006 (`/forget` 명령 set), DEC-007 (correction via supersede),
   DEC-022 (second-brain repo는 canonical 아님), DEC-023 (`JudgmentItem.kind`
   v1 enum 범위).
