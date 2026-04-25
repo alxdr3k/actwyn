@@ -81,6 +81,8 @@ export interface WorkerConfig {
   readonly poll_interval_ms?: number | undefined;
   readonly notifications?: {
     readonly chunk_size?: number | undefined;
+    /** Max delivery attempts per notification chunk before giving up. Default: 3. */
+    readonly max_attempts_per_chunk?: number | undefined;
   } | undefined;
   /** Optional S3 sync config. When present, storage_sync jobs run the upload/delete pass. */
   readonly sync?: SyncConfig | undefined;
@@ -1060,10 +1062,12 @@ async function runStorageSyncJob(deps: WorkerDeps, job: ClaimedJob): Promise<Run
 
   let uploadResult: { uploaded: number; failed: number; local_missing: number };
   let deleteResult: { deleted: number; delete_failed: number; local_only_deleted: number };
-  // Review Medium 12: re-pend failed rows under max_attempts so the upload
-  // pass that follows can retry them. Without this call, a row that hit a
-  // transient S3 error never comes back from `failed`.
-  let schedulerResult: { repended: number; exhausted: number } = { repended: 0, exhausted: 0 };
+  let schedulerResult: { repended: number; exhausted: number; delete_repended: number; delete_exhausted: number } = {
+    repended: 0,
+    exhausted: 0,
+    delete_repended: 0,
+    delete_exhausted: 0,
+  };
   try {
     schedulerResult = runRetryScheduler(syncDeps);
     uploadResult = await runUploadPass(syncDeps);
@@ -1090,7 +1094,36 @@ async function runStorageSyncJob(deps: WorkerDeps, job: ClaimedJob): Promise<Run
     local_only_deleted: deleteResult.local_only_deleted,
     retry_scheduler_repended: schedulerResult.repended,
     retry_scheduler_exhausted: schedulerResult.exhausted,
+    retry_scheduler_delete_repended: schedulerResult.delete_repended,
+    retry_scheduler_delete_exhausted: schedulerResult.delete_exhausted,
   });
+
+  // Blocker 5: if retryable failures remain after this pass, mark the job
+  // failed with safe_retry=true so the queue re-runs it. This ensures failed
+  // storage rows are eventually retried without relying on an external trigger.
+  // The owning provider_run is never touched — its success stands independently.
+  const retryableFailures =
+    uploadResult.failed + uploadResult.local_missing + deleteResult.delete_failed;
+  if (retryableFailures > 0) {
+    deps.db
+      .prepare<unknown, [string, string]>(
+        `UPDATE jobs
+         SET status = 'failed',
+             finished_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+             result_json = ?,
+             safe_retry = 1
+         WHERE id = ? AND status = 'running'`,
+      )
+      .run(result_json, job.id);
+    deps.events.warn("queue.job.storage_sync.partial_failure", {
+      job_id: job.id,
+      upload_failed: uploadResult.failed,
+      local_missing: uploadResult.local_missing,
+      delete_failed: deleteResult.delete_failed,
+    });
+    return { job_id: job.id, terminal: "failed", turn_id: null, provider_run_id: "" };
+  }
+
   deps.db
     .prepare<unknown, [string, string]>(
       `UPDATE jobs
@@ -1587,13 +1620,17 @@ async function dispatchSystemCommand(
     case "/forget_session": {
       if (!job.session_id) return "활성 세션이 없습니다.";
       const result = forgetSession(deps.db, job.session_id);
-      return result.affected > 0 ? `세션의 모든 아티팩트를 삭제 예약했습니다.` : "삭제할 아티팩트가 없습니다.";
+      return result.affected > 0
+        ? `세션 memory 항목을 revoked 처리했습니다. 저장된 artifact 파일은 삭제하지 않았습니다. 파일 삭제가 필요하면 /forget_artifact <id>를 사용하세요.`
+        : "비활성화할 memory 항목이 없습니다.";
     }
 
     case "/forget_last": {
       if (!job.session_id) return "활성 세션이 없습니다.";
       const result = forgetLast(deps.db, job.session_id);
-      return result.affected > 0 ? `마지막 아티팩트를 삭제 예약했습니다.` : "삭제할 아티팩트가 없습니다.";
+      return result.affected > 0
+        ? `마지막 기억 링크를 해제했습니다. 파일 자체 삭제가 필요하면 /forget_artifact <id>를 사용하세요.`
+        : "해제할 기억 링크 또는 memory 항목이 없습니다.";
     }
 
     case "/correct": {
@@ -1702,7 +1739,7 @@ async function runNotificationRetryJob(deps: WorkerDeps, job: ClaimedJob): Promi
   // attempt_count < max_attempts_per_chunk. If every non-terminal chunk is
   // exhausted (or all chunks are `sent`), stop — otherwise the queue fills
   // up with an infinite chain of notification_retry jobs (review Blocker 3).
-  const MAX_ATTEMPTS_PER_CHUNK = 3;
+  const maxAttemptsPerChunk = deps.config.notifications?.max_attempts_per_chunk ?? 3;
   const retryableRow = deps.db
     .prepare<{ n: number }, [string, number]>(
       `SELECT COUNT(*) AS n
@@ -1711,18 +1748,11 @@ async function runNotificationRetryJob(deps: WorkerDeps, job: ClaimedJob): Promi
          AND status IN ('pending', 'failed')
          AND attempt_count < ?`,
     )
-    .get(req.notification_id, MAX_ATTEMPTS_PER_CHUNK);
+    .get(req.notification_id, maxAttemptsPerChunk);
   const retryable = retryableRow?.n ?? 0;
 
-  // Reviewer follow-up: a chunk that just hit the per-chunk attempt cap on a
-  // retryable error is left as `pending` with `attempt_count == max` because
-  // sendNotification's markChunkPending does not check the cap (the cap is
-  // enforced on the NEXT pass via markChunkFailed). When we decide to stop
-  // scheduling further passes (retryable === 0), there is no next pass —
-  // so we must finalize stranded chunks here, otherwise they sit pending
-  // forever and the parent rollUp never reaches `failed`.
   if (retryable === 0 && rollUpStatus !== "sent") {
-    const finalized = terminalizeExhaustedChunks(deps.db, req.notification_id, MAX_ATTEMPTS_PER_CHUNK);
+    const finalized = terminalizeExhaustedChunks(deps.db, req.notification_id, maxAttemptsPerChunk);
     if (finalized > 0) {
       // Re-derive parent status now that exhausted chunks are `failed`.
       rollUpStatus = rollUpParent(deps.db, req.notification_id);

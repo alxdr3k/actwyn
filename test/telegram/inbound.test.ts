@@ -64,7 +64,8 @@ function textMessageUpdate(update_id: number, text: string, userId = AUTHORIZED_
   };
 }
 
-function photoUpdate(update_id: number, claimed_size_bytes?: number): TelegramUpdate {
+function photoUpdate(update_id: number, opts: { claimed_size_bytes?: number; caption?: string } | number = {}): TelegramUpdate {
+  const o: { claimed_size_bytes?: number; caption?: string } = typeof opts === "number" ? { claimed_size_bytes: opts } : opts;
   return {
     update_id,
     message: {
@@ -73,11 +74,12 @@ function photoUpdate(update_id: number, claimed_size_bytes?: number): TelegramUp
       from: { id: AUTHORIZED_USER_ID },
       chat: { id: 100, type: "private" },
       photo: [
-        claimed_size_bytes !== undefined
-          ? { file_id: `photo-${update_id}-lg`, file_unique_id: `u${update_id}`, width: 1920, height: 1080, file_size: claimed_size_bytes }
+        o.claimed_size_bytes !== undefined
+          ? { file_id: `photo-${update_id}-lg`, file_unique_id: `u${update_id}`, width: 1920, height: 1080, file_size: o.claimed_size_bytes }
           : { file_id: `photo-${update_id}-lg`, file_unique_id: `u${update_id}`, width: 1920, height: 1080 },
         { file_id: `photo-${update_id}-sm`, file_unique_id: `v${update_id}`, width: 90, height: 90 },
       ],
+      ...(o.caption !== undefined ? { caption: o.caption } : {}),
     },
   };
 }
@@ -183,9 +185,10 @@ describe("classifyUpdate — pure", () => {
     }
   });
 
-  test("unknown slash looks like text (not a command)", () => {
+  test("unknown slash → unknown_command (not forwarded to provider as text)", () => {
     const c = classifyUpdate(textMessageUpdate(6, "/nothing here"), opts);
-    expect(c.kind).toBe("text");
+    expect(c.kind).toBe("unknown_command");
+    if (c.kind === "unknown_command") expect(c.command).toBe("/nothing");
   });
 
   test("unsupported update (no message, no from) → skip/unsupported_type", () => {
@@ -479,6 +482,105 @@ describe("processBatch — mixed 50-update stub-style batch", () => {
     const skipped = r.processed.filter((p) => p.telegram_status === "skipped").length;
     expect(enqueued + skipped).toBe(50);
     expect(countJobs()).toBe(enqueued);
+  });
+});
+
+// ---------------------------------------------------------------
+// TEST-ATTACH-CAPTION-SAVE: photo + save-intent caption → long_term
+// ---------------------------------------------------------------
+
+describe("attachment + save-intent caption — retention_class=long_term (Blocker 2)", () => {
+  test("photo with caption '저장해줘' gets retention_class=long_term", () => {
+    processBatch(deps, [photoUpdate(300, { caption: "이 사진 저장해줘" })]);
+    const row = db
+      .prepare<{ retention_class: string }>(
+        "SELECT retention_class FROM storage_objects LIMIT 1",
+      )
+      .get()!;
+    expect(row.retention_class).toBe("long_term");
+  });
+
+  test("photo without save-intent caption gets retention_class=session", () => {
+    processBatch(deps, [photoUpdate(301, { caption: "그냥 사진이야" })]);
+    const row = db
+      .prepare<{ retention_class: string }>(
+        "SELECT retention_class FROM storage_objects LIMIT 1",
+      )
+      .get()!;
+    expect(row.retention_class).toBe("session");
+  });
+
+  test("photo with no caption gets retention_class=session", () => {
+    processBatch(deps, [photoUpdate(302)]);
+    const row = db
+      .prepare<{ retention_class: string }>(
+        "SELECT retention_class FROM storage_objects LIMIT 1",
+      )
+      .get()!;
+    expect(row.retention_class).toBe("session");
+  });
+});
+
+// ---------------------------------------------------------------
+// TEST-TEL-UNKNOWN-SLASH: unknown /foobar → instant_response, no job
+// ---------------------------------------------------------------
+
+describe("unknown slash command (Medium 11)", () => {
+  test("/foobar produces skipped status, instant_response, and no job", () => {
+    const result = processBatch(deps, [textMessageUpdate(400, "/foobar arg1")]);
+    expect(result.processed).toHaveLength(1);
+    const outcome = result.processed[0]!;
+    expect(outcome.telegram_status).toBe("skipped");
+    expect(outcome.job_id).toBeNull();
+    expect(outcome.instant_response).toBeDefined();
+    expect(outcome.instant_response!.text).toContain("/foobar");
+    expect(outcome.instant_response!.text).toContain("/help");
+    expect(countJobs()).toBe(0);
+  });
+
+  test("known command /help does not produce instant_response via unknown path", () => {
+    const result = processBatch(deps, [textMessageUpdate(401, "/help")]);
+    expect(result.processed[0]!.telegram_status).toBe("enqueued");
+    expect(result.processed[0]!.instant_response).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------
+// TEST-CANCEL-CONTROL-PLANE: /cancel sends instant_response without queuing
+// ---------------------------------------------------------------
+
+describe("/cancel control-plane (Blocker 1)", () => {
+  test("/cancel with no running job → instant_response 'not_found', no job created", () => {
+    const result = processBatch(deps, [textMessageUpdate(500, "/cancel")]);
+    expect(result.processed).toHaveLength(1);
+    const outcome = result.processed[0]!;
+    expect(outcome.telegram_status).toBe("enqueued");
+    expect(outcome.job_id).toBeNull();
+    expect(outcome.instant_response).toBeDefined();
+    expect(outcome.instant_response!.text).toContain("취소");
+    expect(countJobs()).toBe(0);
+  });
+
+  test("/cancel with shared cancel_handles calls abort on matching running job", () => {
+    const cancelHandles = new Map<string, AbortController>();
+    const ac = new AbortController();
+    // Pre-seed session and running job so cancelJob can find it.
+    db.prepare(
+      "INSERT OR IGNORE INTO sessions(id, chat_id, user_id) VALUES('sess-c', '100', ?)",
+    ).run(String(AUTHORIZED_USER_ID));
+    db.prepare(
+      `INSERT INTO jobs(id, status, job_type, session_id, user_id, chat_id, request_json, idempotency_key, provider)
+       VALUES('j-running', 'running', 'provider_run', 'sess-c', '${AUTHORIZED_USER_ID}', '100', '{}', 'ikey-r', 'fake')`,
+    ).run();
+    cancelHandles.set("j-running", ac);
+
+    const depsWithHandles: InboundDeps = { ...buildDeps(db), cancel_handles: cancelHandles };
+    const result = processBatch(depsWithHandles, [textMessageUpdate(501, "/cancel")]);
+
+    expect(ac.signal.aborted).toBe(true);
+    expect(result.processed[0]!.instant_response).toBeDefined();
+    const jobRow = db.prepare<{ status: string }>("SELECT status FROM jobs WHERE id = 'j-running'").get()!;
+    expect(jobRow.status).toBe("running");
   });
 });
 

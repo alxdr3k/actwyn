@@ -177,6 +177,25 @@ export function runStartupRecovery(
     }
   }
 
+  // Storage recovery (High Priority 8): if any storage_objects rows are in a
+  // retryable failure state, enqueue a storage_sync job so they are picked up
+  // without waiting for the next user-triggered sync. Without this, failed rows
+  // are only retried when a new storage_sync job happens to be created.
+  const failedStorageCount = db
+    .prepare<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM storage_objects
+       WHERE status IN ('failed', 'delete_failed')`,
+    )
+    .get()?.n ?? 0;
+  if (failedStorageCount > 0) {
+    db.prepare<unknown, [string, string]>(
+      `INSERT INTO jobs(id, status, job_type, request_json, idempotency_key)
+       VALUES(?, 'queued', 'storage_sync', '{}', ?)
+       ON CONFLICT(job_type, idempotency_key) DO NOTHING`,
+    ).run(crypto.randomUUID(), "startup-storage-recovery");
+    opts.events?.info("startup.recovery.storage_sync_enqueued", { failed_rows: failedStorageCount });
+  }
+
   opts.events?.info("startup.recovery.done", {
     interrupted: interrupted.length,
     requeued: requeued.length,

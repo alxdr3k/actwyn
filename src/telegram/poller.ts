@@ -52,6 +52,21 @@ export async function pollOnce(deps: PollerDeps): Promise<BatchResult> {
     });
   }
 
+  // Control-plane instant responses (e.g. /cancel handled without a job):
+  // send notifications outside the inbound txn (zero-network invariant).
+  if (deps.outbound) {
+    for (const outcome of result.processed) {
+      if (!outcome.instant_response) continue;
+      const { chat_id, text } = outcome.instant_response;
+      deps.outbound.send({ chat_id, text }).catch((e) => {
+        deps.events.warn("telegram.instant_response.send_error", {
+          chat_id,
+          error_message: (e as Error).message,
+        });
+      });
+    }
+  }
+
   // Bootstrap whoami delivery (DEC-009): send user_id/chat_id to the sender
   // outside the inbound txn (zero-network invariant in inbound.ts §4.2).
   if (deps.outbound && deps.inbound.config.bootstrap_whoami) {

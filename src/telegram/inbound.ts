@@ -31,6 +31,7 @@ import {
 import type { TelegramMessage, TelegramUpdate } from "~/telegram/types.ts";
 import { parseSaveIntent } from "~/commands/save.ts";
 import { parseCorrection } from "~/commands/correct.ts";
+import { cancelJob } from "~/commands/cancel.ts";
 
 // ---------------------------------------------------------------
 // Classification (pure)
@@ -45,8 +46,9 @@ export type SkipReason =
 
 export type Classification =
   | { kind: "skip"; reason: SkipReason }
-  | { kind: "text"; text: string; has_attachments: boolean }
+  | { kind: "text"; text: string; has_attachments: boolean; explicit_save_intent?: boolean }
   | { kind: "command"; command: string; args: string; has_attachments: boolean }
+  | { kind: "unknown_command"; command: string }
   | { kind: "whoami_bootstrap" }
   | { kind: "nl_correction"; old_hint: string; new_value: string; original_text: string };
 
@@ -92,6 +94,10 @@ export function classifyUpdate(
 
   const cmd = parseCommand(text);
   if (cmd) {
+    if ("unknown" in cmd) {
+      // Unknown slash command — do not forward to provider.
+      return { kind: "unknown_command", command: cmd.unknown };
+    }
     return {
       kind: "command",
       command: cmd.command,
@@ -101,8 +107,12 @@ export function classifyUpdate(
   }
 
   // Natural-language save intent (ADR-0006): "save this", "저장해", etc.
-  const saveIntent = hasAttachments ? null : parseSaveIntent(text);
-  if (saveIntent) {
+  // Parse even when attachments are present — a caption like "이 사진 저장해줘"
+  // alongside a photo is the primary real-world case for long_term retention.
+  // When hasAttachments, the save intent is carried through request_payload so
+  // the inbound writer can set retention_class='long_term' at insert time.
+  const saveIntent = parseSaveIntent(text);
+  if (saveIntent && !hasAttachments) {
     return {
       kind: "command",
       command: "/save_last_attachment",
@@ -123,7 +133,12 @@ export function classifyUpdate(
   }
 
   if (text.length > 0 || hasAttachments) {
-    return { kind: "text", text, has_attachments: hasAttachments };
+    return {
+      kind: "text",
+      text,
+      has_attachments: hasAttachments,
+      ...(hasAttachments && saveIntent ? { explicit_save_intent: true } : {}),
+    };
   }
 
   return { kind: "skip", reason: "unsupported_type" };
@@ -134,30 +149,35 @@ function isWhoamiText(msg: TelegramMessage): boolean {
   return t.startsWith("/whoami");
 }
 
-function parseCommand(text: string): { command: string; args: string } | null {
+const KNOWN_COMMANDS = new Set<string>([
+  "/new",
+  "/chat",
+  "/help",
+  "/status",
+  "/cancel",
+  "/summary",
+  "/end",
+  "/provider",
+  "/doctor",
+  "/whoami",
+  "/save_last_attachment",
+  "/forget_last",
+  "/forget_session",
+  "/forget_artifact",
+  "/forget_memory",
+  "/correct",
+]);
+
+function parseCommand(text: string): { command: string; args: string } | { unknown: string } | null {
   if (!text.startsWith("/")) return null;
   const head = text.split(/\s+/, 1)[0]!;
   // Strip optional `@botname` suffix.
   const command = head.split("@", 1)[0]!;
-  const KNOWN = new Set<string>([
-    "/new",
-    "/chat",
-    "/help",
-    "/status",
-    "/cancel",
-    "/summary",
-    "/end",
-    "/provider",
-    "/doctor",
-    "/whoami",
-    "/save_last_attachment",
-    "/forget_last",
-    "/forget_session",
-    "/forget_artifact",
-    "/forget_memory",
-    "/correct",
-  ]);
-  if (!KNOWN.has(command)) return null;
+  if (!KNOWN_COMMANDS.has(command)) {
+    // Unknown slash command — return a sentinel so the caller can
+    // send a help response without forwarding to the provider.
+    return { unknown: command };
+  }
   const args = text.slice(head.length).trim();
   return { command, args };
 }
@@ -179,6 +199,14 @@ export interface InboundDeps {
   readonly config: InboundConfig;
   readonly newId: () => string;
   readonly now: () => Date;
+  /**
+   * Shared AbortController registry from the worker.
+   * When present, /cancel is handled immediately in the inbound path
+   * (control-plane semantics) rather than queued as a regular job.
+   * This lets /cancel abort a running provider_run without waiting for
+   * the queue to drain.
+   */
+  readonly cancel_handles?: Map<string, AbortController> | undefined;
 }
 
 export interface ProcessedOutcome {
@@ -187,6 +215,13 @@ export interface ProcessedOutcome {
   readonly skip_reason: SkipReason | null;
   readonly job_id: string | null;
   readonly storage_object_ids: readonly string[];
+  /**
+   * Set when /cancel is handled immediately in the inbound path
+   * (control-plane). The poller sends this notification outside the
+   * DB txn so the zero-network-IO invariant in classifyAndCommit is
+   * preserved.
+   */
+  readonly instant_response?: { chat_id: string; text: string } | undefined;
 }
 
 export interface BatchResult {
@@ -315,6 +350,74 @@ export function classifyAndCommit(
 
   const session = ensureActiveSession(deps, { chat_id, user_id });
 
+  // Control-plane: /cancel is handled immediately without going through the
+  // job queue. This lets it abort a running provider_run that is blocking the
+  // single-concurrency worker — a queued cancel job would be processed only
+  // after the provider_run finishes, defeating its purpose.
+  if (classification.kind === "command" && classification.command === "/cancel") {
+    const outcome = cancelJob(deps.db, {
+      session_id: session.id,
+      deps: { running_cancel_handles: deps.cancel_handles },
+    });
+    let responseText: string;
+    switch (outcome.kind) {
+      case "cancelled_queued":
+        responseText = `취소됐습니다 (job_id=${outcome.job_id}).`;
+        break;
+      case "cancel_signalled":
+        responseText = `실행 중인 작업에 취소 신호를 보냈습니다 (job_id=${outcome.job_id}).`;
+        break;
+      case "cancel_unavailable":
+        responseText = `실행 중인 작업을 이 프로세스에서 취소할 수 없습니다 (job_id=${outcome.job_id}). /status 로 상태를 확인하세요.`;
+        break;
+      case "not_found":
+        responseText = "취소할 활성 작업이 없습니다.";
+        break;
+      case "terminal":
+        responseText = `작업은 이미 종료됐습니다 (status=${outcome.status}).`;
+        break;
+    }
+    deps.db
+      .prepare<unknown, [number]>(
+        `UPDATE telegram_updates
+         SET status = 'enqueued', processed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+         WHERE update_id = ?`,
+      )
+      .run(update.update_id);
+    return {
+      update_id: update.update_id,
+      telegram_status: "enqueued",
+      skip_reason: null,
+      job_id: null,
+      storage_object_ids: [],
+      instant_response: { chat_id, text: responseText },
+    };
+  }
+
+  // Unknown slash command: send a help hint and skip job creation.
+  // A typo like "/foobar" must not be forwarded to the provider.
+  if (classification.kind === "unknown_command") {
+    deps.db
+      .prepare<unknown, [number]>(
+        `UPDATE telegram_updates
+         SET status = 'skipped', skip_reason = 'unsupported_type',
+             processed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+         WHERE update_id = ?`,
+      )
+      .run(update.update_id);
+    return {
+      update_id: update.update_id,
+      telegram_status: "skipped",
+      skip_reason: null,
+      job_id: null,
+      storage_object_ids: [],
+      instant_response: {
+        chat_id,
+        text: `알 수 없는 명령입니다: ${classification.command}. /help를 확인하세요.`,
+      },
+    };
+  }
+
   // NL correction: try to resolve old_hint → memory item ID (DEC-007 / US-09).
   // Falls back to regular text if no matching memory item is found.
   let resolvedClassification: typeof classification = classification;
@@ -398,6 +501,13 @@ export function classifyAndCommit(
     if (existing) effectiveJobId = existing.id;
   }
 
+  // explicit_save_intent: caption alongside attachment said "저장해줘" etc.
+  // Promote all attachments in this message to long_term at insert time so
+  // they are eligible for S3 sync immediately after capture.
+  const explicitSaveIntent =
+    resolvedClassification.kind === "text" &&
+    (resolvedClassification as { explicit_save_intent?: boolean }).explicit_save_intent === true;
+
   // Attachments: metadata-only insert, NO network I/O.
   const storageIds: string[] = [];
   if (requestPayload.has_attachments) {
@@ -415,6 +525,8 @@ export function classifyAndCommit(
         bucket: deps.config.s3_bucket,
         now: deps.now(),
       });
+      // Override retention_class when caption expressed explicit save intent.
+      const retentionClass = explicitSaveIntent ? "long_term" : row.retention_class;
       deps.db
         .prepare<
           unknown,
@@ -454,7 +566,7 @@ export function classifyAndCommit(
           effectiveJobId,
           row.source_external_id,
           row.artifact_type,
-          row.retention_class,
+          retentionClass,
           row.visibility,
           row.capture_status,
           row.status,

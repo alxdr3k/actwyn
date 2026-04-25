@@ -130,6 +130,11 @@ async function main(): Promise<void> {
   const localObjectsPath = process.env.ACTWYN_OBJECTS_PATH ?? "/var/lib/actwyn/objects";
   const memoryBasePath = process.env.ACTWYN_MEMORY_PATH ?? "/var/lib/actwyn/memory";
 
+  // Shared registry: worker populates this before each provider_run; the
+  // inbound path reads it to abort a running job immediately on /cancel
+  // without waiting for the queue to drain.
+  const runningCancelHandles = new Map<string, AbortController>();
+
   const inbound = {
     db,
     redactor,
@@ -141,6 +146,7 @@ async function main(): Promise<void> {
     },
     newId: () => crypto.randomUUID(),
     now: () => new Date(),
+    cancel_handles: runningCancelHandles,
   } as const;
 
   const doctorDeps = {
@@ -238,7 +244,7 @@ async function main(): Promise<void> {
         newId: () => crypto.randomUUID(),
         now: () => new Date(),
         doctor: doctorDeps,
-        runningCancelHandles: new Map(),
+        runningCancelHandles,
         config: {
           capture: {
             max_download_size_bytes: 20 * 1024 * 1024,

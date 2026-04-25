@@ -793,3 +793,134 @@ describe("auto-trigger summary — enqueues summary_generation after threshold",
     expect(sumJob!.status).toBe("queued");
   });
 });
+
+// ---------------------------------------------------------------
+// TEST-FORGET-UX: /forget_last and /forget_session response phrasing (Blocker 3)
+// ---------------------------------------------------------------
+
+describe("forget UX — response phrasing (Blocker 3)", () => {
+  function seedForgetJob(id: string, ikey: string, command: "/forget_last" | "/forget_session"): void {
+    db.prepare<unknown, [string, string, string, string]>(
+      `INSERT INTO jobs
+         (id, status, job_type, session_id, user_id, chat_id, request_json, idempotency_key, provider)
+       VALUES(?, 'queued', 'provider_run', ?, 'user-1', 'chat-1', ?, ?, 'fake')`,
+    ).run(
+      id,
+      "sess-1",
+      JSON.stringify({ command, args: "", text: "", has_attachments: false }),
+      ikey,
+    );
+  }
+
+  test("/forget_last response does not say '삭제 예약' and says '기억 링크'", async () => {
+    seedForgetJob("j-fl", "ikey-fl", "/forget_last");
+    await runWorkerOnce(deps());
+    const turn = db
+      .prepare<{ content_redacted: string }>(
+        "SELECT content_redacted FROM turns WHERE job_id = 'j-fl'",
+      )
+      .get();
+    expect(turn).not.toBeNull();
+    expect(turn!.content_redacted).not.toContain("삭제 예약");
+    expect(turn!.content_redacted).toContain("기억 링크");
+  });
+
+  test("/forget_session response does not say '삭제 예약' and clarifies files are kept", async () => {
+    db.prepare(
+      `INSERT INTO memory_items(id, session_id, item_type, content, provenance, confidence, status, source_turn_ids)
+       VALUES('mi-test', 'sess-1', 'fact', 'test memory', 'user_stated', 0.9, 'active', '[]')`,
+    ).run();
+    seedForgetJob("j-fs", "ikey-fs", "/forget_session");
+    await runWorkerOnce(deps());
+    const turn = db
+      .prepare<{ content_redacted: string }>(
+        "SELECT content_redacted FROM turns WHERE job_id = 'j-fs'",
+      )
+      .get();
+    expect(turn).not.toBeNull();
+    expect(turn!.content_redacted).not.toContain("삭제 예약");
+    expect(turn!.content_redacted).toContain("revoked");
+    expect(turn!.content_redacted).toContain("파일은 삭제하지 않았습니다");
+  });
+});
+
+// ---------------------------------------------------------------
+// TEST-STO-JOB-STATUS: storage_sync job fails when retryable rows remain (Blocker 5)
+// ---------------------------------------------------------------
+
+describe("storage_sync job failure semantics (Blocker 5)", () => {
+  test("storage_sync job status is not succeeded when upload fails on retryable error", async () => {
+    const localDir = join(workdir, "objects-b5");
+    mkdirSync(localDir, { recursive: true });
+    const bytes = new Uint8Array([11]);
+    const sha = await sha256HexUint8(bytes);
+    const key = `objects/2026/04/23/so-b5/test.bin`;
+    writeFileSync(join(localDir, "so-b5"), bytes);
+
+    db.prepare<unknown, [string, string, string]>(
+      `INSERT INTO storage_objects
+         (id, storage_backend, bucket, storage_key, source_channel, source_message_id,
+          source_job_id, artifact_type, retention_class, capture_status, status, sha256)
+       VALUES(?, 's3', 'test-bucket', ?, 'system', '0', NULL, 'user_upload', 'long_term', 'captured', 'pending', ?)`,
+    ).run("so-b5", key, sha);
+
+    db.prepare<unknown, [string, string, string]>(
+      `INSERT INTO jobs(id, status, job_type, request_json, idempotency_key)
+       VALUES(?, 'queued', 'storage_sync', ?, ?)`,
+    ).run("j-b5", JSON.stringify({ storage_object_id: "so-b5" }), "sync:so-b5");
+
+    const transport = new StubS3Transport(
+      new Map([[`test-bucket/${key}`, "fail_retryable"]]),
+    );
+    const syncDeps = deps({
+      s3: transport,
+      config: {
+        capture: { max_download_size_bytes: 20 * 1024 * 1024, local_path: (id) => join(localDir, id) },
+        sync: { max_attempts: 3, local_path: (id) => join(localDir, id) },
+      },
+    });
+    await runWorkerOnce(syncDeps);
+
+    const job = db
+      .prepare<{ status: string }>("SELECT status FROM jobs WHERE id = 'j-b5'")
+      .get()!;
+    // Retryable upload failure → storage_sync job must NOT be 'succeeded'.
+    expect(job.status).not.toBe("succeeded");
+  });
+
+  test("storage_sync job succeeds when all uploads complete without error", async () => {
+    const localDir = join(workdir, "objects-b5ok");
+    mkdirSync(localDir, { recursive: true });
+    const bytes = new Uint8Array([12]);
+    const sha = await sha256HexUint8(bytes);
+    const key = `objects/2026/04/23/so-b5ok/test.bin`;
+    writeFileSync(join(localDir, "so-b5ok"), bytes);
+
+    db.prepare<unknown, [string, string, string]>(
+      `INSERT INTO storage_objects
+         (id, storage_backend, bucket, storage_key, source_channel, source_message_id,
+          source_job_id, artifact_type, retention_class, capture_status, status, sha256)
+       VALUES(?, 's3', 'test-bucket', ?, 'system', '0', NULL, 'user_upload', 'long_term', 'captured', 'pending', ?)`,
+    ).run("so-b5ok", key, sha);
+
+    db.prepare<unknown, [string, string, string]>(
+      `INSERT INTO jobs(id, status, job_type, request_json, idempotency_key)
+       VALUES(?, 'queued', 'storage_sync', ?, ?)`,
+    ).run("j-b5ok", JSON.stringify({ storage_object_id: "so-b5ok" }), "sync:so-b5ok");
+
+    const transport = new StubS3Transport();
+    const syncDeps = deps({
+      s3: transport,
+      config: {
+        capture: { max_download_size_bytes: 20 * 1024 * 1024, local_path: (id) => join(localDir, id) },
+        sync: { max_attempts: 3, local_path: (id) => join(localDir, id) },
+      },
+    });
+    await runWorkerOnce(syncDeps);
+
+    const job = db
+      .prepare<{ status: string }>("SELECT status FROM jobs WHERE id = 'j-b5ok'")
+      .get()!;
+    expect(job.status).toBe("succeeded");
+  });
+});

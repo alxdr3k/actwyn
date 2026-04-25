@@ -211,25 +211,21 @@ function markUploadFailed(deps: SyncDeps, id: string, detail: string): void {
 // Uses a per-row counter embedded in error_json.attempts.
 // ---------------------------------------------------------------
 
-export function runRetryScheduler(deps: SyncDeps): { repended: number; exhausted: number } {
-  // Bump each failed row back to pending ONCE per scheduler tick.
-  // Callers typically call this every N seconds; the next sync pass
-  // then attempts them. Exhaustion policy is applied before the
-  // flip: if attempts >= max_attempts, leave it failed.
-  const rows = deps.db
+export function runRetryScheduler(deps: SyncDeps): { repended: number; exhausted: number; delete_repended: number; delete_exhausted: number } {
+  // Upload retry: failed → pending for rows under max_attempts.
+  const uploadRows = deps.db
     .prepare<{ id: string; error_json: string | null }, []>(
       `SELECT id, error_json FROM storage_objects WHERE status = 'failed' AND capture_status = 'captured'`,
     )
     .all();
   let repended = 0;
   let exhausted = 0;
-  for (const r of rows) {
+  for (const r of uploadRows) {
     const attempts = parseAttempts(r.error_json);
     if (attempts >= deps.config.max_attempts) {
       exhausted += 1;
       continue;
     }
-    // Don't mutate the attempts counter here; markUploadFailed owns it.
     deps.db.prepare<unknown, [string]>(
       `UPDATE storage_objects
        SET status = 'pending'
@@ -237,7 +233,32 @@ export function runRetryScheduler(deps: SyncDeps): { repended: number; exhausted
     ).run(r.id);
     repended += 1;
   }
-  return { repended, exhausted };
+
+  // Delete retry: delete_failed → deletion_requested for rows under max_attempts.
+  // Without this path, a transient S3 DELETE failure leaves the object permanently
+  // in delete_failed even though the user said "forget it / delete it".
+  const deleteRows = deps.db
+    .prepare<{ id: string; error_json: string | null }, []>(
+      `SELECT id, error_json FROM storage_objects WHERE status = 'delete_failed'`,
+    )
+    .all();
+  let delete_repended = 0;
+  let delete_exhausted = 0;
+  for (const r of deleteRows) {
+    const attempts = parseAttempts(r.error_json);
+    if (attempts >= deps.config.max_attempts) {
+      delete_exhausted += 1;
+      continue;
+    }
+    deps.db.prepare<unknown, [string]>(
+      `UPDATE storage_objects
+       SET status = 'deletion_requested'
+       WHERE id = ? AND status = 'delete_failed'`,
+    ).run(r.id);
+    delete_repended += 1;
+  }
+
+  return { repended, exhausted, delete_repended, delete_exhausted };
 }
 
 function parseAttempts(error_json: string | null): number {
@@ -308,9 +329,18 @@ export async function runDeletePass(deps: SyncDeps): Promise<DeletePassResult> {
       ).run(row.id);
       deleted += 1;
     } catch (e) {
+      // Track delete attempt count in error_json so the retry scheduler can
+      // enforce max_attempts (same pattern as upload failures).
+      const existing = deps.db
+        .prepare<{ error_json: string | null }, [string]>(
+          "SELECT error_json FROM storage_objects WHERE id = ?",
+        )
+        .get(row.id);
+      const attempts = parseAttempts(existing?.error_json ?? null) + 1;
       const err = JSON.stringify({
         reason: (e as Error).message,
         ts: new Date().toISOString(),
+        attempts,
       });
       deps.db.prepare<unknown, [string, string]>(
         `UPDATE storage_objects
@@ -318,6 +348,11 @@ export async function runDeletePass(deps: SyncDeps): Promise<DeletePassResult> {
              error_json = ?
          WHERE id = ? AND status = 'deletion_requested'`,
       ).run(err, row.id);
+      deps.events?.warn("storage.sync.delete_failed", {
+        storage_object_id: row.id,
+        attempts,
+        reason: (e as Error).message,
+      });
       delete_failed += 1;
     }
   }
