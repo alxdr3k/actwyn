@@ -61,7 +61,19 @@ export function cancelJob(
       )
       .run(row.id);
     if ((res.changes ?? 0) === 1) return { kind: "cancelled_queued", job_id: row.id };
-    return { kind: "terminal", job_id: row.id, status: row.status };
+    // Race: the worker claimed the job between our SELECT and this UPDATE.
+    // Re-read current status and attempt running-job cancellation so /cancel
+    // doesn't silently fail right when contention is highest.
+    const fresh = db
+      .prepare<{ status: string }, [string]>("SELECT status FROM jobs WHERE id = ?")
+      .get(row.id);
+    if (fresh?.status === "running") {
+      const handle = args.deps?.running_cancel_handles?.get(row.id);
+      if (!handle) return { kind: "cancel_unavailable", job_id: row.id };
+      handle.abort();
+      return { kind: "cancel_signalled", job_id: row.id };
+    }
+    return { kind: "terminal", job_id: row.id, status: fresh?.status ?? row.status };
   }
 
   if (row.status === "running") {

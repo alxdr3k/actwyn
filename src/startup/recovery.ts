@@ -188,11 +188,16 @@ export function runStartupRecovery(
     )
     .get()?.n ?? 0;
   if (failedStorageCount > 0) {
+    // Use a per-boot unique key so each startup creates a fresh storage_sync
+    // job regardless of what prior boots left behind. A static key would be
+    // swallowed by ON CONFLICT DO NOTHING after the first boot's row reaches
+    // 'succeeded', silently abandoning failed storage rows on all later boots.
+    const bootKey = `startup-storage-recovery:${now().toISOString()}`;
     db.prepare<unknown, [string, string]>(
       `INSERT INTO jobs(id, status, job_type, request_json, idempotency_key)
        VALUES(?, 'queued', 'storage_sync', '{}', ?)
        ON CONFLICT(job_type, idempotency_key) DO NOTHING`,
-    ).run(crypto.randomUUID(), "startup-storage-recovery");
+    ).run(crypto.randomUUID(), bootKey);
     opts.events?.info("startup.recovery.storage_sync_enqueued", { failed_rows: failedStorageCount });
   }
 
