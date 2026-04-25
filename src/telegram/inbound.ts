@@ -213,7 +213,7 @@ export function readOffset(db: DbHandle): number {
 
 export type InsertReceivedResult =
   | { kind: "inserted" }
-  | { kind: "existing"; existing_status: "received" | "enqueued" | "skipped"; job_id: string | null; skip_reason: SkipReason | null };
+  | { kind: "existing"; existing_status: "received" | "enqueued" | "skipped" | "failed"; job_id: string | null; skip_reason: SkipReason | null };
 
 /**
  * Insert-or-no-op a received Telegram update into `telegram_updates`.
@@ -254,7 +254,7 @@ export function insertReceived(
 
   const existing = deps.db
     .prepare<
-      { status: "received" | "enqueued" | "skipped"; job_id: string | null; skip_reason: SkipReason | null },
+      { status: "received" | "enqueued" | "skipped" | "failed"; job_id: string | null; skip_reason: SkipReason | null },
       [number]
     >(`SELECT status, job_id, skip_reason FROM telegram_updates WHERE update_id = ?`)
     .get(update.update_id);
@@ -536,7 +536,18 @@ export function processBatch(
       // Re-running would: create duplicate storage_objects (new UUIDs each
       // time bypass the jobs idempotency guard), re-trigger NL intent side
       // effects, and reset the already-set job_id on the row.
-      if (inserted.kind === "existing" && inserted.existing_status !== "received") {
+      //
+      // Follow-up review note: only `enqueued` and `skipped` are durably
+      // terminal. `failed` is a recovery state — a duplicate delivery for
+      // a previously-failed row MUST go back through classifyAndCommit so
+      // the operator (or Telegram retrying the same update_id) can pick
+      // it up. Otherwise updates can be silently dropped after partial
+      // recovery. `received` likewise means the prior pass crashed before
+      // committing; reprocessing is correct.
+      if (
+        inserted.kind === "existing" &&
+        (inserted.existing_status === "enqueued" || inserted.existing_status === "skipped")
+      ) {
         processed.push({
           update_id: u.update_id,
           telegram_status: inserted.existing_status,

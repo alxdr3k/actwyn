@@ -372,6 +372,25 @@ describe("AC-TEL-003 — duplicate update_id", () => {
     const sessN = db.prepare<{ n: number }>("SELECT COUNT(*) AS n FROM sessions").get()!.n;
     expect(sessN).toBe(0);
   });
+
+  test("Follow-up: duplicate update with prior status='failed' IS reprocessed (recovery path, not silently dropped)", () => {
+    // Insert a row that already exists in `failed` (e.g., a previous classify
+    // pass crashed and the operator marked it failed for retry). A duplicate
+    // delivery of the same update_id must go back through classifyAndCommit
+    // so the job actually gets enqueued.
+    const u = textMessageUpdate(321, "retry me");
+    db.prepare<unknown, [number, string]>(
+      `INSERT INTO telegram_updates(update_id, chat_id, user_id, update_type, status, raw_update_json_redacted)
+       VALUES(?, '100', '${AUTHORIZED_USER_ID}', 'message', 'failed', ?)`,
+    ).run(321, JSON.stringify(u));
+
+    processBatch(deps, [u]);
+    // After reprocessing, the row should be enqueued and a job should exist.
+    const row = getUpdateRow(321);
+    expect(row.status).toBe("enqueued");
+    expect(row.job_id).not.toBeNull();
+    expect(countJobs()).toBe(1);
+  });
 });
 
 // ---------------------------------------------------------------
