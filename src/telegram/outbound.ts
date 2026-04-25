@@ -336,6 +336,37 @@ function markChunkFailed(db: DbHandle, chunkId: string, reason: { reason: string
 // Parent roll-up — derived, never mutated independently.
 // ---------------------------------------------------------------
 
+/**
+ * Flip any chunk that is still `pending` AND has reached the per-chunk attempt
+ * cap to `failed`. This exists because `markChunkPending` (used on retryable
+ * send errors) does not itself check the cap — it leaves the chunk pending
+ * with an incremented `attempt_count`, expecting the NEXT pass to observe
+ * `attempt_count >= maxAttempts` and call `markChunkFailed`. When the worker
+ * decides to stop scheduling further retry passes (because no chunks are
+ * retry-eligible), there is no "next pass", so without this helper the chunk
+ * would be stranded as `pending` forever and the parent rollUp would never
+ * reach a terminal state.
+ *
+ * Returns the number of chunks finalized.
+ */
+export function terminalizeExhaustedChunks(
+  db: DbHandle,
+  notification_id: string,
+  maxAttemptsPerChunk: number,
+): number {
+  const res = db
+    .prepare<unknown, [string, string, number]>(
+      `UPDATE outbound_notification_chunks
+       SET status = 'failed',
+           error_json = COALESCE(error_json, json_object('reason', 'max_attempts_exhausted'))
+       WHERE outbound_notification_id = ?
+         AND status = ?
+         AND attempt_count >= ?`,
+    )
+    .run(notification_id, "pending", maxAttemptsPerChunk);
+  return res.changes ?? 0;
+}
+
 export function rollUpParent(
   db: DbHandle,
   notification_id: string,
@@ -406,9 +437,11 @@ export function rollUpParent(
 // Stub transport
 // ---------------------------------------------------------------
 
+export type StubPlan = "ok" | "fail_once" | "fail_non_retryable" | "fail_retryable_always";
+
 export interface StubOutboundOptions {
   /** Map chunk text → behaviour. Default: all succeed. */
-  readonly plan?: ReadonlyMap<string, "ok" | "fail_once" | "fail_non_retryable">;
+  readonly plan?: ReadonlyMap<string, StubPlan>;
 }
 
 export class StubOutboundTransport implements OutboundTransport {
@@ -427,6 +460,9 @@ export class StubOutboundTransport implements OutboundTransport {
     if (plan === "fail_non_retryable") {
       throw new TelegramSendError("bad_request", undefined, false);
     }
+    if (plan === "fail_retryable_always") {
+      throw new TelegramSendError("transient", undefined, true);
+    }
     if (plan === "fail_once") {
       // Use the resolved key (which may be a prefix) as the dedupe key.
       const key = this.resolveKey(args.text);
@@ -439,7 +475,7 @@ export class StubOutboundTransport implements OutboundTransport {
     return { telegram_message_id: `tg-${this.counter}` };
   }
 
-  private resolvePlan(text: string): "ok" | "fail_once" | "fail_non_retryable" {
+  private resolvePlan(text: string): StubPlan {
     if (!this.opts.plan) return "ok";
     // Exact match first.
     if (this.opts.plan.has(text)) return this.opts.plan.get(text)!;

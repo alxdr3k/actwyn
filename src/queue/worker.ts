@@ -68,8 +68,10 @@ import {
 } from "~/telegram/attachment_capture.ts";
 import {
   createNotificationAndChunks,
+  rollUpParent,
   sendNotification,
   splitForTelegram,
+  terminalizeExhaustedChunks,
   type NotificationType,
   type OutboundTransport,
 } from "~/telegram/outbound.ts";
@@ -1700,6 +1702,7 @@ async function runNotificationRetryJob(deps: WorkerDeps, job: ClaimedJob): Promi
   // attempt_count < max_attempts_per_chunk. If every non-terminal chunk is
   // exhausted (or all chunks are `sent`), stop — otherwise the queue fills
   // up with an infinite chain of notification_retry jobs (review Blocker 3).
+  const MAX_ATTEMPTS_PER_CHUNK = 3;
   const retryableRow = deps.db
     .prepare<{ n: number }, [string, number]>(
       `SELECT COUNT(*) AS n
@@ -1708,8 +1711,23 @@ async function runNotificationRetryJob(deps: WorkerDeps, job: ClaimedJob): Promi
          AND status IN ('pending', 'failed')
          AND attempt_count < ?`,
     )
-    .get(req.notification_id, 3);
+    .get(req.notification_id, MAX_ATTEMPTS_PER_CHUNK);
   const retryable = retryableRow?.n ?? 0;
+
+  // Reviewer follow-up: a chunk that just hit the per-chunk attempt cap on a
+  // retryable error is left as `pending` with `attempt_count == max` because
+  // sendNotification's markChunkPending does not check the cap (the cap is
+  // enforced on the NEXT pass via markChunkFailed). When we decide to stop
+  // scheduling further passes (retryable === 0), there is no next pass —
+  // so we must finalize stranded chunks here, otherwise they sit pending
+  // forever and the parent rollUp never reaches `failed`.
+  if (retryable === 0 && rollUpStatus !== "sent") {
+    const finalized = terminalizeExhaustedChunks(deps.db, req.notification_id, MAX_ATTEMPTS_PER_CHUNK);
+    if (finalized > 0) {
+      // Re-derive parent status now that exhausted chunks are `failed`.
+      rollUpStatus = rollUpParent(deps.db, req.notification_id);
+    }
+  }
 
   const retryOutcome: "sent" | "retry_scheduled" | "exhausted" =
     rollUpStatus === "sent"
