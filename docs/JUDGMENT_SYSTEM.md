@@ -555,7 +555,8 @@ CREATE TABLE judgment_items (
   authority_source TEXT NOT NULL DEFAULT 'none',
 
   -- approval workflow (ADR-0012 §Approval State).
-  -- P0.5: all 4 enum values accepted (DEC-030).
+  -- P0.5: all 4 enum values accepted (ADR-0012 §Decision 3 —
+  -- approval_state + approved_by + approved_at).
   approval_state TEXT NOT NULL DEFAULT 'proposed',
 
   -- 3 status axes (ADR-0013 + DEC-033). The legacy `status` column

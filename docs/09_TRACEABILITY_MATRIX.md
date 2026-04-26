@@ -77,7 +77,7 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | Q-034   | Attention scoring formula 가중치 (정적 vs 학습)                     | —             | —                          | —                | ADR-0010 §Attention scoring; ADR-0011 §Decision 9 (activation_score 통합) |
 | Q-035   | Cognitive analogy의 communication 방식                             | —             | —                          | —                | ADR-0010 §Disclaimers                          |
 | Q-036   | `rejected` vs `revoked` status 통합 검토                            | —             | —                          | —                | ADR-0011 §Decision 2; DEC-026                  |
-| Q-037   | `architecture_assumption` 구현 형태 (kind / scope / 별 schema)     | superseded by Q-059 | —                    | —                | ADR-0011 §Decision 6; ADR-0013 §Decision 8     |
+| Q-037   | `architecture_assumption` 구현 형태 (kind / scope / 별 schema)     | ADR-0013      | —                          | —                | ADR-0011 §Decision 6; ADR-0013 §Decision 8 (kind=assumption + target_domain). Q-059가 후속 마이그레이션 추적 |
 | Q-038   | `activation_score` formula 가중치 default 값                        | —             | —                          | —                | ADR-0011 §Decision 8/9; Q-034 trace            |
 | Q-039   | `research_update_protocol` 7단계 자동화 시점                        | —             | —                          | —                | ADR-0011 §Decision 7                           |
 | Q-040   | `last_verified_at` 갱신 trigger                                     | —             | —                          | —                | ADR-0011 §시간 필드 8개                         |
