@@ -154,7 +154,7 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | DEC-026 | `JudgmentItem.status` enum P0.5 9 enum 모두 schema 도입 (**superseded by DEC-033**) | —          | —                  | ADR-0011 §Decision 2; Q-036; ADR-0013 §Decision 3 |
 | DEC-027 | `decay_policy` enum P0.5는 `none` + `supersede_only`만        | —                        | —                  | ADR-0011 §Decision 4          |
 | DEC-028 | `ontology_version` + `schema_version` 모든 새 record에 강제   | —                        | —                  | ADR-0011 §Decision 5; Q-042    |
-| DEC-029 | `system_authored` 제거 + `authority_source` P0.5 도입 범위    | —                        | —                  | ADR-0012 §Decision 1-3; Q-040  |
+| DEC-029 | `system_authored` 제거 + `authority_source` P0.5 도입 범위    | —                        | —                  | ADR-0012 §Decision 1-3; ADR-0011 §Refs (system_authored RETRACT cross-ref); second-brain Round 12 사용자 직접 발견 (no upstream Q) |
 | DEC-030 | Control-plane vs Judgment-plane 분리                          | —                        | —                  | ADR-0012 §Decision 6           |
 | DEC-031 | Critic Loop P0.5 도입 단계 (1-3단계만)                        | —                        | —                  | ADR-0012 §Decision 9; Q-047    |
 | DEC-032 | Tension `target_domain` P0.5 도입 범위 (8 enum, architecture 포함) | —                        | —                  | ADR-0013 §Decision 2; Q-051    |

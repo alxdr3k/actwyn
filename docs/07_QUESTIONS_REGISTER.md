@@ -1272,12 +1272,16 @@ committed for a later milestone.
 
 - **Status**: open.
 - **Owner**: project lead.
-- **Context**: ADR-0013이 P0.5 7 enum + reserved 5 enum (product /
-  marketing / user_preference / research / tooling). 확장 시점?
+- **Context**: ADR-0013이 P0.5 **8 enum** (design / memory / policy /
+  workflow / evidence / decision / security / architecture; DEC-032 정합)
+  + reserved 5 enum (product / marketing / user_preference / research /
+  tooling). 확장 시점?
 - **Recommendation**: 사용자 ideation에서 해당 domain의 tension 발견될
   때마다 enum 추가 (DEC-032 trigger 정합). 예측 미루지 말고 evidence 기반.
 - **Trigger**: reserved domain의 tension 등장 시.
-- **History**: 2026-04-26 (ADR-0013 §Decision 2; DEC-032).
+- **History**: 2026-04-26 (ADR-0013 §Decision 2; DEC-032). follow-up:
+  codex bot 발견 — Q-062 baseline이 7 enum stale → DEC-032 (8 enum)
+  정합으로 정정.
 
 ---
 

@@ -161,13 +161,30 @@ type JudgmentItem = {
     | "decided"
     | "deprecated"
 
-  status:
+  // Status 3-axis separation (ADR-0013 §Status Axis Separation;
+  // DEC-033 supersedes the single-`status` enum from earlier drafts).
+  // The legacy `status` field is RETRACTED — see §Status Axis Separation
+  // and the P0.5 SQL DDL.
+
+  lifecycle_status:        // truth lifecycle (사람·AI 명시 변경)
     | "proposed"
     | "active"
-    | "superseded"
-    | "revoked"
     | "rejected"
+    | "revoked"
+    | "superseded"
     | "expired"
+
+  activation_state:        // 현재 task에서 workspace 후보? (대부분 projection)
+    | "eligible"
+    | "dormant"
+    | "stale"
+    | "history_only"
+    | "excluded"
+
+  retention_state:         // 보존/노출 정책
+    | "normal"
+    | "archived"
+    | "deleted"
 
   confidence: "low" | "medium" | "high"
   importance: 1 | 2 | 3 | 4 | 5
