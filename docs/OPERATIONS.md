@@ -1,7 +1,7 @@
 # Operations
 
 > Status: thin current-state map · Owner: project lead ·
-> Last updated: 2026-04-27
+> Last updated: 2026-04-26
 >
 > This file covers only what is verifiable from `src/`,
 > `config/`, `deploy/`, and `.env.example`. Anything not listed
@@ -32,13 +32,19 @@ of these are missing or empty.
 | Variable                    | Default                                  | Purpose                                                                |
 | --------------------------- | ---------------------------------------- | ---------------------------------------------------------------------- |
 | `NODE_ENV`                  | `development`                            | One of `development | production | test`.                              |
-| `LOG_LEVEL`                 | `info` (via `runtime.json`)              | Override via `config/runtime.json#log.level`.                          |
 | `ACTWYN_CONFIG_PATH`        | `config/runtime.json`                    | Path to the runtime tunables file.                                     |
 | `ACTWYN_DB_PATH`            | `/var/lib/actwyn/actwyn.db`              | SQLite database file path.                                             |
 | `ACTWYN_MIGRATIONS_PATH`    | `/opt/actwyn/migrations`                 | Migration directory path.                                              |
 | `ACTWYN_OBJECTS_PATH`       | `/var/lib/actwyn/objects`                | Local FS root for captured attachment bytes.                           |
 | `ACTWYN_MEMORY_PATH`        | `/var/lib/actwyn/memory`                 | Local FS root for memory snapshots and transcripts.                    |
 | `BOOTSTRAP_WHOAMI`          | unset                                    | When `true`, allows `/whoami` to respond once for an unauthorized user (DEC-009). 30-minute auto-expiry recorded in `settings`. |
+
+**Log level is not an env var.** `loadConfig()` in `src/config.ts`
+does not read `LOG_LEVEL`. To change log level, edit
+`config/runtime.json#log.level` (one of `debug | info | warn | error`).
+Earlier versions of `.env.example` and `deploy/install.sh` carried a
+`LOG_LEVEL=` placeholder that was silently ignored; that placeholder
+has been removed.
 
 Variables whose names end in `TOKEN` / `SECRET` / `KEY` /
 `PASSWORD` are routed through the redactor's `exact_values` set so

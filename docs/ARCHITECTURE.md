@@ -1,7 +1,7 @@
 # Architecture
 
 > Status: thin current-state overview · Owner: project lead ·
-> Last updated: 2026-04-27
+> Last updated: 2026-04-26
 >
 > This is a short pointer doc. For why decisions were made, see
 > `docs/adr/` (ADR-0001 … ADR-0013). For acceptance contracts and
@@ -39,10 +39,14 @@ tools, Control Gate evaluators, or projections are implemented yet
 ## System overview
 
 actwyn is a single-user Telegram personal agent. One systemd service
-runs the Bun process; that process owns the long-poll loop, the job
-worker, the notification retry loop, and the storage sync loop. SQLite
-(WAL) is the source of truth for runtime state. Hetzner Object Storage
-holds durable artifacts asynchronously.
+runs the Bun process. `src/main.ts` launches **two top-level loops
+concurrently** — the Telegram long-poll loop and the job worker
+loop. Storage sync and notification retry are not separate top-level
+loops; they are worker-owned job handlers (`storage_sync` and
+`notification_retry` `jobs.job_type`s) that the worker dispatches
+alongside `provider_run` and `summary_generation`. SQLite (WAL) is
+the source of truth for runtime state. Hetzner Object Storage holds
+durable artifacts asynchronously.
 
 ```
 Telegram long-poll  ──┐
@@ -119,13 +123,18 @@ A short summary; the full file map lives in `docs/CODE_MAP.md`.
   migrations.
 - `src/telegram/*` — long-poll, inbound classifier, outbound
   delivery, attachment metadata.
-- `src/queue/worker.ts`, `src/queue/notification_retry.ts` — job
-  claim / dispatch loops.
+- `src/queue/worker.ts` — single job claim / dispatch loop;
+  also owns the in-process attachment capture pre-step
+  (`runCapturePass`) and dispatches `storage_sync` /
+  `notification_retry` jobs.
+- `src/queue/notification_retry.ts` — handlers + helpers for the
+  `notification_retry` job_type, called from the worker loop.
 - `src/providers/*` — Claude adapter, fake adapter, stream-json
   parsing, subprocess lifecycle.
 - `src/context/*` — prompt builder + packer (read-only).
 - `src/memory/*` — summary, items, provenance.
-- `src/storage/*` — local FS, S3 transport, sync loop, MIME probe.
+- `src/storage/*` — local FS, S3 transport, sync handler (driven by
+  `storage_sync` jobs from the worker), MIME probe.
 - `src/observability/*` — events emitter and the single redactor.
 - `src/commands/*` — `/cancel`, `/correct`, `/doctor`, `/forget`,
   `/provider`, `/save_last_attachment`, `/status`, `/summary`,

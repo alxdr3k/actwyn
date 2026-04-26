@@ -19,7 +19,7 @@
 > ---
 >
 > Status: living spec (Phase 0 commitment) · Owner: project lead ·
-> Last updated: 2026-04-27 · Architectural authority:
+> Last updated: 2026-04-26 · Architectural authority:
 > [ADR-0009](./adr/0009-db-native-judgment-system.md) +
 > [ADR-0010](./adr/0010-cognitive-extension-of-judgment-system.md)
 >

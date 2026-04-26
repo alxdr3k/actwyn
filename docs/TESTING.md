@@ -1,7 +1,7 @@
 # Testing
 
 > Status: thin current-state map · Owner: project lead ·
-> Last updated: 2026-04-27
+> Last updated: 2026-04-26
 >
 > Commands listed here are the ones present in `package.json` and
 > `scripts/`. Do not invent commands; if you need a new one, add it

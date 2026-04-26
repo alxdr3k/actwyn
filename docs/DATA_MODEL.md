@@ -1,7 +1,7 @@
 # Data Model
 
 > Status: thin current-state map · Owner: project lead ·
-> Last updated: 2026-04-27
+> Last updated: 2026-04-26
 >
 > This file is a human-readable map. It is **not** authoritative.
 > The authoritative schema lives in `migrations/*.sql` and the
@@ -168,6 +168,34 @@ Attaches meaning to an artifact.
 
 - `relation_type ∈ { evidence, attachment, generated_output, reference, source }`.
 - CHECK requires `memory_summary_id` or `turn_id` to be non-null.
+
+## Single-writer map
+
+Each table has one writer module. Other modules must route through
+the owner instead of mutating the table directly. This is the
+operative summary for AI agents; `docs/02_HLD.md` §5.1 has the full
+reasoning.
+
+| Table                                 | Writer                                                                            |
+| ------------------------------------- | --------------------------------------------------------------------------------- |
+| `telegram_updates`                    | `src/telegram/poller.ts`, `src/telegram/inbound.ts`                               |
+| `settings['telegram.next_offset']`    | `src/telegram/inbound.ts` (advances inside the inbound txn)                       |
+| `jobs` (insert)                       | `src/telegram/inbound.ts`, `src/commands/*`, `src/telegram/attachment_capture.ts` (storage_sync), `src/queue/worker.ts` (notif-retry, summary), `src/telegram/outbound.ts` |
+| `jobs.status` (transitions)           | `src/queue/worker.ts`, `src/startup/recovery.ts`, `src/commands/cancel.ts`        |
+| `sessions`                            | `src/telegram/inbound.ts` (create), `src/memory/summary.ts` (`/end`)              |
+| `turns`                               | `src/providers/claude.ts`                                                         |
+| `provider_runs`                       | `src/providers/claude.ts`                                                         |
+| `provider_raw_events`                 | `src/providers/claude.ts`                                                         |
+| `memory_summaries`                    | `src/memory/summary.ts`                                                           |
+| `memory_items` (insert)               | `src/memory/summary.ts`, `src/commands/correct.ts`                                |
+| `memory_items.status`                 | `src/commands/correct.ts` (`active → superseded`), `src/commands/forget.ts` (`→ revoked`) |
+| `storage_objects` (insert)            | `src/telegram/inbound.ts` (attachments), `src/providers/claude.ts` (generated artifacts), `src/memory/summary.ts` (snapshots), `src/storage/local.ts` (transcripts) |
+| `storage_objects.status`              | `src/storage/sync.ts`, `src/startup/recovery.ts`, `src/commands/forget.ts`        |
+| `memory_artifact_links`               | `src/memory/summary.ts`, `src/commands/save.ts`, `src/commands/forget.ts`         |
+| `outbound_notifications` (insert)     | `src/queue/worker.ts`, `src/commands/*`                                           |
+| `outbound_notifications.status`       | `src/telegram/outbound.ts` (rolled up from chunks)                                |
+| `outbound_notification_chunks`        | `src/queue/worker.ts`, `src/commands/*` (insert in same txn as parent), `src/telegram/outbound.ts` (status) |
+| `allowed_users`                       | out-of-band config — not written at runtime                                       |
 
 ## Cross-table invariants
 

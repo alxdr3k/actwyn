@@ -1,7 +1,7 @@
 # Runtime Flow
 
 > Status: thin current-state map · Owner: project lead ·
-> Last updated: 2026-04-27
+> Last updated: 2026-04-26
 >
 > This file describes the implemented runtime as it exists in
 > `src/`. The fuller, design-level state-machine specifications
@@ -106,8 +106,8 @@ outbound_notifications (status=pending)
             └─ chunk → failed → notification_retry job picks it up
 ```
 
-`status = sent` is terminal; the retry loop never re-sends a sent
-notification.
+`status = sent` is terminal; the `notification_retry` handler never
+re-sends a sent notification.
 
 ### Storage (attachment lifecycle)
 
@@ -138,7 +138,7 @@ promotes a `session` attachment to `long_term`.
 | Resume failed mid-run            | Same `jobs` row flips back to `queued` with `replay_mode` (HLD §6.2).                  |
 | DB busy (WAL contention)         | `BEGIN IMMEDIATE` retried by Bun SQLite busy_timeout; long contention surfaces in events. |
 | S3 unavailable                   | `storage_objects.status` cycles `pending → failed → pending`; never blocks the worker. |
-| Notification send failure        | Per-chunk `failed` row picked up by `notification_retry` loop; sent chunks not resent. |
+| Notification send failure        | Per-chunk `failed` row picked up by a `notification_retry` job (worker-dispatched); sent chunks not resent. |
 | Process restart                  | `startup/recovery` reconciles: `running → interrupted`, `safe_retry` → `queued`, kills orphan PIDs. |
 | Missing required env             | `loadConfig()` throws `ConfigError` and the process exits 1 before opening the DB.     |
 | Unauthorized inbound             | `telegram_updates.status=skipped`, `skip_reason` recorded, no job created.             |

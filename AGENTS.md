@@ -40,8 +40,12 @@ Do not read `docs/design/archive/` by default. Those are history.
 
 ## Source of truth
 
-- Code, tests, migrations, and any generated schema are
-  **authoritative** for implemented behavior.
+- Code, tests, and migrations are **authoritative** for implemented
+  behavior.
+- Generated docs / schemas (when generators land in
+  `docs/generated/`) sit just below them — derived, not authority.
+  If a generated doc looks wrong, fix the generator or the source,
+  never the generated output by hand.
 - Thin current-state docs (`docs/ARCHITECTURE.md`, `docs/CODE_MAP.md`,
   `docs/DATA_MODEL.md`, `docs/RUNTIME.md`, `docs/TESTING.md`,
   `docs/OPERATIONS.md`) explain the current shape but never override
@@ -97,9 +101,11 @@ the PR description rather than claiming green.
 - Single-redactor invariant: only `src/observability/redact.ts`
   may define redaction patterns or emit `[REDACTED:*]` placeholders.
   Lint is `bun run lint:redactor`.
-- Each table has a single-writer module (see `docs/02_HLD.md` §5.1
-  for the writer map). If you need to mutate a table from a new
-  module, route through the existing owner instead.
+- Each table has a single-writer module. The thin operative table
+  is in `docs/DATA_MODEL.md` §Single-writer map; the full reasoning
+  is in `docs/02_HLD.md` §5.1 (only open the HLD if you need the
+  reasoning, not the lookup). If you need to mutate a table from a
+  new module, route through the existing owner instead.
 - New env vars must appear in `.env.example` and `src/config.ts`
   validation.
 - Avoid editing `bun.lock` by hand; let `bun install` regenerate it.

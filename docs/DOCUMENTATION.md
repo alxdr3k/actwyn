@@ -1,6 +1,6 @@
 # Documentation Policy
 
-> Status: living policy · Owner: project lead · Last updated: 2026-04-27
+> Status: living policy · Owner: project lead · Last updated: 2026-04-26
 >
 > Codified in **DEC-037** (Implementation Documentation Lifecycle
 > Policy). This file is the operational shape of that policy and the
@@ -11,20 +11,28 @@ authoritative, and what to update when something changes.
 
 ## Source-of-truth hierarchy
 
-1. Code, tests, migrations, and any generated schemas
-2. Thin current-state docs (`docs/ARCHITECTURE.md`, `docs/CODE_MAP.md`,
+1. Code, tests, migrations
+2. Generated docs / schemas produced from those sources
+   (`docs/generated/*` once generators land)
+3. Thin current-state docs (`docs/ARCHITECTURE.md`, `docs/CODE_MAP.md`,
    `docs/DATA_MODEL.md`, `docs/RUNTIME.md`, `docs/TESTING.md`,
    `docs/OPERATIONS.md`)
-3. ADRs in `docs/adr/`
-4. Q / DEC registers and traceability matrix
+4. ADRs in `docs/adr/`
+5. Q / DEC registers and traceability matrix
    (`docs/07_QUESTIONS_REGISTER.md`, `docs/08_DECISION_REGISTER.md`,
    `docs/09_TRACEABILITY_MATRIX.md`)
-5. Long design documents and archived design notes
+6. Long design documents and archived design notes
    (`docs/PRD.md`, `docs/02_HLD.md`, `docs/00_PROJECT_DELIVERY_PLAYBOOK.md`,
    `docs/03_RISK_SPIKES.md`, `docs/04_IMPLEMENTATION_PLAN.md`,
    `docs/05_RUNBOOK.md`, `docs/06_ACCEPTANCE_TESTS.md`,
    `docs/JUDGMENT_SYSTEM.md` (Phase 0 / 0.5 architectural design
    record, per DEC-037), future `docs/design/archive/*`)
+
+Generated outputs sit in tier 2 (not tier 1) because they can lag
+their source and become stale; the source code / migrations always
+win. This matches `docs/generated/README.md`'s rule that a wrong
+generated doc is fixed at the generator, not by hand-editing the
+output.
 
 ## Rules
 

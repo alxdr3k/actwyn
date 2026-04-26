@@ -41,11 +41,12 @@ needs the *why* or the acceptance criterion.
 
 ## Source-of-truth hierarchy
 
-1. Code, tests, migrations, generated schemas
-2. Thin current-state docs (top of this index)
-3. ADRs (`adr/`)
-4. Q / DEC registers + traceability matrix
-5. Long design / historical / archived docs
+1. Code, tests, migrations
+2. Generated docs / schemas produced from those sources
+3. Thin current-state docs (top of this index)
+4. ADRs (`adr/`)
+5. Q / DEC registers + traceability matrix
+6. Long design / historical / archived docs
 
 See [`DOCUMENTATION.md`](./DOCUMENTATION.md) for the full policy
 and the "what to update when" table.
