@@ -31,6 +31,64 @@ Vault가 아니다. Governed judgment memory다.
 - **Judgment**는 그 위에서 "지금 무엇을 믿고 어떻게 행동할지" 정한
   것 — source-grounded, scoped, temporal, supersedable.
 
+## Planes and object ownership
+
+actwyn judgment system은 5 plane으로 분리된다. 각 plane은 ownership과
+write rule이 다르다.
+
+```txt
+source/event plane:
+  실제 일어난 사건과 source 자료
+  examples: Telegram events, uploaded files, tool outputs,
+            provider outputs, raw source locators
+  ownership: actwyn runtime (ADR-0008 telegram ledgers /
+             ADR-0004 S3 archive)
+  not used directly as agent behavior baseline
+
+memory plane:
+  remembered facts / preferences / summaries / candidates
+  examples: memory_items, memory_summaries (ADR-0006)
+  ownership: ADR-0006 explicit-save-first
+  may be promoted into judgment but is not identical to judgment
+
+judgment-plane:
+  durable source-grounded judgments actwyn may use as
+  behavior/context baseline
+  examples: JudgmentItem with kind ∈
+            { decision / current_state / procedure / caution /
+              fact / preference }
+  ownership: ADR-0009 ~ ADR-0013
+  can influence agent answer/action **only after**
+  authority/provenance/status gates pass
+
+projection / read-plane:
+  read-optimized derived views (재생성 가능, source of truth 아님)
+  examples: current_operating_view, FTS5 index, vector index,
+            graph projection, ContextPacket
+  ownership: scripts/projections (ADR-0009 Law #4)
+  never canonical source of truth
+
+control-plane:
+  telemetry / audit / debug / routing / critique objects
+  examples: ControlGateDecision, ReflectionTriageEvent, Tension,
+            InteractionSignal, WorkspaceTrace, RetrievalDebugEvent,
+            ContextPackTrace, CritiqueOutcome
+  ownership: actwyn telemetry layer
+  cannot directly commit durable judgment
+```
+
+### Plane ownership rules
+
+- `Tension`은 control-plane이며 `JudgmentItem`이 아니다.
+- `ControlGateDecision`은 control-plane이며 `JudgmentItem`이 아니다.
+- `ReflectionTriageEvent`은 control-plane이며 `JudgmentItem`이 아니다.
+- Control-plane object는 OpenQuestion / Decision / EvalCase /
+  SchemaChange / ToolContractChange / ProcedureUpdate /
+  JudgmentProposal로 이어질 수 있다.
+- **Control-plane object는 직접 durable judgment를 commit하지 못한다.**
+  반드시 typed tool gate (ADR-0009 §Tool contract / ADR-0012
+  §Authority Source)를 거친다.
+
 ## Relationship to memory layer (ADR-0006)
 
 Judgment layer는 ADR-0006의 memory layer **위에 추가**되며
@@ -126,21 +184,34 @@ echo. Stage 5의 act / refuse / propose는 advisory mode (PRD §11) 안에
 ## Core data model
 
 ```ts
+// Phase 1A enforced kinds: fact / preference / decision / current_state /
+//                          procedure / caution
+// Deferred / conceptual: claim / principle / hypothesis / experiment /
+//                        result / assumption
+//
+// `assumption` is the future home for architecture/marketing/research
+// assumptions. For P0.5 / Phase 1A, architecture assumptions are
+// represented as `decision` or `current_state` until `assumption` is
+// explicitly enabled (ADR-0013 §architecture_assumption).
+type JudgmentKind =
+  | "fact"
+  | "preference"
+  | "decision"
+  | "current_state"
+  | "procedure"
+  | "caution"
+  // deferred / conceptual
+  | "claim"
+  | "principle"
+  | "hypothesis"
+  | "experiment"
+  | "result"
+  | "assumption"
+
 type JudgmentItem = {
   id: string
 
-  kind:
-    | "fact"
-    | "preference"
-    | "claim"
-    | "principle"
-    | "hypothesis"
-    | "experiment"
-    | "result"
-    | "decision"
-    | "current_state"
-    | "procedure"
-    | "caution"
+  kind: JudgmentKind
 
   scope: {
     user_id: string
@@ -151,20 +222,22 @@ type JudgmentItem = {
 
   statement: string
 
-  // origin axis (ADR-0012 §Origin/Authority separation; 8 enum)
-  epistemic_status:
+  // origin axis (ADR-0012 §Origin/Authority separation; 6 enum)
+  // Answers "where did this content come from?"
+  // `decided` / `deprecated` / `system_authored` are NOT origin values
+  // (mapped to other fields — see ADR-0013 §epistemic_origin).
+  epistemic_origin:
     | "observed"
     | "user_stated"
     | "user_confirmed"
     | "inferred"
     | "assistant_generated"
     | "tool_output"
-    | "decided"
-    | "deprecated"
 
-  // authority axis (ADR-0012 §Authority Source; 7 enum, optional)
-  // P0.5: only `none` and `user_confirmed` accepted (DEC-029).
-  authority_source?:
+  // authority axis (ADR-0012 §Authority Source; 7 enum)
+  // Answers "why can this be active policy/procedure/operating baseline?"
+  // P0.5 enforced subset: only `none` and `user_confirmed` accepted (DEC-029).
+  authority_source:
     | "none"
     | "user_confirmed"
     | "maintainer_approved"
@@ -173,15 +246,20 @@ type JudgmentItem = {
     | "compiled_system_policy"
     | "safety_policy"
 
-  // approval workflow (ADR-0012)
-  approval_state?: "proposed" | "accepted" | "active" | "rejected"
+  // approval workflow only (ADR-0013 cleanup)
+  // `active` / `proposed` / `accepted` are RETRACTED here — they belong
+  // to lifecycle_status. approval_state is the workflow stage.
+  approval_state:
+    | "not_required"
+    | "pending"
+    | "approved"
+    | "rejected"
+
   approved_by?: "user" | "maintainer" | "system_release"
   approved_at?: string
 
-  // Status 3-axis separation (ADR-0013 §Status Axis Separation;
-  // DEC-033 supersedes the single-`status` enum from earlier drafts).
-  // The legacy `status` field is RETRACTED — see §Status Axis Separation
-  // and the P0.5 SQL DDL.
+  // Status 3-axis separation (ADR-0013 §Status Axis Separation; DEC-033).
+  // Legacy single `status` enum is RETRACTED.
 
   lifecycle_status:        // truth lifecycle (사람·AI 명시 변경)
     | "proposed"
@@ -206,9 +284,33 @@ type JudgmentItem = {
   confidence: "low" | "medium" | "high"
   importance: 1 | 2 | 3 | 4 | 5
 
+  // decay axis (ADR-0011 + DEC-027). P0.5: `none` and `supersede_only` only.
+  decay_policy:
+    | "none"
+    | "time_decay"
+    | "verification_decay"
+    | "event_driven"
+    | "supersede_only"
+
+  // volatility hint (ADR-0011, optional). default mapping: validator layer.
+  volatility?: "low" | "medium" | "high"
+
+  // versioning (mandatory in Phase 1A, ADR-0011 + DEC-028)
+  schema_version: string       // 예: "0.1.0"
+  ontology_version: string     // 예: "judgment-taxonomy-v0.1"
+  policy_version?: string      // optional, 정책 enum 변경 추적
+  projection_version?: string  // optional, current_operating_view projection 변경 추적
+
+  // time fields (ADR-0011)
+  created_at: string
+  updated_at: string
+  observed_at?: string
   valid_from?: string
   valid_until?: string
   revisit_at?: string
+  last_verified_at?: string
+  last_used_at?: string
+  last_relevant_at?: string
 
   source_ids: string[]
   evidence_ids: string[]
@@ -216,17 +318,15 @@ type JudgmentItem = {
   supersedes?: string[]
   superseded_by?: string[]
 
-  // versioning (mandatory, ADR-0011 + DEC-028)
-  // typed tool layer가 default 자동 주입. v0.1로 시작.
-  ontology_version: string  // 예: "judgment-taxonomy-v0.1"
-  schema_version: string    // 예: "0.1.0"
-
-  created_at: string
-  updated_at: string
+  // metacognitive fields (ADR-0010 §Metacognition fields, optional)
+  would_change_if?: string[]
+  missing_evidence?: string[]
+  review_trigger?: string[]
 }
 
 type Source = {
   id: string
+
   kind:
     | "telegram_turn"
     | "conversation_summary"
@@ -236,11 +336,27 @@ type Source = {
     | "metric_snapshot"
     | "manual_user_statement"
     | "imported_markdown"
+    | "memory_item"        // memory-plane → judgment-plane promotion edge
 
   locator: string
   content_hash?: string
+
+  // capture / observation 분리 (ADR-0013 §Source)
+  // captured_at: source가 ledger에 저장된 시점
+  // observed_at: 실제 사건이 발생한 시점 (capture와 다를 수 있음)
   captured_at: string
+  observed_at?: string
+
   redacted: boolean
+  redaction_profile?: string   // 적용된 redaction profile id
+
+  // sensitivity는 PRD §15 / ADR-0006 정합. P0.5 optional.
+  sensitivity?:
+    | "public"
+    | "internal"
+    | "private"
+    | "secret"
+
   trust_level: "low" | "medium" | "high"
 }
 
@@ -543,24 +659,32 @@ CREATE TABLE judgment_sources (
 -- (TEXT columns + CHECK constraints are added in the Phase 1A migration PR).
 CREATE TABLE judgment_items (
   id TEXT PRIMARY KEY,
+
   kind TEXT NOT NULL,
   scope_json TEXT NOT NULL,
   statement TEXT NOT NULL,
 
-  -- origin axis (ADR-0012 §Origin/Authority separation)
-  epistemic_status TEXT NOT NULL,
+  -- origin axis (ADR-0012 §Origin/Authority separation; ADR-0013 rename
+  -- from epistemic_status). Answers "where did this content come from?"
+  -- Allowed values: observed / user_stated / user_confirmed / inferred /
+  -- assistant_generated / tool_output. `decided` / `deprecated` /
+  -- `system_authored` are NOT origin values.
+  epistemic_origin TEXT NOT NULL,
 
-  -- authority axis (ADR-0012 §Authority Source)
-  -- P0.5: only `none` and `user_confirmed` are accepted (DEC-029).
+  -- authority axis (ADR-0012 §Authority Source).
+  -- P0.5 enforced subset: only `none` and `user_confirmed` (DEC-029).
   authority_source TEXT NOT NULL DEFAULT 'none',
 
-  -- approval workflow (ADR-0012 §Approval State).
-  -- P0.5: all 4 enum values accepted (ADR-0012 §Decision 3 —
-  -- approval_state + approved_by + approved_at).
-  approval_state TEXT NOT NULL DEFAULT 'proposed',
+  -- approval workflow only (ADR-0013 cleanup). 4 enum:
+  -- not_required / pending / approved / rejected.
+  -- `active` / `proposed` / `accepted` are RETRACTED here — they belong
+  -- to lifecycle_status.
+  approval_state TEXT NOT NULL DEFAULT 'pending',
+  approved_by TEXT,
+  approved_at TEXT,
 
-  -- 3 status axes (ADR-0013 + DEC-033). The legacy `status` column
-  -- is intentionally absent — see "Notes on enum changes".
+  -- 3 status axes (ADR-0013 + DEC-033). The legacy single `status` column
+  -- is intentionally absent.
   lifecycle_status TEXT NOT NULL DEFAULT 'proposed',
   activation_state TEXT NOT NULL DEFAULT 'eligible',
   retention_state TEXT NOT NULL DEFAULT 'normal',
@@ -578,20 +702,33 @@ CREATE TABLE judgment_items (
   -- mapping resolved at validator layer (Q-041).
   volatility TEXT,
 
-  -- versioning (mandatory, ADR-0011 + Round 11 must-fix).
+  -- versioning (mandatory in Phase 1A; ADR-0011 + DEC-028)
   ontology_version TEXT NOT NULL,
   schema_version TEXT NOT NULL,
+  policy_version TEXT,
+  projection_version TEXT,
 
+  -- time fields (ADR-0011 §시간 필드 8개)
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  observed_at TEXT,
   valid_from TEXT,
   valid_until TEXT,
   revisit_at TEXT,
+  last_verified_at TEXT,
+  last_used_at TEXT,
+  last_relevant_at TEXT,
 
+  -- relation arrays (JSON for SQLite simplicity)
   source_ids_json TEXT,
+  evidence_ids_json TEXT,
   supersedes_json TEXT,
   superseded_by_json TEXT,
 
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  -- metacognitive fields (ADR-0010, optional)
+  would_change_if_json TEXT,
+  missing_evidence_json TEXT,
+  review_trigger_json TEXT
 );
 
 CREATE TABLE judgment_evidence_links (
@@ -599,7 +736,10 @@ CREATE TABLE judgment_evidence_links (
   judgment_id TEXT NOT NULL,
   source_id TEXT NOT NULL,
   relation TEXT NOT NULL,
-  quote_or_span TEXT,
+  -- ADR-0013 cleanup: span_locator (machine-addressable) and
+  -- quote_excerpt (human-readable, may be redacted) are separate columns.
+  span_locator TEXT,
+  quote_excerpt TEXT,
   rationale TEXT,
   FOREIGN KEY (judgment_id) REFERENCES judgment_items(id),
   FOREIGN KEY (source_id) REFERENCES judgment_sources(id)
