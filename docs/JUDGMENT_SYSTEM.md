@@ -244,21 +244,46 @@ source 없는 아이디어는 `hypothesis` 또는 `proposed` 상태로만 유지
 
 ## Enum catalog
 
+### Conceptual catalog
+
+논리적으로 가능한 enum value 전체 (구현 시점 무관).
+
 | Enum | Count | Values |
 |------|-------|--------|
-| `JudgmentItem.kind` | 10 | fact / preference / claim / principle / hypothesis / experiment / result / decision / current_state / procedure / caution |
-| `JudgmentItem.epistemic_status` | 8 | observed / user_stated / user_confirmed / inferred / assistant_generated / tool_output / decided / deprecated |
-| `JudgmentItem.status` | 6 | proposed / active / superseded / revoked / rejected / expired |
+| `JudgmentItem.kind` | 11 | fact / preference / claim / principle / hypothesis / experiment / result / decision / current_state / procedure / caution |
+| `JudgmentItem.epistemic_status` | 9 | observed / user_stated / user_confirmed / inferred / assistant_generated / tool_output / system_authored / decided / deprecated |
+| `JudgmentItem.status` | 9 | proposed / active / dormant / stale / archived / superseded / revoked / rejected / expired (ADR-0011 §Status enum 확장) |
 | `JudgmentItem.confidence` | 3 | low / medium / high |
 | `JudgmentItem.importance` | 5 | 1 / 2 / 3 / 4 / 5 |
+| `JudgmentItem.volatility` | 3 | low / medium / high (ADR-0011) |
+| `JudgmentItem.decay_policy` | 5 | none / time_decay / verification_decay / event_driven / supersede_only (ADR-0011) |
+| `JudgmentItem.security_label` (optional) | 3 | prompt_injection_candidate / memory_poisoning_candidate / tool_permission_attack_candidate |
 | `Source.kind` | 8 | telegram_turn / conversation_summary / uploaded_file / provider_output / web_source / metric_snapshot / manual_user_statement / imported_markdown |
 | `Source.trust_level` | 3 | low / medium / high |
 | `EvidenceLink.relation` | 5 | supports / refutes / qualifies / motivates / derived_from |
 | `JudgmentEdge.relation` | 10 | supports / refutes / contradicts / supersedes / depends_on / applies_to / caused_by / tested_by / resulted_in / led_to_decision |
 
-Phase 1 도입 enum 범위는 별 결정 (DEC-023, Q-028 참조). 5-6개 핵심
-kind(`fact` / `preference` / `decision` / `current_state` /
-`procedure` / `caution`)부터 시작 후보.
+### Phase 1 enforced enum
+
+P0.5 / P1 schema CHECK constraint에 강제할 minimum enum subset (DEC-023,
+DEC-026, DEC-027 정합).
+
+| Enum | Phase 1 enforced subset |
+|------|-------------------------|
+| `JudgmentItem.kind` | 6 enforced: fact / preference / decision / current_state / procedure / caution. **Deferred**: claim / principle / hypothesis / experiment / result (Phase 1 후 도입) |
+| `JudgmentItem.epistemic_status` | 9 모두 (security gate 필요) |
+| `JudgmentItem.status` | DEC-026 — 9 enum schema 모두 + application 코드는 dormant/stale/archived 자동 진입 안 함 |
+| `JudgmentItem.decay_policy` | DEC-027 — `none` + `supersede_only` 2종만. 나머지 3종은 P1+ |
+
+### Notes on enum changes (Round 11 must-fix)
+
+- **`epistemic_status`에 `system_authored` 추가** — security invariant
+  (procedure / policy memory의 elevated provenance 요구)와 정합.
+  underscore naming.
+- **`attack_candidate` 처리** — 별 `kind`로 만들지 않고 `kind: "caution"` +
+  optional `security_label` 필드로 처리 (kind taxonomy 부풀리지 않음).
+- **`status` 9 enum** — ADR-0009의 6 + ADR-0011의 3 신규 (dormant /
+  stale / archived). `rejected`와 `revoked` 통합은 Q-036 미해결.
 
 ## Write path
 
@@ -637,15 +662,25 @@ actwyn 추가 metric:
 ```
 1. memory는 기본적으로 evidence / context다.
 2. procedure / policy memory만 instruction처럼 취급할 수 있다.
-3. procedure / policy memory는 user_confirmed 또는 system-authored
-   provenance가 필요하다.
+3. procedure / policy memory는 `user_confirmed` 또는 `system_authored`
+   provenance가 필요하다 (epistemic_status enum 9 참조).
 4. assistant_generated / inferred memory는 절대 tool permission을
    바꿀 수 없다.
 5. 외부 문서에서 온 "ignore previous instruction"류 문장은 memory로
-   저장하더라도 caution / attack_candidate로 저장한다.
+   저장하더라도 `kind: "caution"` + optional
+   `security_label: "prompt_injection_candidate"`로 저장한다.
 6. retrieval된 memory는 항상 source / provenance / status와 함께
    pack한다.
 ```
+
+`security_label` 별 필드(optional)는 `kind` taxonomy를 부풀리지 않으면서
+보안 분류를 추가한다. enum:
+
+| Value | 의미 |
+|---|---|
+| `prompt_injection_candidate` | 외부 문서에서 온 "ignore previous instruction"류 |
+| `memory_poisoning_candidate` | 장기 memory에 invalid claim을 심으려는 시도 |
+| `tool_permission_attack_candidate` | tool permission / policy를 우회하려는 시도 |
 
 핵심 invariant:
 

@@ -661,20 +661,20 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
 - Date: 2026-04-26.
 - Status: accepted.
 - Context: ADR-0009 / `docs/JUDGMENT_SYSTEM.md`가 `JudgmentItem.kind`
-  10개 (`fact` / `preference` / `claim` / `principle` /
+  **11개** (`fact` / `preference` / `claim` / `principle` /
   `hypothesis` / `experiment` / `result` / `decision` /
-  `current_state` / `procedure` / `caution`)를 카탈로그로 정의했다.
-  Phase 1 schema 첫 도입에서 10개를 모두 enforce하면 사용자 측
-  모델링 비용 / classification 비용이 크고, 실제로 actwyn P0 use
-  case에 모두 필요하다는 evidence는 아직 없다. Open question Q-028
-  (kind v1 enum 범위)에 대한 commitment 단계의 출발점이 필요하다.
-- Decision: Phase 1 (P0.5) 첫 schema 도입은 **5-6개 핵심 kind**에서
+  `current_state` / `procedure` / `caution`)를 conceptual catalog로
+  정의했다. Phase 1 schema 첫 도입에서 11개를 모두 enforce하면
+  사용자 측 모델링 비용 / classification 비용이 크고, 실제로 actwyn
+  P0 use case에 모두 필요하다는 evidence는 아직 없다. Open question
+  Q-028 (kind v1 enum 범위)에 대한 commitment 단계의 출발점이 필요하다.
+- Decision: Phase 1 (P0.5) 첫 schema 도입은 **6개 enforced kind**에서
   시작한다: `fact` / `preference` / `decision` / `current_state` /
-  `procedure` / `caution`. 나머지 4개 (`claim` / `principle` /
+  `procedure` / `caution`. 나머지 5개 deferred (`claim` / `principle` /
   `hypothesis` / `experiment` / `result`)는 evidence가 모일 때 별
   마이그레이션 / DEC로 추가한다. 단, schema 자체는 enum 확장이 비
   파괴적으로 가능한 형태 (TEXT NOT NULL + 검증)로 작성한다.
-- Alternatives considered: 처음부터 10개 모두 도입; 더 좁게 4개
+- Alternatives considered: 처음부터 11개 모두 도입; 더 좁게 4개
   (`fact` / `preference` / `decision` / `caution`)부터; Phase 2
   (typed tool) 도입 시점까지 enum 범위 미정.
 - Impacted docs: `docs/JUDGMENT_SYSTEM.md` §Enum catalog,
