@@ -42,13 +42,30 @@
 Telegram getUpdates
   └─► telegram_updates (status=received)
        └─► classifier
-            ├─► authorized text/command  → jobs (queued, idempotency_key='telegram:' || update_id)
-            │                               telegram_updates → enqueued
-            ├─► attachment              → storage_objects (capture_status=pending)
-            │                               + jobs (provider_run or storage_capture)
-            ├─► unauthorized            → telegram_updates → skipped
-            └─► malformed / unsupported → telegram_updates → skipped or failed
+            ├─► authorized text                  → jobs (provider_run, queued,
+            │                                       idempotency_key='telegram:' || update_id)
+            │                                       telegram_updates → enqueued
+            ├─► authorized command               → jobs (provider_run | summary_generation,
+            │                                       depending on the command)
+            ├─► authorized message + attachment  → jobs (provider_run, queued)
+            │                                       + storage_objects (capture_status=pending)
+            │                                       in the SAME inbound transaction;
+            │                                       byte capture is performed in-process by
+            │                                       the worker via runCapturePass(jobId)
+            │                                       before the AI run (NOT a separate job)
+            ├─► unauthorized                     → telegram_updates → skipped
+            └─► malformed / unsupported          → telegram_updates → skipped or failed
 ```
+
+The implemented `jobs.job_type` enum is exactly
+`{ provider_run, summary_generation, storage_sync, notification_retry }`
+(see `migrations/001_init.sql` CHECK constraint). There is no
+`storage_capture` job type; attachment byte capture runs inside the
+owning `provider_run` job before the AI subprocess executes
+(`runCapturePass` in `src/queue/worker.ts`, which calls
+`captureOne` from `src/telegram/attachment_capture.ts`).
+S3-eligible objects then get a `storage_sync` job inserted by
+`commitCaptureSuccess`.
 
 The long-poll offset (settings key `telegram.next_offset`, see
 `OFFSET_KEY` in `src/telegram/inbound.ts`) is advanced **only after**
@@ -99,9 +116,13 @@ inbound attachment
   └─ Phase 1 (synchronous, in inbound txn):
        storage_objects (capture_status=pending, status=pending,
                         retention_class=session, source_channel=telegram)
-  └─ Phase 2 (separate txn, post-commit):
-       attachment_capture downloads bytes, runs MIME probe,
-       sets capture_status=captured + sha256/size_bytes
+       + provider_run job (no separate storage_capture job)
+  └─ Phase 2 (in-process, run by the worker before the AI subprocess):
+       runCapturePass(jobId) → captureOne(...) downloads bytes,
+       runs MIME probe, sets capture_status=captured +
+       sha256/size_bytes via commitCaptureSuccess; on S3-eligible
+       retention class, inserts a storage_sync job
+       (idempotency_key='sync:' || storage_object_id)
   └─ Phase 3 (async):
        storage/sync uploads to S3, advances status to uploaded
 ```

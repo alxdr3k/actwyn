@@ -90,9 +90,18 @@ After install:
 
 1. Edit `/etc/actwyn/env` and populate the secrets. File mode must
    remain `0640 root:actwyn`.
-2. Rsync the application to `/opt/actwyn` (`bun.lock`,
-   `config/runtime.json`, `migrations/*.sql`, `src/*`,
-   `scripts/check-single-redactor.ts`).
+2. Rsync the application to `/opt/actwyn`. Required at runtime:
+   - `package.json` and `bun.lock` (Bun engine pin + module
+     resolution metadata).
+   - `tsconfig.json` — defines the `~/*` → `src/*` path alias used
+     throughout `src/main.ts` and its imports. **Without it, Bun
+     fails module resolution at boot.**
+   - `config/runtime.json` (loaded by `src/config.ts`).
+   - `migrations/*.sql` (consumed by `src/db/migrator.ts` against
+     `ACTWYN_MIGRATIONS_PATH`, defaulting to `/opt/actwyn/migrations`).
+   - `src/*` (the application).
+   - `scripts/check-single-redactor.ts` (used by `bun run lint:redactor`;
+     listed in the existing `deploy/systemd/README.md`).
 3. As root: `systemctl enable --now actwyn.service`.
 4. Tail logs: `journalctl -u actwyn -f`.
 
