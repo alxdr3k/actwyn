@@ -103,6 +103,7 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | Q-060   | JudgmentItem 4축 분리 사용자 작성 default                           | —             | —                          | —                | ADR-0013                                      |
 | Q-061   | Critique Lens v0.1 LLM critic prompt 형식                           | —             | —                          | —                | ADR-0013 §Decision 1                          |
 | Q-062   | Tension target_domain 확장 시점                                     | —             | —                          | —                | ADR-0013 §Decision 2; DEC-032                 |
+| Q-063   | docs-structure follow-up PR scope (current-state docs / AGENTS.md / archive) | —    | —                          | —                | DEC-037 §scope clarification                  |
 
 ## Matrix — ADRs → artifacts
 
@@ -162,6 +163,7 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | DEC-034 | `procedure_subtype` 5 enum + default `skill`                  | —                        | —                  | ADR-0013 §Decision 7; Q-056    |
 | DEC-035 | Reflection 5 sub-action P0.5 도입 (`reflection_triage`만)     | —                        | —                  | ADR-0013 §Decision 5; Q-054    |
 | DEC-036 | `current_truth` → `current_operating_view` 이름 변경          | —                        | —                  | ADR-0013 §Decision 4; Q-057    |
+| DEC-037 | Implementation Documentation Lifecycle Policy                  | —                        | —                  | ADR README §Promotion rules; Q-063 (follow-up docs-structure PR) |
 
 ## Matrix — PRD acceptance criteria → evidence
 

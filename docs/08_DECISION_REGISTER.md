@@ -84,6 +84,7 @@ deployment shape). Everything else is a `DEC-###`.
 | DEC-034 | `procedure_subtype` 5 enum + default `skill`                  | accepted |
 | DEC-035 | Reflection 5 sub-action P0.5 도입 (`reflection_triage`만)     | accepted |
 | DEC-036 | `current_truth` → `current_operating_view` 이름 변경          | accepted |
+| DEC-037 | Implementation Documentation Lifecycle Policy                  | accepted |
 
 Decisions that were previously `D01`..`D05` in the flat log have
 been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
@@ -1053,6 +1054,74 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
 - Review trigger: 더 정확한 이름 (예: `active_view`) 발견 시.
 - Supersedes / superseded by: —
 - Refs: ADR-0013 §Decision 4; Q-057.
+
+## DEC-037 — Implementation Documentation Lifecycle Policy
+
+- Date: 2026-04-26.
+- Status: accepted.
+- Context: actwyn judgment system은 Phase 0/0.5에서 ADR 5 + JUDGMENT_SYSTEM.md
+  spec + DEC/Q register로 큰 design surface를 만들었다. Phase 1A 구현이
+  시작되면 이 design 문서들을 어떻게 관리할지 — current behavior에 맞춰
+  편집할지, 그대로 historical record로 두고 별도 current-state docs를
+  만들지 — 결정이 필요하다. 결정 없이 가면 (a) accepted ADR이 사후
+  수정되어 audit trail 깨짐, (b) design spec과 implementation drift가
+  silent하게 누적, (c) 새 contributor가 어디를 source of truth로 봐야
+  할지 모름.
+- Decision: Phase 0/0.5 design 문서와 implementation 문서의 lifecycle을
+  다음 7개 원칙으로 분리한다.
+  1. Phase 0 design specs (`docs/JUDGMENT_SYSTEM.md`, ADR-0009 ~ ADR-0013,
+     관련 DEC/Q)는 Phase 1 구현이 시작되면 **historical architectural
+     records**로 취급한다.
+  2. **Accepted ADRs는 current behavior에 맞춰 편집하지 않는다.** 새
+     ADR이 supersede / refine한다 (ADR README §Promotion rules 정합).
+  3. Current implemented behavior는 implementation 시작 후 **thin
+     current-state docs**로 기록한다 (별도 PR).
+  4. Code / tests / migrations / schema 정의가 implemented behavior의
+     **source of truth**다. 문서가 코드와 다르면 코드가 맞다.
+  5. Current docs는 작게 유지하며, behavior / schema / runtime 변경 시만
+     업데이트한다.
+  6. Archived design docs는 **history**이며 **authority가 아니다**.
+     reader는 이를 "왜 이 결정을 했는가"의 근거로 보고, "지금 어떻게
+     동작하는가"의 source로 보지 않는다.
+  7. `AGENTS.md` / 본격 current-state doc 구조는 별도 docs-structure PR
+     에서 도입한다 (Q-063 추적).
+- Alternatives considered:
+  - (a) ADR을 current behavior에 맞춰 사후 편집 — audit trail 깨짐, ADR
+    promotion rules와 충돌.
+  - (b) design spec을 그대로 current spec으로 유지 — implementation drift
+    누적 후 silent contradiction.
+  - (c) 본 PR에서 archive 폴더 + AGENTS.md + current-state docs 모두 도입
+    — scope creep, Phase 0/0.5 cleanup 본 PR 범위 밖.
+- Impacted docs: ADR README §Promotion rules; `docs/JUDGMENT_SYSTEM.md`
+  (자체가 historical record가 될 후보); 모든 ADR-0009 ~ ADR-0013;
+  DEC-022 ~ DEC-036; Q-027 ~ Q-062.
+- Risks / mitigations:
+  - design / implementation drift → §5 (small current docs) + §4
+    (code is source of truth) + Phase 1A에서 thin current-state docs
+    도입 시점에 명시 sync.
+  - ADR이 stale로 보일 위험 → §1 (historical record라는 framing) +
+    ADR README §Index가 supersede chain 표시.
+  - 새 contributor 혼동 → Phase 1A 첫 commit 또는 docs-structure PR에서
+    `AGENTS.md`로 onboarding.
+- Review trigger:
+  - Phase 1A 첫 implementation PR이 열릴 때 (current-state docs 시작
+    시점).
+  - docs-structure PR이 시작될 때 (`AGENTS.md` / archive location 결정).
+  - design spec과 implementation 사이 silent drift가 감지될 때.
+- Supersedes / superseded by: —
+- Refs: ADR README §Promotion rules; Q-063 (follow-up docs-structure PR).
+
+### 본 PR에서 의도적으로 하지 않은 것 (DEC-037 scope clarification)
+
+다음은 후속 docs-structure PR로 분리한다 (Q-063):
+
+- `docs/ARCHITECTURE.md`, `docs/CODE_MAP.md`, `AGENTS.md`,
+  `docs/design/archive/` 같은 새 구조 도입 X.
+- `docs/JUDGMENT_SYSTEM.md` 이동 또는 archive X (본 commit으로 자체
+  cleanup만).
+- Full current-doc structure 생성 X.
+
+본 DEC는 lifecycle policy commitment만 codify한다.
 
 ---
 

@@ -1284,6 +1284,34 @@ committed for a later milestone.
   codex bot 발견 — Q-062 baseline이 7 enum stale → DEC-032 (8 enum)
   정합으로 정정.
 
+### Q-063 — docs-structure follow-up PR scope
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: DEC-037이 Implementation Documentation Lifecycle Policy를
+  commit했지만, 구체적 docs 구조 (current-state docs / `AGENTS.md` /
+  archive location)는 본 PR scope 밖으로 분리. Phase 1A 첫 implementation
+  PR 또는 별도 docs-structure PR에서 결정 필요.
+- **Required follow-up items**:
+  1. **Thin current-state docs 도입** — `docs/JUDGMENT_SYSTEM_CURRENT.md`
+     또는 동등한 위치에 implementation 시점의 동작·schema·tool contract를
+     얇게 기록. design spec과 별개로 유지.
+  2. **`AGENTS.md` 생성 또는 갱신** — 새 contributor / agent가 어디를
+     source of truth로 봐야 할지 onboarding. code = source of truth /
+     ADR = historical / current-state docs = thin behavior 명시.
+  3. **Phase 0 design specs archive location 결정** — `docs/design/`
+     vs `docs/archive/phase-0/` vs in-place 유지 + ADR README의 retired
+     marker. 후보 비교 + 결정.
+  4. **Drift detection mechanism** — design spec과 implementation이
+     drift할 때 감지 방법 (CI grep / eval fixture / manual review
+     cadence).
+- **Recommendation**: Phase 1A 첫 implementation PR 머지 후 별도
+  docs-structure PR로 처리. 본 PR scope 밖.
+- **Trigger**: Phase 1A 첫 implementation PR이 열릴 때 또는 docs
+  drift가 감지될 때.
+- **History**: 2026-04-26 (DEC-037 §scope clarification으로 follow-up
+  분리).
+
 ---
 
 ## Deferred
