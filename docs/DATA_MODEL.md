@@ -83,12 +83,20 @@ Durable job queue.
 - `status ∈ { queued, running, succeeded, failed, cancelled, interrupted }`.
 - `job_type ∈ { provider_run, summary_generation, storage_sync, notification_retry }`.
 - `(job_type, idempotency_key)` is globally unique. Idempotency-key
-  shapes per HLD §5.3:
+  shapes used in code today (HLD §5.3 prose lists the same families
+  but with stale spellings; the runtime is authoritative):
   - `'telegram:' || update_id`
+    (`src/telegram/inbound.ts`)
   - `'summary:' || session_id || ':' || user_trigger_epoch`
+    (`src/commands/summary.ts`)
   - `'end:' || session_id`
+    (`src/commands/summary.ts`)
   - `'sync:' || storage_object_id`
-  - `'notify:' || outbound_notification_id`
+    (`src/telegram/attachment_capture.ts` + `src/storage/sync.ts`)
+  - `'notif-retry:' || notification_id`, optionally suffixed with
+    `':from:' || from_job_id` when re-enqueued by a newer job
+    (`enqueueNotificationRetryJob` in `src/queue/worker.ts`,
+    `src/startup/recovery.ts`)
 
 ### `provider_runs`
 
@@ -170,8 +178,14 @@ to keep in mind:
 - `settings['telegram.next_offset']` is advanced **only after** the
   transaction that recorded the matching `telegram_updates` rows
   has committed.
-- Every `telegram_updates.status = enqueued` row has a `jobs` row
-  whose `idempotency_key = 'telegram:' || update_id`.
+- Every `telegram_updates.status = enqueued` row that came from the
+  regular inbound path has a `jobs` row whose
+  `idempotency_key = 'telegram:' || update_id`. **Exception**:
+  `/cancel` is a control-plane action — `classifyAndCommit` in
+  `src/telegram/inbound.ts` marks the update `enqueued`, returns an
+  `instant_response`, and intentionally **does not** insert a
+  `jobs` row (`job_id = null`). When debugging or backfilling, do
+  not assume every `enqueued` update joins to a `telegram:*` job.
 - A `jobs` row with `job_type = provider_run` reaching
   `status = succeeded` has at least one `provider_runs.status = succeeded`
   and at least one assistant `turns` row.
