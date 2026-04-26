@@ -373,7 +373,8 @@ describe("delete_failed retry path (Blocker 4)", () => {
     seedDeleteFailed("so-df-1", 1);
     const result = runRetryScheduler({
       db,
-      config: { max_attempts: 3 },
+      transport: new StubS3Transport(),
+      config: { max_attempts: 3, local_path: localPath },
     });
     expect(result.delete_repended).toBe(1);
     expect(result.delete_exhausted).toBe(0);
@@ -388,7 +389,8 @@ describe("delete_failed retry path (Blocker 4)", () => {
     seedDeleteFailed("so-df-2", 3);
     const result = runRetryScheduler({
       db,
-      config: { max_attempts: 3 },
+      transport: new StubS3Transport(),
+      config: { max_attempts: 3, local_path: localPath },
     });
     expect(result.delete_exhausted).toBe(1);
     expect(result.delete_repended).toBe(0);
