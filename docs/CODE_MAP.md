@@ -91,7 +91,7 @@ record per DEC-037). It has no module in `src/` yet. See
 | ------------------------------------- | ------------------------------------------------------------------------------------ |
 | `src/queue/worker.ts`                 | Single job claim + dispatch loop; one `provider_run` at a time. Also runs the in-process attachment capture pre-step before each `provider_run`. |
 | `src/queue/notification_retry.ts`     | Handlers / helpers used by the worker to process `notification_retry` jobs (per-chunk re-send of `outbound_notification_chunks`). Not a separate loop. |
-| `src/startup/recovery.ts`             | Boot-time reconciliation of `running` jobs and pending storage objects.              |
+| `src/startup/recovery.ts`             | Boot-time reconciliation of stale `running` jobs (force `interrupted`, requeue if `safe_retry`, kill orphan PIDs); offset fast-forward; enqueues one `storage_sync` job for `failed` / `delete_failed` rows only (not for `pending`). |
 
 ## Observability
 

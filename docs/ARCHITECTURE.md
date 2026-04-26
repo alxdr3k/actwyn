@@ -139,8 +139,10 @@ A short summary; the full file map lives in `docs/CODE_MAP.md`.
 - `src/commands/*` — `/cancel`, `/correct`, `/doctor`, `/forget`,
   `/provider`, `/save_last_attachment`, `/status`, `/summary`,
   `/whoami`.
-- `src/startup/recovery.ts` — boot-time reconciliation of jobs and
-  storage.
+- `src/startup/recovery.ts` — boot-time reconciliation of stale
+  `running` jobs (force `interrupted`, requeue if `safe_retry`, kill
+  orphan PIDs); offset fast-forward; one-shot `storage_sync` for
+  `failed` / `delete_failed` rows only.
 
 ## Planned but not implemented
 

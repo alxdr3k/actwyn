@@ -21,8 +21,15 @@
    (`src/db.ts`).
 3. `migrate(db, migrationsPath)` — forward-only, idempotent
    (`src/db/migrator.ts`).
-4. `runStartupRecovery(db, …)` — reconciles `running` jobs and
-   pending storage objects (`src/startup/recovery.ts`).
+4. `runStartupRecovery(db, …)` — reconciles stale `running` jobs
+   (forces `running → interrupted`, requeues if `safe_retry`, kills
+   orphan process groups), fast-forwards
+   `settings['telegram.next_offset']` past gaps, and **sweeps only
+   `storage_objects` rows in `('failed', 'delete_failed')`** by
+   enqueueing one `storage_sync` job with a per-boot idempotency key.
+   Rows in `pending` are **not** swept here — they are picked up by
+   ordinary `storage_sync` jobs created by capture / promotion paths.
+   See `src/startup/recovery.ts`.
 5. Wires composition root: redactor, S3 transport, Telegram Bot API
    transport, Claude adapter (full + advisory variants), MIME probe,
    shared cancel-handle map.

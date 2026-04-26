@@ -189,7 +189,7 @@ reasoning.
 | `memory_summaries`                    | `src/memory/summary.ts`                                                           |
 | `memory_items` (insert)               | `src/memory/summary.ts`, `src/commands/correct.ts`                                |
 | `memory_items.status`                 | `src/commands/correct.ts` (`active → superseded`), `src/commands/forget.ts` (`→ revoked`) |
-| `storage_objects` (insert)            | `src/telegram/inbound.ts` (attachments), `src/providers/claude.ts` (generated artifacts), `src/memory/summary.ts` (snapshots), `src/storage/local.ts` (transcripts) |
+| `storage_objects` (insert)            | `src/telegram/inbound.ts` (Telegram attachments, capture_status=pending); `src/queue/worker.ts` `enqueueMemorySnapshotSync` (memory_snapshot rows for `/summary` / `/end`, also enqueues the `storage_sync` job in the same txn). These are the only two `INSERT INTO storage_objects` sites in `src/`. |
 | `storage_objects.status`              | `src/storage/sync.ts`, `src/startup/recovery.ts`, `src/commands/forget.ts`        |
 | `memory_artifact_links`               | `src/memory/summary.ts`, `src/commands/save.ts`, `src/commands/forget.ts`         |
 | `outbound_notifications` (insert)     | `src/queue/worker.ts`, `src/commands/*`                                           |
