@@ -179,8 +179,8 @@ reasoning.
 | Table                                 | Writer                                                                            |
 | ------------------------------------- | --------------------------------------------------------------------------------- |
 | `telegram_updates`                    | `src/telegram/poller.ts`, `src/telegram/inbound.ts`                               |
-| `settings['telegram.next_offset']`    | `src/telegram/inbound.ts` (advances inside the inbound txn)                       |
-| `jobs` (insert)                       | `src/telegram/inbound.ts`, `src/commands/*`, `src/telegram/attachment_capture.ts` (storage_sync), `src/queue/worker.ts` (notif-retry, summary), `src/telegram/outbound.ts` |
+| `settings['telegram.next_offset']`    | `src/telegram/inbound.ts` (advances inside the inbound txn); `src/startup/recovery.ts` (offset fast-forward at boot) |
+| `jobs` (insert)                       | `src/telegram/inbound.ts` (`provider_run`); `src/commands/summary.ts` (`summary_generation`); `src/commands/save.ts`, `src/commands/forget.ts` (`storage_sync` for save / delete); `src/telegram/attachment_capture.ts` (`storage_sync` post-capture); `src/queue/worker.ts` (`storage_sync` for memory_snapshot, `notification_retry`); `src/startup/recovery.ts` (`storage_sync` recovery sweep, `notification_retry` for restart-recovery turn). `src/telegram/outbound.ts` does **not** write `jobs`. |
 | `jobs.status` (transitions)           | `src/queue/worker.ts`, `src/startup/recovery.ts`, `src/commands/cancel.ts`        |
 | `sessions`                            | `src/telegram/inbound.ts` (create), `src/memory/summary.ts` (`/end`)              |
 | `turns`                               | `src/providers/claude.ts`                                                         |
@@ -190,7 +190,7 @@ reasoning.
 | `memory_items` (insert)               | `src/memory/summary.ts`, `src/commands/correct.ts`                                |
 | `memory_items.status`                 | `src/commands/correct.ts` (`active → superseded`), `src/commands/forget.ts` (`→ revoked`) |
 | `storage_objects` (insert)            | `src/telegram/inbound.ts` (Telegram attachments, capture_status=pending); `src/queue/worker.ts` `enqueueMemorySnapshotSync` (memory_snapshot rows for `/summary` / `/end`, also enqueues the `storage_sync` job in the same txn). These are the only two `INSERT INTO storage_objects` sites in `src/`. |
-| `storage_objects.status`              | `src/storage/sync.ts`, `src/startup/recovery.ts`, `src/commands/forget.ts`        |
+| `storage_objects.status`              | `src/storage/sync.ts`, `src/commands/forget.ts` (recovery only counts `failed` / `delete_failed` rows and enqueues a `storage_sync` job; it does not update `storage_objects.status` directly) |
 | `memory_artifact_links`               | `src/memory/summary.ts`, `src/commands/save.ts`, `src/commands/forget.ts`         |
 | `outbound_notifications` (insert)     | `src/queue/worker.ts`, `src/commands/*`                                           |
 | `outbound_notifications.status`       | `src/telegram/outbound.ts` (rolled up from chunks)                                |
