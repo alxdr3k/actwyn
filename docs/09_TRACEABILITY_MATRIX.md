@@ -157,7 +157,7 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | DEC-029 | `system_authored` 제거 + `authority_source` P0.5 도입 범위    | —                        | —                  | ADR-0012 §Decision 1-3; Q-040  |
 | DEC-030 | Control-plane vs Judgment-plane 분리                          | —                        | —                  | ADR-0012 §Decision 6           |
 | DEC-031 | Critic Loop P0.5 도입 단계 (1-3단계만)                        | —                        | —                  | ADR-0012 §Decision 9; Q-047    |
-| DEC-032 | Tension `target_domain` P0.5 도입 범위 (7 enum)              | —                        | —                  | ADR-0013 §Decision 2; Q-051    |
+| DEC-032 | Tension `target_domain` P0.5 도입 범위 (8 enum, architecture 포함) | —                        | —                  | ADR-0013 §Decision 2; Q-051    |
 | DEC-033 | `status` 9 enum → 3축 분리 (lifecycle / activation / retention) | —                        | —                  | ADR-0013 §Decision 3; **supersedes DEC-026** |
 | DEC-034 | `procedure_subtype` 5 enum + default `skill`                  | —                        | —                  | ADR-0013 §Decision 7; Q-056    |
 | DEC-035 | Reflection 5 sub-action P0.5 도입 (`reflection_triage`만)     | —                        | —                  | ADR-0013 §Decision 5; Q-054    |

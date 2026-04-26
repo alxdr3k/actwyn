@@ -528,6 +528,16 @@ CREATE TABLE judgment_items (
   confidence TEXT NOT NULL DEFAULT 'medium',
   importance INTEGER NOT NULL DEFAULT 3,
 
+  -- decay axis (ADR-0011 + DEC-027). P0.5: only `none` and
+  -- `supersede_only` are accepted; remaining 3 enums (`time_decay` /
+  -- `verification_decay` / `event_driven`) are P1+. Default
+  -- `supersede_only` aligns with ADR-0009 12 Laws #7.
+  decay_policy TEXT NOT NULL DEFAULT 'supersede_only',
+
+  -- volatility hint (ADR-0011). Optional in P0.5 — kind/domain default
+  -- mapping resolved at validator layer (Q-041).
+  volatility TEXT,
+
   -- versioning (mandatory, ADR-0011 + Round 11 must-fix).
   ontology_version TEXT NOT NULL,
   schema_version TEXT NOT NULL,
