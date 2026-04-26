@@ -1157,9 +1157,13 @@ committed for a later milestone.
 
 ### Q-051 — Tension `target_domain` P0.5 도입 범위?
 
-- **Status**: decided as DEC-032 (P0.5 7 enum).
+- **Status**: decided as DEC-032 (P0.5 **8 enum**: design / memory / policy
+  / workflow / evidence / decision / security / architecture). `architecture`
+  는 Tension과 `kind=assumption`이 enum을 공유하므로 P0.5 필수 (PR #10
+  codex bot P1 review 정정으로 7 → 8).
 - **Trigger**: 사용자가 reserved 5 enum domain에서 tension 제기 시 enum 추가.
-- **History**: 2026-04-26 (ADR-0013 §Decision 2; DEC-032).
+- **History**: 2026-04-26 (ADR-0013 §Decision 2; DEC-032). follow-up:
+  codex bot 발견 — DEC-032 본문은 8 enum이지만 Q-051은 7로 stale → 정정.
 
 ### Q-052 — Tension `category` 14 enum P0.5 도입 범위?
 

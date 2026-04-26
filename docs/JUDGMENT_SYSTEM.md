@@ -1155,11 +1155,11 @@ procedure가 active policy로 effective하려면 elevated `authority_source`가
 
 | Policy | 의미 | 도입 시점 | 정합 도구 |
 |--------|------|-----------|----------|
-| `delete` | 완전 삭제(privacy 요청, GDPR) | P0(이미) | DEC-006 `/forget` |
-| `expire` | 시간 기반 자동 inactive(`valid_until` / `revisit_at`) | P0.5 | `judgment_items.status = expired` |
-| `supersede` | 더 나은 판단으로 교체, 이전 row 보존 | P0(이미) | `judgment.supersede` |
-| `archive` | 근거 / 학습용 보존, current context 제외 | P1 | 별 status / view |
-| `compress` | 원문 보존 + summary 사용으로 토큰 절약 | P1 | `compressed_summary` 필드 |
+| `delete` | 완전 삭제(privacy 요청, GDPR) | P0(이미) | DEC-006 `/forget`; `retention_state = "deleted"` |
+| `expire` | 시간 기반 자동 inactive(`valid_until` / `revisit_at`) | P0.5 | `lifecycle_status = "expired"` (ADR-0013 §Status Axis Separation; 기존 `status` 단일 컬럼은 RETRACT) |
+| `supersede` | 더 나은 판단으로 교체, 이전 row 보존 | P0(이미) | `judgment.supersede` → `lifecycle_status = "superseded"` |
+| `archive` | 근거 / 학습용 보존, current context 제외 | P1 | `retention_state = "archived"` (3축 분리 적용) |
+| `compress` | 원문 보존 + summary 사용으로 토큰 절약 | P1 | `compressed_summary` 필드 + `retention_state` 유지 |
 
 근거: Complementary Learning Systems(McClelland 1995). 망각은 결함이
 아니라 기능 — fast hippocampal learning과 slow cortical consolidation이
