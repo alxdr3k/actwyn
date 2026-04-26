@@ -34,7 +34,7 @@ Status legend:
 
 | Path                                     | Purpose                                                                          |
 | ---------------------------------------- | -------------------------------------------------------------------------------- |
-| `src/telegram/poller.ts`                 | Long-poll loop against Telegram Bot API; advances `telegram_next_offset`.        |
+| `src/telegram/poller.ts`                 | Long-poll loop against Telegram Bot API; advances the offset stored in `settings['telegram.next_offset']`. |
 | `src/telegram/inbound.ts`                | Classifies updates (text / command / attachment / unauthorized) and enqueues.    |
 | `src/telegram/outbound.ts`               | `sendMessage` executor; drives `outbound_notifications` + chunk states.          |
 | `src/telegram/bot_api.ts`                | Telegram Bot API HTTP transport (no framework dependency).                       |

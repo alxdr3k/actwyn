@@ -52,8 +52,12 @@ Config-driven; not mutated at runtime. Typically one row in P0.
 
 Opaque key/value store. Notable keys:
 
-- `telegram_next_offset` — long-poll offset (writer:
-  `src/telegram/poller.ts`).
+- `telegram.next_offset` — long-poll offset. The canonical settings
+  key is `telegram.next_offset` (with a dot), defined as
+  `OFFSET_KEY` in `src/telegram/inbound.ts` and read by
+  `src/startup/recovery.ts`. Some prose docs (HLD §5, code comments)
+  still refer to it as `telegram_next_offset`; treat the dot form as
+  authoritative for SQL queries / manual repair.
 - `bootstrap_whoami.expires_at` — DEC-009 30-minute auto-expiry.
 - `schema.migrations.<NNN>` — applied migration markers.
 
@@ -163,7 +167,7 @@ These are enforced in code + invariant tests, not in SQL triggers.
 The full list lives in `docs/02_HLD.md` §5.2; the most common ones
 to keep in mind:
 
-- `settings.telegram_next_offset` is advanced **only after** the
+- `settings['telegram.next_offset']` is advanced **only after** the
   transaction that recorded the matching `telegram_updates` rows
   has committed.
 - Every `telegram_updates.status = enqueued` row has a `jobs` row

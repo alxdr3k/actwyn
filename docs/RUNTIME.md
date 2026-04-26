@@ -50,10 +50,11 @@ Telegram getUpdates
             └─► malformed / unsupported → telegram_updates → skipped or failed
 ```
 
-`telegram_next_offset` is advanced **only after** the same
-transaction that records `enqueued` / `skipped` / `failed`. Crash
-before commit re-delivers the update; `update_id` makes the second
-delivery a no-op.
+The long-poll offset (settings key `telegram.next_offset`, see
+`OFFSET_KEY` in `src/telegram/inbound.ts`) is advanced **only after**
+the same transaction that records `enqueued` / `skipped` / `failed`.
+Crash before commit re-delivers the update; `update_id` makes the
+second delivery a no-op.
 
 ### Job execution
 
