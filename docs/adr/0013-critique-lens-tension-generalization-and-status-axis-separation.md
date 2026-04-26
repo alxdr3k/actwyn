@@ -356,7 +356,7 @@ type AttentionPriority = {
 | Risk | Mitigation |
 | ---- | ---------- |
 | status 3축 분리로 application 코드 복잡도 증가 | 3축은 직교, SQL filter는 단순 (lifecycle_status='active' AND activation_state IN ('eligible', 'dormant')). projection rule이 복잡도 흡수. |
-| Tension target_domain 12 enum P0.5 도입이 over-engineering | DEC-032 — P0.5는 7 enum (design / memory / policy / workflow / evidence / decision / security)만. 나머지 5 enum은 schema reserved. |
+| Tension target_domain 13 enum P0.5 도입이 over-engineering | DEC-032 — P0.5는 8 enum (design / memory / policy / workflow / evidence / decision / security / architecture)만. 나머지 5 enum은 schema reserved. (`architecture`는 `kind=assumption` enum 공유로 P0.5 필수.) |
 | ADR-0012 DesignTension → Tension rename으로 마이그레이션 비용 | ADR-0012 commit `8679544` 이후 schema migration 전이라 실제 row 없음. 문서 정정만으로 충분. |
 | `current_truth` → `current_operating_view` 이름 변경으로 ADR-0009 Law #4 문구 변경 | DB 필드 `current_state` 유지 — 코드 / migration 영향 없음. ADR-0009 본문은 ADR-0013 §4로 cross-ref + 정정. |
 | Reflection 5 sub-action 분해로 P0.5 scope 확장 | DEC-035 — P0.5는 reflection_triage만. 나머지 4 sub-action은 P1+. |

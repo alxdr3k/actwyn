@@ -131,8 +131,14 @@ single source로 관리한다.
   (memory가 아니라 judgment — "저장"이 아니라 "판단" 프레이밍).
 - 보안 invariant 강화: retrieved memory / judgment는 system policy
   나 tool permission을 override 못 함. procedure / policy memory는
-  `user_confirmed` 또는 system-authored provenance 필수. 이는
+  elevated `authority_source` (ADR-0012에서 도입: `user_confirmed` /
+  `maintainer_approved` / `merged_adr` / `runtime_config` /
+  `compiled_system_policy` / `safety_policy` 중 하나) 필수. 이는
   ADR-0006의 promotion gate를 procedure / policy 영역으로 확장.
+  *(원래 본 항목은 "user_confirmed 또는 system-authored provenance 필수"
+  라고 표기했으나, ADR-0012가 origin과 authority 축 혼합 발견 후
+  `system_authored`를 epistemic_status enum에서 제거하고 `authority_source`
+  별 필드로 분리. 본 항목은 ADR-0012 §Authority Source와 정합되도록 정정.)*
 - second-brain GitHub repo의 후속 처분은 본 PR scope 밖. 별도
   결정 필요 (Q-027 참조).
 - Eval harness 새로 구축 (Phase 2+). RAGAS metrics + actwyn 추가

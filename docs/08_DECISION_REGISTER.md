@@ -878,7 +878,11 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
   실제 row 없음. 문서 정정만으로 충분.
 - Review trigger: P1 schema PR에서 `authority_source` enum 추가 필요 시.
 - Supersedes / superseded by: —
-- Refs: ADR-0012 §Decision 1-3; Q-040.
+- Refs: ADR-0012 §Decision 1-3; ADR-0011 §Refs (system_authored RETRACT
+  cross-ref); second-brain Ideation Round 12 사용자 모순 직접 발견
+  (no upstream Q-### — DEC-029는 retraction 결정이라 ADR-0012가 직접
+  source). *(이전 Refs Q-040은 last_verified_at trigger 추적이라 무관 —
+  codex bot review로 발견하여 정정.)*
 
 ## DEC-030 — Control-plane vs Judgment-plane 분리 commitment
 

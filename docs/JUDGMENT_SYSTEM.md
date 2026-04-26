@@ -640,7 +640,7 @@ P0.5는 FTS5만. sqlite-vec / pgvector 도입 결정은 Q-029 trigger.
 - `judgment.supersede` — 새 active로 이전 active를 superseded로
 - `judgment.revoke` — active를 revoked로 (tombstone, ADR-0006의
   `/forget` 패턴과 정합)
-- `judgment.query` — kind / scope / status / FTS 기반 조회
+- `judgment.query` — kind / scope / lifecycle_status / activation_state / retention_state / FTS 기반 조회 (ADR-0013 §Status Axis Separation; 단일 `status` 컬럼 RETRACT)
 - `judgment.explain` — judgment의 source / evidence / supersede chain /
   would_change_if 반환
 - `judgment.link_evidence` — 기존 judgment에 source link 추가
@@ -760,7 +760,7 @@ src/judgment/
   extract.ts    // AI extraction → candidate JudgmentItem
   propose.ts    // judgment.propose tool impl
   commit.ts     // judgment.commit + supersede + revoke
-  query.ts      // judgment.query (kind/scope/status/FTS)
+  query.ts      // judgment.query (kind/scope/lifecycle_status/activation_state/retention_state/FTS)
   explain.ts    // judgment.explain
   project.ts    // current_state + FTS + (later) vector/graph
   policy.ts     // provenance gate + security invariants
