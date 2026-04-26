@@ -1,6 +1,6 @@
 # Traceability Matrix
 
-> Status: living document · Owner: project lead · Last updated: 2026-04-22
+> Status: living document · Owner: project lead · Last updated: 2026-04-26
 >
 > This matrix is the index that connects questions, decisions, and
 > source-of-truth artifacts. See
@@ -77,7 +77,7 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | Q-034   | Attention scoring formula 가중치 (정적 vs 학습)                     | —             | —                          | —                | ADR-0010 §Attention scoring; ADR-0011 §Decision 9 (activation_score 통합) |
 | Q-035   | Cognitive analogy의 communication 방식                             | —             | —                          | —                | ADR-0010 §Disclaimers                          |
 | Q-036   | `rejected` vs `revoked` status 통합 검토                            | —             | —                          | —                | ADR-0011 §Decision 2; DEC-026                  |
-| Q-037   | `architecture_assumption` 구현 형태 (kind / scope / 별 schema)     | —             | —                          | —                | ADR-0011 §Decision 6                           |
+| Q-037   | `architecture_assumption` 구현 형태 (kind / scope / 별 schema)     | superseded by Q-059 | —                    | —                | ADR-0011 §Decision 6; ADR-0013 §Decision 8     |
 | Q-038   | `activation_score` formula 가중치 default 값                        | —             | —                          | —                | ADR-0011 §Decision 8/9; Q-034 trace            |
 | Q-039   | `research_update_protocol` 7단계 자동화 시점                        | —             | —                          | —                | ADR-0011 §Decision 7                           |
 | Q-040   | `last_verified_at` 갱신 trigger                                     | —             | —                          | —                | ADR-0011 §시간 필드 8개                         |
@@ -149,9 +149,9 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | DEC-021 | CJK-safer token estimator rule                               | §12.6                    | §10.4              | —                            |
 | DEC-022 | second-brain GitHub repo는 actwyn judgment의 canonical 아님    | §12 (taxonomy 확장 예정) | §11.3              | ADR-0009 §1; second-brain Round 7 |
 | DEC-023 | `JudgmentItem.kind` v1 enum 범위 (6 enforced + 5 deferred)   | —                        | —                  | ADR-0009 §Risks; Q-028        |
-| DEC-024 | P0.5 cognitive scope (Goal / Workspace / Reflection 최소형)  | —                        | —                  | ADR-0010 §Phase 재구성; Q-032 |
+| DEC-024 | P0.5 cognitive scope (Goal / Workspace / Reflection 최소형)  | —                        | —                  | ADR-0010 §Phase 재구성; Q-032; **Reflection clause superseded by DEC-035** |
 | DEC-025 | JudgmentItem metacognitive 필드 P0.5 optional 도입           | —                        | —                  | ADR-0010 §Decision 3          |
-| DEC-026 | `JudgmentItem.status` enum P0.5 9 enum 모두 schema 도입      | —                        | —                  | ADR-0011 §Decision 2; Q-036    |
+| DEC-026 | `JudgmentItem.status` enum P0.5 9 enum 모두 schema 도입 (**superseded by DEC-033**) | —          | —                  | ADR-0011 §Decision 2; Q-036; ADR-0013 §Decision 3 |
 | DEC-027 | `decay_policy` enum P0.5는 `none` + `supersede_only`만        | —                        | —                  | ADR-0011 §Decision 4          |
 | DEC-028 | `ontology_version` + `schema_version` 모든 새 record에 강제   | —                        | —                  | ADR-0011 §Decision 5; Q-042    |
 | DEC-029 | `system_authored` 제거 + `authority_source` P0.5 도입 범위    | —                        | —                  | ADR-0012 §Decision 1-3; Q-040  |

@@ -496,22 +496,47 @@ CREATE TABLE judgment_sources (
   captured_at TEXT NOT NULL
 );
 
+-- ADR-0012/0013/DEC-033 reflected: single `status` column retired,
+-- replaced by 3 axes (lifecycle_status / activation_state / retention_state).
+-- authority_source + approval_state come from ADR-0012.
+-- ontology_version + schema_version are mandatory (see §ontology_version + schema_version).
+-- P0.5 enum subset is enforced at the validator layer, not at the DB layer
+-- (TEXT columns + CHECK constraints are added in the Phase 1A migration PR).
 CREATE TABLE judgment_items (
   id TEXT PRIMARY KEY,
   kind TEXT NOT NULL,
   scope_json TEXT NOT NULL,
   statement TEXT NOT NULL,
 
+  -- origin axis (ADR-0012 §Origin/Authority separation)
   epistemic_status TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'proposed',
+
+  -- authority axis (ADR-0012 §Authority Source)
+  -- P0.5: only `none` and `user_confirmed` are accepted (DEC-029).
+  authority_source TEXT NOT NULL DEFAULT 'none',
+
+  -- approval workflow (ADR-0012 §Approval State).
+  -- P0.5: all 4 enum values accepted (DEC-030).
+  approval_state TEXT NOT NULL DEFAULT 'proposed',
+
+  -- 3 status axes (ADR-0013 + DEC-033). The legacy `status` column
+  -- is intentionally absent — see "Notes on enum changes".
+  lifecycle_status TEXT NOT NULL DEFAULT 'proposed',
+  activation_state TEXT NOT NULL DEFAULT 'eligible',
+  retention_state TEXT NOT NULL DEFAULT 'normal',
 
   confidence TEXT NOT NULL DEFAULT 'medium',
   importance INTEGER NOT NULL DEFAULT 3,
+
+  -- versioning (mandatory, ADR-0011 + Round 11 must-fix).
+  ontology_version TEXT NOT NULL,
+  schema_version TEXT NOT NULL,
 
   valid_from TEXT,
   valid_until TEXT,
   revisit_at TEXT,
 
+  source_ids_json TEXT,
   supersedes_json TEXT,
   superseded_by_json TEXT,
 
@@ -1109,9 +1134,19 @@ procedure 예시 3개.
   scope: { user_id: alxdr3k }
 ```
 
-procedure는 `epistemic_status`로 `user_confirmed` 또는 `system-authored`만
-허용(ADR-0009 §Security invariants 그대로). assistant_generated /
-inferred procedure는 절대 active로 commit되지 않는다.
+procedure가 active policy로 effective하려면 elevated `authority_source`가
+필요하다 — origin과 authority의 분리 (ADR-0012). P0.5 허용 조합:
+
+- `epistemic_status = user_confirmed` + `authority_source = user_confirmed`
+- `epistemic_status ∈ {assistant_generated, inferred, ...}` 라도
+  사람의 명시적 승인 / PR 머지로 `authority_source ∈ {merged_adr,
+  maintainer_approved, ...}`를 얻은 경우만 active 허용 (단, P0.5는 elevated
+  authority 5종을 enforce하지 않음 — DEC-029 참조)
+
+> **RETRACTED.** 이전 문구 ("epistemic_status가 `user_confirmed` 또는
+> `system-authored`만 허용") 는 origin과 authority를 한 필드에 섞어 둔
+> 설계의 잔재였다. ADR-0012의 §Origin/Authority separation으로 폐기됨.
+> `epistemic_status` enum에서 `system_authored`도 함께 제거되었다.
 
 ### Forgetting / decay / consolidation policy
 
@@ -1267,23 +1302,19 @@ terminology 중 무엇을 우선할지는 별도 결정(Q-035).
 - `stale`: 오래됐고 현재 상황 변화 때문에 맞는지 의심됨. 사용 시 재검증
   필요.
 
-### Status enum 확장 (ADR-0009의 6 → 9)
+### Status enum 확장 (ADR-0009의 6 → 9) — RETRACTED by ADR-0013 / DEC-033
 
-ADR-0009의 6 status에서 확장:
+> **RETRACT (Round 13).** 이 섹션은 단일 `status` enum을 6→9로 확장하는
+> 안이었으나, ADR-0013에서 truth-lifecycle / workspace-activation /
+> retention 세 축이 한 컬럼에 섞여 있는 axis conflation으로 판정되어
+> 폐기되었다. 후속 설계는
+> [§Status Axis Separation (ADR-0013)](#status-axis-separation-adr-0013)을
+> 따른다 — 9 enum은 `lifecycle_status` (6) +
+> `activation_state` (5) + `retention_state` (3) 세 컬럼으로 분해된다.
+> P0.5 도입 범위는 DEC-026 → **superseded by DEC-033**.
 
-| Status | 의미 | 기본 워크스페이스 |
-|---|---|---|
-| `proposed` | 아직 확정 안 된 후보 | 보통 제외, 검토 task면 포함 |
-| `active` | 현재 유효 | 포함 후보 |
-| **`dormant` (신규)** | 유효할 수 있으나 요즘 안 쓰임 | relevance 높을 때만 포함 |
-| **`stale` (신규)** | 낡았을 가능성 큼, 재확인 필요 | 경고와 함께 제한 포함 |
-| `expired` | 유효기간 지남 | 기본 제외 |
-| `superseded` | 더 새 판단으로 대체됨 | 기본 제외, history 시 포함 |
-| `revoked` | 잘못됐거나 폐기됨 | 기본 제외, 폐기 이유 묻는 경우만 |
-| `rejected` | (Q-036: revoked와 통합 검토) | revoked와 동일 처리 후보 |
-| **`archived` (신규)** | 장기 보관 | 기본 제외, audit/explain 시만 |
-
-P0.5 도입 범위는 DEC-026.
+(아래 9-enum 표는 의도적으로 보존하지 않는다. 옛 결정 흔적을 추적하려면
+DEC-026 → DEC-033 supersede chain을 참조하라.)
 
 ### 시간 필드 8개
 
@@ -1404,7 +1435,7 @@ activation_score로 흡수되어 단일 formula. ADR-0011에서 명시적으로
 > **중요한 기억은 오래됐다고 자동 떨어지지 않음. 대신 오래될수록 재검증
 > 필요성이 올라간다.**
 
-### architecture_assumption (first-class judgment)
+### architecture_assumption (first-class judgment) — refined by ADR-0013
 
 시스템 자신의 설계 가정도 judgment로 저장. 같은 lifecycle (active →
 challenged → superseded). 예시:
@@ -1421,10 +1452,18 @@ challenged → superseded). 예시:
 신규: "Reflection은 event-triggered" (active)
 ```
 
-P1에 `judgment_items`에 `kind = "architecture_assumption"` row를
-시드 — ADR-0009 / ADR-0010 / ADR-0011의 commitment를
-architecture_assumption 형식으로 저장. 구현 형태(별 `kind` enum vs
-`scope: system`)는 Q-037.
+> **REFINE (ADR-0013).** 이전 안 (`kind = "architecture_assumption"`
+> 단독 enum)은 kind enum 폭발 위험으로 폐기. 새 안:
+> `kind = "assumption"` + `target_domain = "architecture"`.
+> Q-037 권고가 Q-059로 갱신되었음 — 본 문서 §kind=assumption + target_domain
+> 절을 참조.
+>
+> **P0.5 적용 여부:** `kind = "assumption"`은 P0.5 enforced kind 6종
+> (fact / preference / decision / current_state / procedure / caution)에
+> 포함되지 않는다. P0.5에서 architecture assumption은 (a) ADR/DEC seed
+> 또는 (b) `kind = "decision"` / `current_state` 표현으로 보존하고,
+> `kind = "assumption"` 도입은 P1로 미룬다. 따라서 P0.5 시드에서
+> 문자열 `"architecture_assumption"` kind는 사용하지 않는다.
 
 ### research_update_protocol (7단계)
 
@@ -1446,7 +1485,7 @@ P0.5는 사람 검토 + Claude proposal 패턴. 자동화는 P2+ (Q-039).
 
 | Phase | 추가 항목 |
 |---|---|
-| **P0.5** | status 9 enum (또는 8) + ontology_version + schema_version 강제 + supersede_only / none decay + architecture_assumption 시드 |
+| **P0.5** | lifecycle_status 6 + activation_state 3 (eligible / history_only / excluded) + retention_state 3 (DEC-033, supersedes 9-enum proposal) + ontology_version + schema_version 강제 + supersede_only / none decay. `kind = "assumption"` 도입은 P1로 deferred (architecture assumption은 ADR/DEC seed 또는 decision/current_state로 표현) |
 | **P1** | 추가 시간 필드 (last_verified_at / last_used_at / last_relevant_at) + 5 decay_policy 전체 + activation_score formula 구현 |
 | **P2** | research_update_protocol 자동화 + ontology migration tooling |
 
@@ -1708,7 +1747,104 @@ P0.5는 1-3단계만, 나머지는 P1+ (DEC-031).
 > codify (2) DesignTension → 일반 Tension generalize (3) status 9 enum
 > → 3축 분리 (4) 8개 setting 정교화.
 
-### Critique Lens v0.1 (5 Rules)
+### Exception Probe Gate (Round 14 must-fix)
+
+> Exception probing — and the broader Critique Lens — is **not** run on
+> every user request. Without a gate, every "오늘 날씨 어때?"-class
+> request would burn tokens on philosophical exception checks and
+> generate spurious Tension candidates. The gate decides whether the
+> Critique Lens runs at all, and at what depth.
+
+The gate is a control-plane classifier (not a Judgment). Its output is
+the **probe level** assigned to a candidate decision/turn.
+
+```
+Level   Name                     When                                                       Cost
+L0      none                     Casual Q&A, simple lookup, translation, weather.            0
+L1      cheap_check              Durable memory write candidate; minor policy use;          rule-based
+                                 rephrasing of an already-accepted decision.
+L2      structured_probe         Schema, enum, lifecycle, authority, projection,            short critic-lens checklist
+                                 retrieval inclusion, security/safety changes.
+L3      full_tension_review      ADR, write-path, long-term architecture, hard-to-reverse   full critic model
+                                 commitments; explicit user "review this" requests.
+```
+
+Gate triggers (any one fires → minimum L1; combinations escalate):
+
+1. User explicitly requests review/critique/sanity-check
+   ("이거 이상하지 않아?", "전체적으로 다시 봐", "구현 들어가도 돼?").
+2. Candidate is durable: judgment / procedure / policy / current_state /
+   ADR / DEC.
+3. Change touches schema / enum / lifecycle / authority / projection /
+   retrieval / security.
+4. User emits a **doubt signal** (한국어 keyword 후보:
+   "흠", "아니다", "미묘하게", "앞뒤가 안 맞아", "머리가 터질 것 같다";
+   en: "wait", "hmm", "actually", "doesn't quite line up").
+   Detection method is Q-045.
+5. Candidate conflicts with or could supersede an existing decision /
+   ADR / DEC / current_operating_view.
+6. High token cost / workflow friction / implementation burden expected.
+7. Eval or telemetry shows failure related to the candidate.
+
+Outputs:
+
+- A `reflection_triage_event` in the control-plane carrying
+  `exception_probe_level ∈ {L0, L1, L2, L3}`, `triggers[]`, and
+  `commit_allowed = false` (per ADR-0012).
+- For L0: no Critique Lens, no Tension generation. Done.
+- For L1: rule-based check only (e.g. "is this a duplicate of an
+  existing judgment with same scope?"). No critic-model call.
+- For L2: run the architecture/design Critique Lens v0.1 (below) over
+  the candidate. May emit `Tension` rows.
+- For L3: L2 + critic-model call (ADR-0012) + explicit human review
+  prompt. May open a tracked `Tension` and gate `judgment.commit`
+  through `approval_state`.
+
+P0.5 implementation scope:
+
+- Gate is **on-policy** (always evaluated). Default level = L0.
+- L1 is rule-based (cheap; runs in the same turn).
+- L2 is invoked only when triggers 1-3 fire and the candidate is a
+  judgment.commit / authority promotion / schema change.
+- L3 is **manual-only** in P0.5 (user must explicitly ask for "full
+  review"). Auto-promotion to L3 is P1+.
+
+The probe output is **control-plane telemetry**. It must not directly
+commit durable judgments — promotion still goes through ADR-0012's
+critique → proposal → approval gate.
+
+Eval fixtures the Phase 1A control-plane PR must include:
+
+- Casual weather question → `exception_probe_level = L0`, no Tension,
+  no reflection_triage event with reflection content.
+- "JudgmentItem.status에 stale을 넣자" → `exception_probe_level = L2`,
+  Tension candidate with `category ∈ {axis_conflation, lifecycle_gap}`.
+- Explicit "구현 들어가도 돼?" → `exception_probe_level = L3`.
+
+### Critique Lens v0.1 (5 Rules) — architecture/design scope
+
+> **Scope (Round 14 must-fix).** These 5 rules are **not** universal
+> reasoning rules. They are the first domain-specific critique lens
+> extracted from the actwyn Judgment System design process — i.e. an
+> `architecture_critique_lens_v0.1`, not a `universal_actwyn_reasoning_law`.
+> Apply this lens **only** when:
+>
+> - reviewing architecture / schema / lifecycle / authority / workflow /
+>   security decisions, **or**
+> - committing durable policy / procedure / current_state changes, **or**
+> - responding to explicit user doubt or design-review requests, **or**
+> - the Exception Probe Gate above assigned L2 or L3.
+>
+> Do **not** apply this lens to ordinary factual Q&A, casual lookup, or
+> low-impact tasks. Other domains (marketing, product, research) need
+> their own lens packs (cf. `target_domain` reserved enum, ADR-0013
+> §Decision 2).
+
+Lens identifier: `architecture_critique_lens_v0.1`
+Trigger level: L2 or L3 (Exception Probe Gate)
+Applies to: target_domain ∈ { design, memory, policy, workflow,
+evidence, decision, security }
+Output: `Tension[]` (control-plane telemetry; commit_allowed = false)
 
 actwyn critic loop의 self-applied algorithm. ADR-0012의 LLM critic prompt
 8 failure mode와 정합 (8 mode = "무엇을 보는가", 5 rule = "어떻게
@@ -1737,6 +1873,8 @@ Rule 5. Systematization gate
   If tension is recurring / high-impact / implementation-affecting /
   future-bug-prone, promote to tracked Tension.
   Otherwise keep as ephemeral critique telemetry.
+  Also weigh token / user-review cost: if tracking a Tension would cost
+  more attention than the likely future bug, keep it ephemeral.
 ```
 
 ### Tension Generalization (DesignTension → Tension)
