@@ -704,8 +704,8 @@ committed for a later milestone.
   - Option B — 단계적 마이그레이션. `memory_items`의 `user_stated` /
     `user_confirmed` row를 source-grounded judgment로 promotion.
     `memory_items`는 deprecation track.
-  - Option C — 통합. 한 테이블로 합치고 `kind` / `epistemic_status`로
-    구분.
+  - Option C — 통합. 한 테이블로 합치고 `kind` / `epistemic_origin` (ADR-0013
+    rename)으로 구분.
   현 commitment는 Option A. Phase 1에서 evidence 기반 재결정.
 - **Decision**: ADR-0009 (Phase 0 commit), Phase 1에서 별 ADR / DEC
   필요.
@@ -740,7 +740,7 @@ committed for a later milestone.
 - **Owner**: Staff Eng
 - **Proposed answer**: Phase 1은 **FTS5만**으로 시작. embedding
   projection은 Phase 4 trigger (`source_grounding_rate` /
-  `current_truth_accuracy` eval metric이 부족 evidence를 줄 때).
+  `current_operating_view_accuracy` eval metric이 부족 evidence를 줄 때).
   단, schema와 module structure는 embedding projection이 추가되어도
   비파괴적으로 들어올 수 있는 형태로 작성 (`judgment.project` 모듈
   분리, projection table 별도 권장).
@@ -791,7 +791,7 @@ committed for a later milestone.
     supersede / explain 자동 평가 시작 (CI에서 기본 평가 세트
     실행).
   - Phase 4 (embedding projection): RAGAS metric 통합 + actwyn 추가
-    metric (`current_truth_accuracy` / `supersede_respect_rate` /
+    metric (`current_operating_view_accuracy` / `supersede_respect_rate` /
     `source_grounding_rate` / `negative_knowledge_recall` /
     `memory_poisoning_rejection_rate` / `decision_explainability`).
   Law 12 (No eval, no intelligence) 준수 — 자동화 시점이 늦더라도
@@ -875,7 +875,7 @@ committed for a later milestone.
   - Option C — **task-conditioned 가중치.** query classifier(현재
     7 task) 별로 다른 가중치 set. 단순한 다중 정적 가중치.
   현 commitment는 P1 implementation 시 A로 시작, eval metric
-  (`source_grounding_rate` / `current_truth_accuracy`)가 부족 evidence를
+  (`source_grounding_rate` / `current_operating_view_accuracy`)가 부족 evidence를
   주면 C로 확장. B(학습 기반)는 multi-user / 풍부 telemetry가 생긴
   P2+에서 검토.
 - **Decision**: —  (P1 Attention scoring PR에서 결정).
@@ -1137,13 +1137,15 @@ committed for a later milestone.
 
 - **Status**: decided.
 - **Owner**: project lead.
-- **Context**: DesignTension 자체가 axis_conflation에 빠질 위험 — 즉
-  DesignTension on DesignTension 재귀.
-- **Decision**: 깊이 제한 1 — DesignTension on DesignTension 금지.
-  `target_type`에 `design_tension` 제외. 메타-critique이 필요하면 사용자
-  명시 또는 별 ADR.
+- **Context**: `Tension` (ADR-0012가 `DesignTension`으로 도입; ADR-0013
+  cleanup으로 generalize) 자체가 `axis_conflation` 카테고리에 빠질 위험
+  — 즉 `Tension` on `Tension` 재귀.
+- **Decision**: 깊이 제한 1 — `Tension` on `Tension` 금지. `target_type`
+  enum에서 critique-object self-target (예: 별도 `tension` target_type)
+  제외. 메타-critique이 필요하면 사용자 명시 또는 별 ADR.
 - **Trigger**: 깊이 제한 2 이상이 필요한 use case 발견 시.
-- **History**: 2026-04-26 (ADR-0012 §Risks).
+- **History**: 2026-04-26 (ADR-0012 §Risks). 2026-04-26 follow-up
+  (ADR-0013 cleanup): `DesignTension` → `Tension` rename 반영.
 
 ### Q-050 — Control-plane과 judgment-plane DB 분리 정도?
 
@@ -1246,21 +1248,22 @@ committed for a later milestone.
 
 - **Status**: open.
 - **Owner**: project lead.
-- **Context**: ADR-0013이 kind + `epistemic_status` (origin axis,
-  ADR-0012 정합 — Round 13 narrative에서 "epistemic_origin"으로 표기됐던
-  것은 schema 필드명이 아니라 axis 명) + authority_source + lifecycle_status
-  + activation_state 4축 분리. 사용자가 모두 입력? typed tool layer가 default
-  자동 주입?
-- **Recommendation**: typed tool layer에서 default 자동 주입 (kind는 사용자
-  / critic model 입력, 나머지 4축은 default + override).
-  **`epistemic_status`** (ADR-0012 §Origin/Authority schema 필드명;
-  Round 13에서 "epistemic_origin"으로 표기됐던 것은 axis 명 abstraction —
-  schema 필드는 `epistemic_status` 그대로) default = `user_stated` 또는
-  `assistant_generated` (caller에 따라). authority_source default = `none`.
-  lifecycle_status default = `proposed`. activation_state default =
-  `eligible`.
+- **Context**: ADR-0013 cleanup으로 schema 필드는 4축 분리 — kind +
+  `epistemic_origin` (ADR-0012 origin axis, ADR-0013 cleanup으로 필드명
+  `epistemic_status` → `epistemic_origin` rename) + `authority_source`
+  + `lifecycle_status` + `activation_state`. 사용자가 모두 입력? typed
+  tool layer가 default 자동 주입?
+- **Recommendation**: typed tool layer에서 default 자동 주입 (kind는
+  사용자 / critic model 입력, 나머지 4축은 default + override).
+  `epistemic_origin` default = `user_stated` 또는 `assistant_generated`
+  (caller에 따라). `authority_source` default = `none`.
+  `approval_state` default = `pending` (low-risk fact는 `not_required`).
+  `lifecycle_status` default = `proposed`. `activation_state` default =
+  `eligible`. `retention_state` default = `normal`.
 - **Trigger**: P1 typed tool 구현 시.
-- **History**: 2026-04-26 (ADR-0013).
+- **History**: 2026-04-26 (ADR-0013). 2026-04-26 follow-up (ADR-0013
+  cleanup): schema 필드명 `epistemic_status` → `epistemic_origin`
+  rename 확정. approval_state default 추가.
 
 ### Q-061 — Critique Lens v0.1 LLM critic prompt 형식?
 

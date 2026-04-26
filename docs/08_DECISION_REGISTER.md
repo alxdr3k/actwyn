@@ -649,7 +649,8 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
   source, (2) human-readable export — 가끔 읽기 좋은 Markdown
   snapshot, (3) backup / archive — Git history, (4) publishing
   layer — 일부 지식의 블로그 / 공개 문서 승격. **canonical이 아닌
-  것**: 실시간 memory write path, current truth source, agent
+  것**: 실시간 memory write path, `current_operating_view` source
+  (ADR-0013 cleanup으로 rename; 이전 이름: "current truth"), agent
   runtime retrieval primary DB, Obsidian vault, PR 기반 memory
   manager.
 - Alternatives considered: second-brain repo를 canonical로 유지하고
