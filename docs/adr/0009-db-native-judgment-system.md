@@ -192,8 +192,11 @@ single source로 관리한다.
   — **확장**. `authority_source` / `approval_state` / `approved_by` /
   `approved_at` 필드 추가, control-plane object 4종 신설
   (`interaction_signals` / `reflection_triage_events` /
-  `design_tensions` / `critique_outcomes`). 본 ADR의 12 Laws / 5 schema
-  / 8 typed tool 모두 유효.
+  `tensions` / `critique_outcomes`). 본 ADR의 12 Laws / 5 schema
+  / 8 typed tool 모두 유효. *(ADR-0012 commit 시점에는
+  `design_tensions`라는 이름이었으나, ADR-0013이 generalize하여
+  `tensions` 단일 테이블 + `target_domain` 차원으로 rename — Phase 1
+  schema는 `tensions`를 사용해야 한다.)*
 - ADR-0013 (Critique Lens v0.1 + Tension Generalization + Status Axis
   Separation) — Law #4 ("Current truth is a projection")의 "current
   truth"는 "current operating view"로 이름 변경 (DB 필드는 그대로).

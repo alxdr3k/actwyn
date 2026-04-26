@@ -1107,7 +1107,8 @@ committed for a later milestone.
   - (b) 사용자 직접 입력
   - (c) maintainer가 PR review 시 결정
 - **Recommendation**: (a) — critic 초기 평가 후 사용자 review로 final.
-- **Trigger**: P1 design_tensions schema PR.
+- **Trigger**: P1 `tensions` schema PR (ADR-0013이 `design_tensions` →
+  `tensions` rename + target_domain 차원).
 - **History**: 2026-04-26 (ADR-0012 §Decision 7).
 
 ### Q-047 — Critic Loop 4-7단계 자동화 시점?

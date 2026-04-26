@@ -151,6 +151,7 @@ type JudgmentItem = {
 
   statement: string
 
+  // origin axis (ADR-0012 §Origin/Authority separation; 8 enum)
   epistemic_status:
     | "observed"
     | "user_stated"
@@ -160,6 +161,22 @@ type JudgmentItem = {
     | "tool_output"
     | "decided"
     | "deprecated"
+
+  // authority axis (ADR-0012 §Authority Source; 7 enum, optional)
+  // P0.5: only `none` and `user_confirmed` accepted (DEC-029).
+  authority_source?:
+    | "none"
+    | "user_confirmed"
+    | "maintainer_approved"
+    | "merged_adr"
+    | "runtime_config"
+    | "compiled_system_policy"
+    | "safety_policy"
+
+  // approval workflow (ADR-0012)
+  approval_state?: "proposed" | "accepted" | "active" | "rejected"
+  approved_by?: "user" | "maintainer" | "system_release"
+  approved_at?: string
 
   // Status 3-axis separation (ADR-0013 §Status Axis Separation;
   // DEC-033 supersedes the single-`status` enum from earlier drafts).
@@ -198,6 +215,11 @@ type JudgmentItem = {
 
   supersedes?: string[]
   superseded_by?: string[]
+
+  // versioning (mandatory, ADR-0011 + DEC-028)
+  // typed tool layer가 default 자동 주입. v0.1로 시작.
+  ontology_version: string  // 예: "judgment-taxonomy-v0.1"
+  schema_version: string    // 예: "0.1.0"
 
   created_at: string
   updated_at: string
@@ -1709,7 +1731,11 @@ schema change / eval case / supersede / no-op.
   strong_preference / conceptual_challenge / scope_pushback). doubt
   signal 예시: "흠" / "아니다" / "미묘하게 다르다" / "앞뒤가 안 맞아".
 - **`reflection_triage_events`** — control-plane reflection 판단 기록.
-- **`design_tensions`** — 위 객체.
+- **`tensions`** — 위 `Tension` 객체 (ADR-0013 §Tension Generalization;
+  `target_domain` 차원으로 design / memory / policy / workflow / evidence
+  / decision / security / architecture 모두 단일 테이블에 저장. ADR-0012
+  의 `design_tensions` 표는 본 commit으로 RETRACT — Phase 1 schema는
+  반드시 `tensions` 테이블 명을 사용해야 한다).
 - **`critique_outcomes`** — 의문 → 결과 추적 (no_change / doc_fix /
   schema_change / tool_contract_change / new_eval_case /
   new_open_question / decision_superseded).

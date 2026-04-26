@@ -889,10 +889,11 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
 - Date: 2026-04-26.
 - Status: accepted.
 - Context: ADR-0012가 `ReflectionTriageEvent` / `interaction_signals` /
-  `design_tensions` / `critique_outcomes` 4 control-plane object를 신설.
-  이를 judgment-plane (decision / current_state / caution / procedure /
-  principle / fact / preference)과 명시적으로 분리할지, 같은 plane으로
-  취급할지 결정 필요.
+  `tensions` (ADR-0013 §Tension Generalization으로 `design_tensions` →
+  `tensions` rename + target_domain 차원) / `critique_outcomes` 4
+  control-plane object를 신설. 이를 judgment-plane (decision /
+  current_state / caution / procedure / principle / fact / preference)과
+  명시적으로 분리할지, 같은 plane으로 취급할지 결정 필요.
 - Decision: control-plane과 judgment-plane을 명시적으로 분리한다.
   control-plane는 telemetry / audit / debug 용 (durable 아닐 수 있음,
   retention class `session` 기본). judgment-plane는 actwyn 행동의 기준
