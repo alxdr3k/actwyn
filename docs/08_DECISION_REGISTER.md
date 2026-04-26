@@ -835,6 +835,83 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
 - Supersedes / superseded by: —
 - Refs: ADR-0011 §Decision 5; Q-030.
 
+## DEC-029 — `system_authored` enum 제거 + `authority_source` P0.5 도입 범위
+
+- Date: 2026-04-26.
+- Status: accepted.
+- Context: Round 11 must-fix #3가 `system_authored`를 `epistemic_status`에
+  추가했지만 (commit `eb9004b`), 사용자가 즉시 모순 발견 — origin과 authority
+  를 한 필드에 섞은 axis conflation. ADR-0012가 RETRACT.
+- Decision: (a) `epistemic_status`에서 `system_authored` 제거, 8 enum 유지
+  (origin only). (b) 신규 `authority_source` 필드 (7 enum, optional)로
+  authority 분리. (c) P0.5 `authority_source` 도입 범위는 `none` +
+  `user_confirmed` 2종만. 나머지 5 enum (`maintainer_approved` /
+  `merged_adr` / `runtime_config` / `compiled_system_policy` /
+  `safety_policy`)은 P1+ evidence 기반 추가.
+- Alternatives considered: `system_authored` 의미 재정의로 유지;
+  `authority_source` 7 enum 모두 P0.5 도입; `epistemic_status`와
+  `authority_source` 통합 single field.
+- Impacted docs: ADR-0012 §Decision 1-3; `docs/JUDGMENT_SYSTEM.md`
+  §Authority Source; ADR-0011 Refs.
+- Risks / mitigations: ADR-0011 commit `eb9004b`이 system_authored를
+  추가했던 row가 있을 수 있음 → 현재 시점은 schema migration 전이라
+  실제 row 없음. 문서 정정만으로 충분.
+- Review trigger: P1 schema PR에서 `authority_source` enum 추가 필요 시.
+- Supersedes / superseded by: —
+- Refs: ADR-0012 §Decision 1-3; Q-040.
+
+## DEC-030 — Control-plane vs Judgment-plane 분리 commitment
+
+- Date: 2026-04-26.
+- Status: accepted.
+- Context: ADR-0012가 `ReflectionTriageEvent` / `interaction_signals` /
+  `design_tensions` / `critique_outcomes` 4 control-plane object를 신설.
+  이를 judgment-plane (decision / current_state / caution / procedure /
+  principle / fact / preference)과 명시적으로 분리할지, 같은 plane으로
+  취급할지 결정 필요.
+- Decision: control-plane과 judgment-plane을 명시적으로 분리한다.
+  control-plane는 telemetry / audit / debug 용 (durable 아닐 수 있음,
+  retention class `session` 기본). judgment-plane는 actwyn 행동의 기준
+  (durable). DesignTension 등 critique object는 judgment_items에 들어가지
+  않으며, judgment_items는 critique 카테고리를 가지지 않는다.
+- Alternatives considered: 모두 judgment_items로 통합 (recursive critique
+  위험); 별 DB 분리 (운영 cost 증가).
+- Impacted docs: ADR-0012 §Decision 6; `docs/JUDGMENT_SYSTEM.md`
+  §Metacognitive Critique Loop §Control-plane vs Judgment-plane.
+- Risks / mitigations: 같은 SQLite DB 안에서 schema (`control_plane_*`
+  prefix vs `judgment_*` prefix)로 분리. application 코드에서 두 plane
+  cross-reference는 link table만 (foreign key 없음).
+- Review trigger: control-plane object가 judgment-plane으로 승격해야 할
+  use case 발견 시; storage cost가 control-plane에서 폭발할 때.
+- Supersedes / superseded by: —
+- Refs: ADR-0012 §Decision 6.
+
+## DEC-031 — Critic Loop P0.5 도입 단계 (1-3단계만)
+
+- Date: 2026-04-26.
+- Status: accepted.
+- Context: ADR-0012가 Critic Loop 8단계 (capture → signal detection →
+  tension proposal → target linking → severity ranking → resolution path
+  → outcome tracking → learning)를 정의. P0.5에 모두 도입하면
+  over-engineering 위험.
+- Decision: P0.5는 1-3단계만 도입 — capture (이미 ADR-0008 ledger 활용),
+  signal detection (rule-based + 사용자 명시), tension proposal (수동
+  생성 + critic model 후보). 4-7단계 (target linking / severity ranking
+  / resolution path / outcome tracking)는 P1+. 8단계 (learning /
+  auto-heuristic 승격)는 P3+.
+- Alternatives considered: 1-2단계만 (signal detection까지) — tension
+  proposal이 없으면 critique loop 시작 안 됨; 1-7단계 모두 — P1 cost
+  너무 큼.
+- Impacted docs: ADR-0012 §Decision 9; `docs/JUDGMENT_SYSTEM.md`
+  §Metacognitive Critique Loop §Critic Loop 8단계.
+- Risks / mitigations: P0.5 design tensions이 자동 resolution 없이 쌓일
+  위험 → 사용자가 직접 review하여 resolution path 결정. P1에 4단계
+  자동화.
+- Review trigger: P1 schema PR; design tensions queue가 사용자 검토
+  burden을 만들 때.
+- Supersedes / superseded by: —
+- Refs: ADR-0012 §Decision 9; Q-047.
+
 ---
 
 ## Incident log

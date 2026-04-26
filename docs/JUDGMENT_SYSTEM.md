@@ -251,7 +251,9 @@ source 없는 아이디어는 `hypothesis` 또는 `proposed` 상태로만 유지
 | Enum | Count | Values |
 |------|-------|--------|
 | `JudgmentItem.kind` | 11 | fact / preference / claim / principle / hypothesis / experiment / result / decision / current_state / procedure / caution |
-| `JudgmentItem.epistemic_status` | 9 | observed / user_stated / user_confirmed / inferred / assistant_generated / tool_output / system_authored / decided / deprecated |
+| `JudgmentItem.epistemic_status` | 8 | observed / user_stated / user_confirmed / inferred / assistant_generated / tool_output / decided / deprecated (origin only — Round 12 RETRACTION: system_authored 제거, ADR-0012 §Origin/Authority separation 참조) |
+| `JudgmentItem.authority_source` (optional, 신규 ADR-0012) | 7 | none / user_confirmed / maintainer_approved / merged_adr / runtime_config / compiled_system_policy / safety_policy |
+| `JudgmentItem.approval_state` (optional, 신규 ADR-0012) | 4 | proposed / accepted / active / rejected |
 | `JudgmentItem.status` | 9 | proposed / active / dormant / stale / archived / superseded / revoked / rejected / expired (ADR-0011 §Status enum 확장) |
 | `JudgmentItem.confidence` | 3 | low / medium / high |
 | `JudgmentItem.importance` | 5 | 1 / 2 / 3 / 4 / 5 |
@@ -271,15 +273,20 @@ DEC-026, DEC-027 정합).
 | Enum | Phase 1 enforced subset |
 |------|-------------------------|
 | `JudgmentItem.kind` | 6 enforced: fact / preference / decision / current_state / procedure / caution. **Deferred**: claim / principle / hypothesis / experiment / result (Phase 1 후 도입) |
-| `JudgmentItem.epistemic_status` | 9 모두 (security gate 필요) |
+| `JudgmentItem.epistemic_status` | 8 모두 (origin gate 필요) |
+| `JudgmentItem.authority_source` (ADR-0012) | DEC-029 — `none` + `user_confirmed`만 P0.5. 나머지 5 enum (maintainer_approved / merged_adr / runtime_config / compiled_system_policy / safety_policy)은 P1+ |
+| `JudgmentItem.approval_state` (ADR-0012) | 4 모두 |
 | `JudgmentItem.status` | DEC-026 — 9 enum schema 모두 + application 코드는 dormant/stale/archived 자동 진입 안 함 |
 | `JudgmentItem.decay_policy` | DEC-027 — `none` + `supersede_only` 2종만. 나머지 3종은 P1+ |
 
-### Notes on enum changes (Round 11 must-fix)
+### Notes on enum changes (Round 11 must-fix + Round 12 retraction)
 
-- **`epistemic_status`에 `system_authored` 추가** — security invariant
-  (procedure / policy memory의 elevated provenance 요구)와 정합.
-  underscore naming.
+- **`epistemic_status`에 `system_authored` 추가 → ROUND 12에서 RETRACTED**
+  — 사용자가 즉시 모순 발견 ("AI 생성이면 policy 권위 가진다는 게 앞뒤 안
+  맞음"). origin과 authority를 한 필드에 섞은 axis conflation. ADR-0012가
+  `authority_source` 별 필드로 분리 — origin (epistemic_status, 8 enum)와
+  authority (authority_source, 7 enum) 완전 분리. `system_authored`는
+  enum에서 제거.
 - **`attack_candidate` 처리** — 별 `kind`로 만들지 않고 `kind: "caution"` +
   optional `security_label` 필드로 처리 (kind taxonomy 부풀리지 않음).
 - **`status` 9 enum** — ADR-0009의 6 + ADR-0011의 3 신규 (dormant /
@@ -662,8 +669,12 @@ actwyn 추가 metric:
 ```
 1. memory는 기본적으로 evidence / context다.
 2. procedure / policy memory만 instruction처럼 취급할 수 있다.
-3. procedure / policy memory는 `user_confirmed` 또는 `system_authored`
-   provenance가 필요하다 (epistemic_status enum 9 참조).
+3. procedure / policy memory는 elevated `authority_source`가 필요하다
+   (`user_confirmed` / `maintainer_approved` / `merged_adr` /
+   `runtime_config` / `compiled_system_policy` / `safety_policy` 중 하나).
+   `epistemic_status: assistant_generated`도 사람의 승인 / 머지를 거쳐
+   `authority_source: merged_adr`로 active 가능. ADR-0012 §Origin/Authority
+   separation 참조.
 4. assistant_generated / inferred memory는 절대 tool permission을
    바꿀 수 없다.
 5. 외부 문서에서 온 "ignore previous instruction"류 문장은 memory로
@@ -1445,6 +1456,247 @@ P0.5는 사람 검토 + Claude proposal 패턴. 자동화는 P2+ (Q-039).
 > **새 논문 등장과 "오래된 기억"은 같은 lifecycle 문제 —
 > architecture_assumption도 judgment처럼 저장하면 module 단위 교체로
 > 처리 가능.**
+
+## Authority Source (ADR-0012)
+
+> Round 12에서 사용자가 ADR-0011 적용 commit (`eb9004b`)의
+> `system_authored` enum 추가에 모순을 즉시 발견. "AI가 생성한 내용이면
+> policy/procedure 권위 가진다는 게 앞뒤 안 맞아." 진단: origin과
+> authority 두 축을 한 필드에 섞은 axis conflation. ADR-0012가 RETRACT.
+
+### Origin vs Authority
+
+| 축 | 필드 | 의미 |
+|---|---|---|
+| Origin | `epistemic_status` (8 enum) | 내용이 어디서 왔는가 |
+| Authority | `authority_source` (7 enum, optional) | 왜 active policy/procedure가 될 수 있는가 |
+
+`epistemic_status: assistant_generated`인 내용도 사람의 명시적 승인 / PR
+머지로 `authority_source: merged_adr` / `maintainer_approved`를 얻을 수
+있다. 두 축은 별개.
+
+### `authority_source` 7 enum
+
+```ts
+authority_source?:
+  | "none"                       // 권위 없음 (proposal 단계)
+  | "user_confirmed"             // 사용자 명시 확인
+  | "maintainer_approved"        // maintainer (사용자 본인) 승인
+  | "merged_adr"                 // ADR 형태로 머지됨
+  | "runtime_config"             // 배포 config (env / config file)
+  | "compiled_system_policy"     // 컴파일된 시스템 규칙 (소스코드)
+  | "safety_policy"              // 안전 정책 (OWASP invariant 등)
+```
+
+**중요**: `compiled_system_policy`는 "시스템이 생각해서 쓴 내용"이 아니라
+**배포된 프로그램 자체에 포함된 규칙**.
+
+P0.5 도입 범위는 DEC-029 — `none` + `user_confirmed`만, 나머지 5 enum은
+P1+.
+
+### `approval_state` + `approved_by` + `approved_at`
+
+```ts
+approval_state?: "proposed" | "accepted" | "active" | "rejected"
+approved_by?: "user" | "maintainer" | "system_release"
+approved_at?: string
+```
+
+### Procedure/policy 권위 결정 패턴
+
+| 시나리오 | epistemic_status | authority_source | status / approval |
+|---|---|---|---|
+| Assistant 제안 procedure | `assistant_generated` | `none` | `proposed` |
+| 사용자가 "규칙으로 하자" 확인 | `user_confirmed` | `user_confirmed` | `active` / `accepted` |
+| Claude가 ADR 작성 + maintainer 머지 | `assistant_generated` | `merged_adr` 또는 `maintainer_approved` | `active` / `accepted` |
+| 코드/config의 안전 규칙 | `observed` 또는 `tool_output` | `compiled_system_policy` 또는 `safety_policy` | `active` |
+
+**핵심 invariant** (ADR-0009 정합):
+- `epistemic_status: assistant_generated`가 곧바로
+  `authority_source: maintainer_approved`로 가지 않음. 사람의 명시적 승인
+  / 머지가 필요. ADR-0009의 "assistant_generated / inferred 자동 commit
+  금지" 그대로 유효.
+
+## Metacognitive Critique Loop (ADR-0012)
+
+> Round 12에서 사용자가 본인의 미묘한 오류 발견 능력을 actwyn에 이식
+> 가능한지 질문. GPT가 사용자 비판 패턴 5종을 시스템화한 Metacognitive
+> Critique Loop를 제안.
+
+### Why this section
+
+actwyn은 좋은 기억 저장 시스템을 넘어 **자기 설계와 자기 판단 안의
+"미묘한 불일치"를 감지**하는 시스템이 되어야 한다. 사용자 비판 패턴 5종
+(축 혼합 / 단어 과잉 일반화 / workflow friction / 미래 변경 흡수성 /
+자기참조)을 control-plane critique object로 codify.
+
+### Control-plane vs Judgment-plane
+
+```
+control-plane (telemetry / audit / debug):
+  reflection_triage_event       (ADR-0012)
+  workspace_build_event          (ADR-0010)
+  retrieval_debug_event
+  context_pack_event
+  interaction_signal             (ADR-0012, 신규)
+  design_tension                 (ADR-0012, 신규)
+  critique_outcome               (ADR-0012, 신규)
+
+judgment-plane (durable, 행동 기준):
+  decision / current_state / caution / procedure / principle
+  fact / preference (ADR-0009 11 conceptual kinds)
+```
+
+**원칙**: critique를 judgment-plane에 저장하면 "자기 판단의 판단의 판단"
+recursive swamp. 둘은 명시 분리.
+
+### Reflection triage layer
+
+actwyn (또는 별 critic model)이 reflection 후보 판단까지만 수행. commit은
+별 gate. 절대 안 되는 구조:
+
+```
+대화 종료 → LLM이 reflection 생성 → 바로 memory/judgment commit
+```
+
+좋은 구조:
+
+```
+이벤트 발생 → reflection triage → proposal queue → provenance/authority
+gate → 필요 시 user confirmation 또는 maintainer approval → commit
+```
+
+critic model 사용 가능 (오히려 추천 — Claude Haiku 후보, Q-043). 출력은
+constrained JSON, `commit_allowed: false` 강제.
+
+```ts
+type ReflectionTriageEvent = {
+  id: string
+  source_turn_ids: string[]
+  trigger_type:
+    | "explicit_user_memory_request"
+    | "correction"
+    | "decision_signal"
+    | "conceptual_tension"
+    | "repeated_confusion"
+    | "architecture_assumption_challenged"
+    | "high_salience_user_signal"
+  should_reflect: boolean
+  suggested_reflection_type?: string
+  reason: string
+  confidence: number
+  created_at: string
+}
+```
+
+### 사용자 비판 패턴 5종
+
+| 패턴 | 의미 | 예시 (이 ideation 진행 중 발견) |
+|---|---|---|
+| A. 축 혼합 감지 | 한 필드가 여러 축 섞음 | system_authored가 origin과 authority 섞음 (Round 12) |
+| B. 단어 과잉 일반화 | 자연어 단어 하나가 여러 개념 묶음 | "오래된 기억"이 chronological/staleness/invalidity/dormancy 섞음 (Round 10) |
+| C. Workflow friction | 사용자 실제 사용 경로와 충돌 | GitHub PR write-back 거부, Obsidian 미사용 (Round 7) |
+| D. 미래 변경 흡수성 | 현재 이론을 schema에 박으면 마이그레이션 비용 | 새 논문 등장 시 업그레이드 가능? (Round 10) |
+| E. 자기참조 | 판단 시스템 자체가 review 대상 | 의문 발견 능력을 actwyn에 이식? (Round 12) |
+
+### `DesignTension` 객체
+
+```ts
+type DesignTension = {
+  id: string
+  target_type:
+    | "judgment_item" | "schema_field" | "tool_contract"
+    | "doc_section" | "architecture_assumption" | "workflow"
+  target_id?: string
+  category:
+    | "axis_conflation" | "ambiguous_term" | "scope_creep"
+    | "workflow_friction" | "authority_confusion" | "lifecycle_gap"
+    | "upgradeability_gap" | "token_cost_risk" | "security_risk"
+    | "projection_gap" | "eval_gap"
+  signal_source:
+    | "user_question" | "user_correction" | "critic_model"
+    | "eval_failure" | "telemetry" | "code_review"
+  evidence_source_ids: string[]
+  suspected_issue: string
+  why_it_matters: string
+  proposed_resolution?: string
+  severity: "low" | "medium" | "high"
+  confidence: number
+  status:
+    | "open" | "accepted" | "rejected" | "resolved"
+    | "converted_to_judgment" | "converted_to_question" | "converted_to_decision"
+  created_at: string
+  resolved_at?: string
+}
+```
+
+**핵심**: judgment 아닌 critique. 결과는 open question / doc fix /
+schema change / eval case / supersede / no-op.
+
+### 4 신규 telemetry tables
+
+- **`interaction_signals`** — 대화 중 signal 캡처 (8 signal_type:
+  confusion / correction / doubt / friction / overwhelm /
+  strong_preference / conceptual_challenge / scope_pushback). doubt
+  signal 예시: "흠" / "아니다" / "미묘하게 다르다" / "앞뒤가 안 맞아".
+- **`reflection_triage_events`** — control-plane reflection 판단 기록.
+- **`design_tensions`** — 위 객체.
+- **`critique_outcomes`** — 의문 → 결과 추적 (no_change / doc_fix /
+  schema_change / tool_contract_change / new_eval_case /
+  new_open_question / decision_superseded).
+
+### Critic Loop 8단계
+
+```
+1. Capture (turn / 문서 / tool output / PR review를 ledger 저장)
+2. Signal detection (correction / doubt / friction / ambiguity / overload)
+3. Tension proposal (DesignTension 후보 생성)
+4. Target linking (어떤 schema / judgment / ADR / tool contract 겨냥?)
+5. Severity ranking (구현 / 보안 / scope creep / token cost / friction)
+6. Resolution path (open question / doc fix / schema change / eval case /
+   supersede / no-op)
+7. Outcome tracking (실제 PR / 문서 / 결정으로 이어졌는지)
+8. Learning (자동 감지 heuristic으로 승격)
+```
+
+P0.5는 1-3단계만, 나머지는 P1+ (DEC-031).
+
+### LLM critic prompt 제한 (constrained JSON)
+
+자유 "리뷰해줘"는 장황한 철학을 만듦. 8 failure mode 체크리스트로 제한:
+
+```
+1. Axis conflation
+2. Authority confusion
+3. Lifecycle gap
+4. Scope mismatch
+5. Projection ambiguity
+6. Upgradeability gap
+7. Token-cost risk
+8. Eval gap
+```
+
+출력 형식:
+```json
+{
+  "tensions": [
+    {
+      "category": "authority_confusion",
+      "target": "epistemic_status.system_authored",
+      "suspected_issue": "Conflates origin with authority.",
+      "severity": "high",
+      "suggested_resolution": "Introduce authority_source instead.",
+      "requires_user_decision": true
+    }
+  ]
+}
+```
+
+### 한 문장 요약
+
+> **actwyn은 기억을 저장하는 시스템을 넘어, 자기 설계와 자기 판단 안의
+> "미묘한 불일치"를 감지하고, 그것을 open question / decision / schema
+> change / eval case로 승격시키는 critique loop를 가져야 한다.**
 
 ## What this isn't
 

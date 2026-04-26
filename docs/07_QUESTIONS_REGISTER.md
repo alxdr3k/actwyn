@@ -1043,6 +1043,109 @@ committed for a later milestone.
 - **Trigger**: 첫 ontology 변경 발생 시.
 - **History**: 2026-04-26 (ADR-0011 §ontology_version + schema_version).
 
+### Q-043 — Reflection triage critic model 선택 (Claude Haiku vs main vs other)?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0012가 reflection triage layer를 control-plane에 두고
+  critic model 사용을 권장 (commit_allowed: false 강제). main model
+  self-critique vs 별 cheap model vs 다른 provider 중 선택 미정.
+- **Options**:
+  - (a) Claude Haiku (cheap, 같은 provider, prompt cache 호환)
+  - (b) Main model (Claude Opus 4.7) self-critique — 자기 답변에 self-bias
+    위험
+  - (c) 다른 provider cheap model (GPT-4o-mini 등) — diversity 좋지만 운영
+    cost 증가
+- **Recommendation**: (a) Claude Haiku — P1+ 도입 시점.
+- **Trigger**: P1 typed tool 구현 시.
+- **History**: 2026-04-26 (ADR-0012 §Decision 4).
+
+### Q-044 — Critic model output JSON schema 정확한 형태?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0012가 critic model 출력은 constrained JSON, `commit_allowed:
+  false` 강제하라고 함. 정확한 schema (durability / novelty / risk_if_ignored
+  score 0-1, source_turn_ids 필수 등) 미정.
+- **Recommendation**: P1 typed tool 구현 시 결정. 초기 JSON schema 후보:
+  `{ should_reflect, reflection_type, durability, novelty, risk_if_ignored,
+  source_turn_ids, reason, commit_allowed: false }`.
+- **Trigger**: P1.
+- **History**: 2026-04-26 (ADR-0012 §Decision 4).
+
+### Q-045 — Doubt signal 한국어 keyword 감지 방법?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: `interaction_signals.signal_type=doubt` 감지에 한국어 표현
+  ("흠" / "아니다" / "미묘하게" / "앞뒤가 안 맞아") + LLM classifier 결합 필요.
+- **Options**:
+  - (a) keyword/regex만 (cheap, 정확도 낮음)
+  - (b) LLM classifier만 (정확도 높지만 모든 turn에 호출은 비쌈)
+  - (c) keyword/regex 1차 필터 + LLM 2차 검증
+- **Recommendation**: (c) — Round 8 token discipline 정합 (cheap classifier
+  gate).
+- **Trigger**: P1 telemetry 구현 시.
+- **History**: 2026-04-26 (ADR-0012 §Decision 8).
+
+### Q-046 — DesignTension severity 결정 주체?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: critic model 자체 평가 vs 사용자 confirm vs maintainer 결정.
+- **Options**:
+  - (a) critic model 초기 평가 + 사용자 review (open status에서)
+  - (b) 사용자 직접 입력
+  - (c) maintainer가 PR review 시 결정
+- **Recommendation**: (a) — critic 초기 평가 후 사용자 review로 final.
+- **Trigger**: P1 design_tensions schema PR.
+- **History**: 2026-04-26 (ADR-0012 §Decision 7).
+
+### Q-047 — Critic Loop 4-7단계 자동화 시점?
+
+- **Status**: decided as DEC-031.
+- **Owner**: project lead.
+- **Context**: ADR-0012가 8단계 정의. P0.5 도입 범위 미정.
+- **Decision**: DEC-031 — P0.5는 1-3단계만 (capture / signal detection /
+  tension proposal). 4-7단계는 P1+, 8단계는 P3+.
+- **Trigger**: P1 도입 시점.
+- **History**: 2026-04-26 (ADR-0012 §Decision 9; DEC-031).
+
+### Q-048 — `critique_outcomes` artifact link 범위?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: outcome trace 시 git commit hash / PR number / DEC-### /
+  Q-### / ADR-#### 어디까지 link?
+- **Recommendation**: 모두 link 가능하게 일반 string field (`changed_artifact_ids`)
+  로 둠. application 코드에서 prefix 인식 (예: `git:abc123`, `pr:10`,
+  `dec:031`).
+- **Trigger**: P1 critique_outcomes schema PR.
+- **History**: 2026-04-26 (ADR-0012 §Decision 8).
+
+### Q-049 — DesignTension 자기참조 깊이 제한?
+
+- **Status**: decided.
+- **Owner**: project lead.
+- **Context**: DesignTension 자체가 axis_conflation에 빠질 위험 — 즉
+  DesignTension on DesignTension 재귀.
+- **Decision**: 깊이 제한 1 — DesignTension on DesignTension 금지.
+  `target_type`에 `design_tension` 제외. 메타-critique이 필요하면 사용자
+  명시 또는 별 ADR.
+- **Trigger**: 깊이 제한 2 이상이 필요한 use case 발견 시.
+- **History**: 2026-04-26 (ADR-0012 §Risks).
+
+### Q-050 — Control-plane과 judgment-plane DB 분리 정도?
+
+- **Status**: decided as DEC-030.
+- **Owner**: project lead.
+- **Context**: 같은 SQLite DB vs 별 DB.
+- **Decision**: DEC-030 — 같은 SQLite DB, schema prefix 분리
+  (`control_plane_*` vs `judgment_*`). cross-reference는 link table만,
+  foreign key 없음.
+- **Trigger**: storage cost가 control-plane에서 폭발할 때.
+- **History**: 2026-04-26 (ADR-0012 §Decision 6; DEC-030).
+
 ---
 
 ## Deferred

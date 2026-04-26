@@ -190,3 +190,9 @@ Memory Activation에 single source로 관리한다.
   2026 Memory survey (write-manage-read loop), Complementary Learning
   Systems (McClelland 1995 — 빠른 episodic 저장과 느린 semantic
   통합).
+- ADR-0012 (Origin/Authority separation + Metacognitive Critique Loop) —
+  본 ADR의 Round 11 must-fix #3 commit (`eb9004b`)이 추가했던
+  `epistemic_status: system_authored` enum은 ADR-0012가 RETRACT한다.
+  origin과 authority 두 축을 한 필드에 섞은 axis conflation. 정정:
+  epistemic_status 8 enum 유지 (origin only) + 신규 `authority_source`
+  필드 (7 enum, authority 전담). ADR-0011의 다른 commitment는 모두 유효.

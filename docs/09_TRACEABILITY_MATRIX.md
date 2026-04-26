@@ -83,6 +83,14 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | Q-040   | `last_verified_at` 갱신 trigger                                     | —             | —                          | —                | ADR-0011 §시간 필드 8개                         |
 | Q-041   | `volatility` 결정 주체                                              | —             | —                          | —                | ADR-0011 §volatility + decay_policy            |
 | Q-042   | `ontology_version` migration 전략                                   | —             | —                          | —                | ADR-0011 §ontology_version + schema_version; DEC-028 |
+| Q-043   | Reflection triage critic model 선택                                 | —             | —                          | —                | ADR-0012 §Decision 4                          |
+| Q-044   | Critic model output JSON schema                                     | —             | —                          | —                | ADR-0012 §Decision 4                          |
+| Q-045   | Doubt signal 한국어 keyword 감지 방법                              | —             | —                          | —                | ADR-0012 §Decision 8                          |
+| Q-046   | DesignTension severity 결정 주체                                    | —             | —                          | —                | ADR-0012 §Decision 7                          |
+| Q-047   | Critic Loop 4-7단계 자동화 시점                                     | DEC-031       | —                          | —                | ADR-0012 §Decision 9                          |
+| Q-048   | `critique_outcomes` artifact link 범위                              | —             | —                          | —                | ADR-0012 §Decision 8                          |
+| Q-049   | DesignTension 자기참조 깊이 제한                                    | decided       | —                          | —                | ADR-0012 §Risks                               |
+| Q-050   | Control-plane / judgment-plane DB 분리 정도                         | DEC-030       | —                          | —                | ADR-0012 §Decision 6                          |
 
 ## Matrix — ADRs → artifacts
 
@@ -99,6 +107,7 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | ADR-0009 | DB-native, AI-first Judgment System                      | §12 (taxonomy 확장 예정) | §11.3 (judgment layer) | `docs/JUDGMENT_SYSTEM.md`; second-brain Ideation Round 7 + Appendix A |
 | ADR-0010 | Cognitive extension of Judgment System                   | §12 (taxonomy 확장 예정) | §11.3                | `docs/JUDGMENT_SYSTEM.md` §Cognitive Architecture Extension; second-brain Ideation Round 9 + Appendix A.19 |
 | ADR-0011 | Architecture upgradeability + memory activation lifecycle | §12 (taxonomy 확장 예정) | §11.3                | `docs/JUDGMENT_SYSTEM.md` §Upgradeability & Memory Activation; second-brain Ideation Round 10 + Appendix A.20 |
+| ADR-0012 | Origin/Authority separation + Metacognitive Critique Loop | §12 (taxonomy 확장 예정) | §11.3                | `docs/JUDGMENT_SYSTEM.md` §Authority Source + §Metacognitive Critique Loop; second-brain Ideation Round 12 + Appendix A.22; ADR-0011 §Refs (RETRACT system_authored) |
 
 ## Matrix — DECs → artifacts
 
@@ -132,6 +141,9 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | DEC-026 | `JudgmentItem.status` enum P0.5 9 enum 모두 schema 도입      | —                        | —                  | ADR-0011 §Decision 2; Q-036    |
 | DEC-027 | `decay_policy` enum P0.5는 `none` + `supersede_only`만        | —                        | —                  | ADR-0011 §Decision 4          |
 | DEC-028 | `ontology_version` + `schema_version` 모든 새 record에 강제   | —                        | —                  | ADR-0011 §Decision 5; Q-042    |
+| DEC-029 | `system_authored` 제거 + `authority_source` P0.5 도입 범위    | —                        | —                  | ADR-0012 §Decision 1-3; Q-040  |
+| DEC-030 | Control-plane vs Judgment-plane 분리                          | —                        | —                  | ADR-0012 §Decision 6           |
+| DEC-031 | Critic Loop P0.5 도입 단계 (1-3단계만)                        | —                        | —                  | ADR-0012 §Decision 9; Q-047    |
 
 ## Matrix — PRD acceptance criteria → evidence
 

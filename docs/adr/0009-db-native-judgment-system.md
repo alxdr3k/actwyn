@@ -182,6 +182,12 @@ single source로 관리한다.
   — **확장 + 정교화**. Status enum (dormant / stale / archived) /
   시간 필드 / decay policy / ontology versioning을 추가하며 본 ADR을
   supersede하지 않는다.
+- ADR-0012 (Origin/Authority separation + Metacognitive Critique Loop)
+  — **확장**. `authority_source` / `approval_state` / `approved_by` /
+  `approved_at` 필드 추가, control-plane object 4종 신설
+  (`interaction_signals` / `reflection_triage_events` /
+  `design_tensions` / `critique_outcomes`). 본 ADR의 12 Laws / 5 schema
+  / 8 typed tool 모두 유효.
 - DEC-006 (`/forget` 명령 set), DEC-007 (correction via supersede),
   DEC-022 (second-brain repo는 canonical 아님), DEC-023 (`JudgmentItem.kind`
   v1 enum 범위).
