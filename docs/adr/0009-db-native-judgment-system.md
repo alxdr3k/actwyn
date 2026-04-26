@@ -178,6 +178,10 @@ single source로 관리한다.
 - ADR-0010 (cognitive extension of Judgment System) — **확장**.
   Goal / Workspace / Attention / Metacognition / Forgetting layer를
   추가하며 본 ADR을 supersede하지 않는다.
+- ADR-0011 (architecture upgradeability + memory activation lifecycle)
+  — **확장 + 정교화**. Status enum (dormant / stale / archived) /
+  시간 필드 / decay policy / ontology versioning을 추가하며 본 ADR을
+  supersede하지 않는다.
 - DEC-006 (`/forget` 명령 set), DEC-007 (correction via supersede),
   DEC-022 (second-brain repo는 canonical 아님), DEC-023 (`JudgmentItem.kind`
   v1 enum 범위).

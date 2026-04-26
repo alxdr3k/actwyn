@@ -1167,6 +1167,250 @@ ADR-0009 Phase 3-5(context compiler / embedding / temporal graph)에 다음을
 사용자에게 actwyn을 설명할 때 cognitive terminology와 engineering
 terminology 중 무엇을 우선할지는 별도 결정(Q-035).
 
+## Upgradeability & Memory Activation (ADR-0011)
+
+> Round 10 (second-brain Ideation 노트)에서 사용자가 (a) 새 논문 등장 시
+> architecture 업그레이드 가능성과 (b) "오래된 기억" 식별 기준을 동시
+> 질문. GPT가 두 질문이 같은 lifecycle 문제임을 보여줌. 본 섹션은
+> ADR-0009 + ADR-0010을 supersede하지 않고 **확장 + 정교화**한다.
+
+### Why this section
+
+핵심 통찰:
+> 기억은 오래됐다고 버리는 게 아니라, **현재 판단에서의 활성화 가치
+> (activation value)가 낮을 때** 워크스페이스에서 빠진다. 유효하지 않은
+> 기억은 삭제되는 게 아니라 superseded / revoked / expired 상태로 역사와
+> 근거에 남는다.
+
+> 새 논문 등장과 "오래된 기억"은 **같은 lifecycle 문제**다. 둘 다
+> active → challenged → superseded 패턴. architecture_assumption도
+> judgment처럼 저장하면 "와 다 갈아엎자"가 아니라 "어떤 module만
+> 교체할지"로 처리 가능.
+
+### Architecture invariants (고정 vs replaceable)
+
+| 고정할 것 (architecture invariants) | 바꿀 수 있게 둘 것 (replaceable) |
+|---|---|
+| source / event 보존 (event ledger append-only) | memory taxonomy (`kind` enum, ontology) |
+| judgment의 source / evidence 연결 (provenance chain) | attention / activation scoring formula |
+| scope / status / confidence / time | reflection policy |
+| supersede / revoke / expire (lifecycle 보존) | consolidation policy |
+| current truth는 projection (재생성 가능) | forgetting / decay policy |
+| index는 파생물 (canonical 아님) | vector / graph backend |
+| eval로 검증 | context packing algorithm |
+| | salience / risk model |
+
+핵심: 인지 이론을 DB schema에 딱딱하게 박지 말고, 정책과 backend는
+갈아끼울 수 있게 둔다.
+
+### "오래된 기억"의 4가지 구분
+
+| 종류 | 정의 | 처리 |
+|---|---|---|
+| 오래된 (chronologically old) | 오래전 생성/관찰 | recency만으로 결정 X |
+| 낡은 (stale) | 한때 맞았지만 현재 상황과 안 맞을 가능성 | 경고 + 제한 포함 |
+| 무효화된 (invalid) | superseded / revoked / expired lifecycle 이동 | 기본 제외, history 시 포함 |
+| 잠든 (dormant) | 여전히 맞을 수 있으나 현재 task와 relevance 낮음 | relevance 높을 때만 포함 |
+
+**dormant vs stale 구분 (핵심)**:
+- `dormant`: 오래됐지만 틀렸다는 증거 없음. 지금 task와 relevance 낮아서
+  잠들어 있음.
+- `stale`: 오래됐고 현재 상황 변화 때문에 맞는지 의심됨. 사용 시 재검증
+  필요.
+
+### Status enum 확장 (ADR-0009의 6 → 9)
+
+ADR-0009의 6 status에서 확장:
+
+| Status | 의미 | 기본 워크스페이스 |
+|---|---|---|
+| `proposed` | 아직 확정 안 된 후보 | 보통 제외, 검토 task면 포함 |
+| `active` | 현재 유효 | 포함 후보 |
+| **`dormant` (신규)** | 유효할 수 있으나 요즘 안 쓰임 | relevance 높을 때만 포함 |
+| **`stale` (신규)** | 낡았을 가능성 큼, 재확인 필요 | 경고와 함께 제한 포함 |
+| `expired` | 유효기간 지남 | 기본 제외 |
+| `superseded` | 더 새 판단으로 대체됨 | 기본 제외, history 시 포함 |
+| `revoked` | 잘못됐거나 폐기됨 | 기본 제외, 폐기 이유 묻는 경우만 |
+| `rejected` | (Q-036: revoked와 통합 검토) | revoked와 동일 처리 후보 |
+| **`archived` (신규)** | 장기 보관 | 기본 제외, audit/explain 시만 |
+
+P0.5 도입 범위는 DEC-026.
+
+### 시간 필드 8개
+
+```ts
+type MemoryTime = {
+  created_at: string         // ADR-0009
+  observed_at?: string       // 신규 — 원래 사건/관찰 시점
+  valid_from?: string        // ADR-0009
+  valid_until?: string       // ADR-0009
+  last_verified_at?: string  // 신규 — 마지막 사실/선호 확인
+  last_used_at?: string      // 신규 — 마지막 답변/판단 사용
+  last_relevant_at?: string  // 신규 — 마지막 관련 task 중요
+  superseded_at?: string     // 신규
+  revoked_at?: string        // 신규
+}
+```
+
+`created_at` 단독으로는 부족. 기억 종류별로 보는 시계가 다름.
+`last_verified_at`은 `last_used_at`과 다르다 — 사용 ≠ 검증.
+`last_used_at` 자동 갱신 trigger는 Q-028.
+
+### volatility + decay_policy (신규 필드)
+
+```ts
+volatility?: "low" | "medium" | "high"
+decay_policy?:
+  | "none"
+  | "time_decay"
+  | "verification_decay"
+  | "event_driven"
+  | "supersede_only"
+```
+
+P0.5는 `none` + `supersede_only`만 도입 (DEC-027). 나머지 3종
+(`time_decay` / `verification_decay` / `event_driven`)은 P1+.
+
+### 기억 종류별 decay 정책 매핑
+
+| 기억 종류 | volatility | decay_policy |
+|---|---|---|
+| 사용자 명시 선호 | medium | verification_decay |
+| 프로젝트 current state | high | event_driven |
+| 결정 (decision) | medium | supersede_only |
+| 원칙 / lesson | low | none 또는 verification_decay |
+| 실험 결과 (raw) | low | none |
+| 실험 결과 (해석) | medium | time_decay |
+| 외부 연구 요약 | (domain) | (volatility 따라) |
+| 마케팅 채널 성과 | high | time_decay |
+| 보안 / 권한 정책 | low | supersede_only |
+| negative knowledge | low | none (오래돼도 중요) |
+
+### ontology_version + schema_version (강제)
+
+```yaml
+ontology_version: judgment-taxonomy-v0.1
+schema_version: 0.1.0
+```
+
+모든 새 record에 강제 (DEC-028). taxonomy / schema 변경 시 기존
+데이터 재해석 가능. v0.1로 시작. typed tool layer
+(`judgment.propose` / `judgment.commit`)에서 자동 주입.
+
+migration 전략은 Q-030 미해결 (자동 변환 vs 명시적 script vs 양립
+운영).
+
+### Hard filter (workspace inclusion 1단계)
+
+무조건 기본 제외:
+
+```
+status = revoked | superseded | expired
+  → 단, history / audit / "왜 바뀌었어?" 질문 시 retrieval 가능
+
+scope mismatch (현재 task scope와 다름)
+sensitivity 부적절 (현재 task에 노출 부적합)
+provenance 부적절 (예: assistant_generated가 procedure/policy로 사용 시도)
+```
+
+### Soft activation_score (workspace inclusion 2단계)
+
+```
+activation_score =
+    task_relevance              (현재 task와 관련도)
+  + scope_match                 (project / area / time window)
+  + importance                  (1-5 field)
+  + confidence                  (low / medium / high)
+  + user_emphasis               (강조도)
+  + current_goal_match          (active goal과 부합도)
+  + decision_impact             (active decision 연결도)
+  + risk_or_caution_boost       (caution과 연결도)
+  + recent_verification_boost   (last_verified_at 최근일수록)
+  + repeated_use_boost          (last_used_at 빈도)
+  - staleness_penalty           (last_verified_at 오래됨)
+  - uncertainty_penalty         (missing_evidence 많음)
+  - token_cost_penalty          (statement 길이)
+```
+
+`created_at`은 작은 요소. 더 중요: `last_verified_at` / `valid_until` /
+`status` / `importance` / `scope` / `current_goal_match`.
+
+**ADR-0010의 attention_score와의 관계**: 본 activation_score가 더
+정교한 통합 formula. ADR-0010 §Attention scoring의 formula는 본
+activation_score로 흡수되어 단일 formula. ADR-0011에서 명시적으로
+통합 commitment.
+
+### 중요도 × 오래됨 매트릭스
+
+| importance | status / verification | 처리 |
+|---|---|---|
+| high | active + recent verification | 강하게 포함 |
+| high | active + stale | 포함 + "확인 필요" 경고 |
+| high | superseded | current 제외, history / negative knowledge 보존 |
+| high | dormant | task와 직접 관련될 때만 포함 |
+| low | active + recent | 보통 포함 |
+| low | dormant / stale | 기본 제외 |
+| low | superseded | 완전 제외 |
+
+> **중요한 기억은 오래됐다고 자동 떨어지지 않음. 대신 오래될수록 재검증
+> 필요성이 올라간다.**
+
+### architecture_assumption (first-class judgment)
+
+시스템 자신의 설계 가정도 judgment로 저장. 같은 lifecycle (active →
+challenged → superseded). 예시:
+
+```
+"current truth is a projection"           (active)
+"vector index is not canonical"           (active)
+"GitHub repo is export/import only"       (active)
+"Reflection은 대화 종료마다 실행한다"     (active)
+  → 새 논문이 challenge 시:
+"무분별한 reflection은 memory pollution"  (challenged)
+  → eval 후 새 policy 채택 시:
+기존: superseded
+신규: "Reflection은 event-triggered" (active)
+```
+
+P1에 `judgment_items`에 `kind = "architecture_assumption"` row를
+시드 — ADR-0009 / ADR-0010 / ADR-0011의 commitment를
+architecture_assumption 형식으로 저장. 구현 형태(별 `kind` enum vs
+`scope: system`)는 Q-037.
+
+### research_update_protocol (7단계)
+
+새 논문 / 서비스 등장 시 처리 프로세스:
+
+```
+1. capture        — 논문 / 서비스 등장 사실을 ledger에 append
+2. extract        — claim / evidence 추출 (LLM)
+3. map            — 어떤 architecture_assumption이 영향받는지 매핑
+4. propose        — 어떤 module / policy 교체할지 proposal
+5. eval           — regression / improvement 측정
+6. migrate        — 점진적 도입 (event_driven)
+7. supersede      — 기존 assumption status: superseded
+```
+
+P0.5는 사람 검토 + Claude proposal 패턴. 자동화는 P2+ (Q-039).
+
+### Phase 도입 순서
+
+| Phase | 추가 항목 |
+|---|---|
+| **P0.5** | status 9 enum (또는 8) + ontology_version + schema_version 강제 + supersede_only / none decay + architecture_assumption 시드 |
+| **P1** | 추가 시간 필드 (last_verified_at / last_used_at / last_relevant_at) + 5 decay_policy 전체 + activation_score formula 구현 |
+| **P2** | research_update_protocol 자동화 + ontology migration tooling |
+
+### 한 문장 요약
+
+> **기억은 오래됐다고 버리는 게 아니라, 현재 판단에서의 활성화 가치가
+> 낮을 때 워크스페이스에서 빠진다.**
+> **유효하지 않은 기억은 삭제되는 게 아니라 superseded / revoked /
+> expired 상태로 역사와 근거에 남는다.**
+> **새 논문 등장과 "오래된 기억"은 같은 lifecycle 문제 —
+> architecture_assumption도 judgment처럼 저장하면 module 단위 교체로
+> 처리 가능.**
+
 ## What this isn't
 
 명시적 scope clarification (Round 7 사용자 조건 정합).

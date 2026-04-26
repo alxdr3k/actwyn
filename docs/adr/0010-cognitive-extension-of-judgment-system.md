@@ -199,6 +199,10 @@ list)는 **모두 그대로 유효**하다.
   §Cognitive Architecture Extension.
 - ADR-0009 (DB-native, AI-first Judgment System) — **확장**되며 supersede
   되지 않음.
+- ADR-0011 (architecture upgradeability + memory activation lifecycle) —
+  본 ADR의 §Attention scoring formula는 ADR-0011의 activation_score로
+  통합되어 단일 formula가 됨. status enum / 시간 필드 / decay policy
+  추가 확장.
 - ADR-0003 (SQLite canonical), ADR-0006 (explicit memory promotion),
   ADR-0008 (durable ledgers) — 정합 유지.
 - DEC-022 (second-brain repo는 canonical 아님), DEC-023

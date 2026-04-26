@@ -764,6 +764,77 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
 - Refs: ADR-0010 §Decision 3 / §Metacognition fields; second-brain
   Ideation 노트 Round 9 + Appendix A.19; Q-032.
 
+## DEC-026 — JudgmentItem.status enum P0.5 도입 범위 (9 enum 모두)
+
+- Date: 2026-04-26.
+- Status: accepted.
+- Context: ADR-0009의 6 status (`proposed` / `active` / `superseded` /
+  `revoked` / `rejected` / `expired`)에 ADR-0011이 3개 신규 status
+  (`dormant` / `stale` / `archived`)를 추가. P0.5 schema에 모두
+  포함할지, 일부만 포함할지 결정 필요.
+- Decision: P0.5에 9 status 모두 도입. 단 default는 `active`로 유지하고,
+  기존 row는 `schema_version: 0.0`으로 표시. application 코드는 P0.5에서
+  `dormant` / `stale` / `archived`를 자동으로 set하지 않으며, 모두
+  명시적 transition으로만 진입한다 (자동 stale 분류는 P1+ activation_score
+  formula 도입 시).
+- Alternatives considered: P0.5는 ADR-0009 6 status만 + P1에 3 신규
+  추가; `archived`만 P0.5 / 나머지는 P1.
+- Impacted docs: ADR-0011 §Decision 2 / §Status enum 확장; Q-036
+  (rejected/revoked 통합).
+- Risks / mitigations: 9 enum이 over-engineering 위험 → application
+  코드는 P0.5에서 active / proposed / superseded / revoked / expired만
+  실제 사용; dormant / stale / archived는 schema column에만 존재.
+- Review trigger: P1 activation_score formula 도입 시 자동 stale 분류
+  로직 검토; rejected / revoked 통합 결정 (Q-036).
+- Supersedes / superseded by: —
+- Refs: ADR-0011 §Decision 2; Q-036.
+
+## DEC-027 — `decay_policy` enum P0.5 도입 범위 (`none` + `supersede_only`만)
+
+- Date: 2026-04-26.
+- Status: accepted.
+- Context: ADR-0011이 5 decay_policy (`none` / `time_decay` /
+  `verification_decay` / `event_driven` / `supersede_only`)를 정의.
+  P0.5에 모두 도입하면 over-engineering 위험; 모두 미도입하면 ADR-0009의
+  supersede chain 정책이 schema에 반영 안 됨.
+- Decision: P0.5는 `none` + `supersede_only` 2종만 도입. 모든 새 record는
+  default `supersede_only`로 설정 (ADR-0009의 12 Laws #7 "Supersede,
+  do not overwrite" 정합). 나머지 3종 (`time_decay` /
+  `verification_decay` / `event_driven`)은 P1+에서 evidence 기반 추가.
+- Alternatives considered: P0.5는 `none`만 / 5종 모두 도입.
+- Impacted docs: ADR-0011 §Decision 4; `docs/JUDGMENT_SYSTEM.md`
+  §volatility + decay_policy.
+- Risks / mitigations: 나중에 `time_decay` / `verification_decay`가
+  필요해지면 schema migration 필요 → 현재 enum을 string column으로
+  저장하면 추가 cost 없음 (CHECK constraint 추가만).
+- Review trigger: 마케팅 채널 성과 / 외부 연구 요약처럼 빠른 stale이
+  필요한 use case가 P1에 등장할 때.
+- Supersedes / superseded by: —
+- Refs: ADR-0011 §Decision 4.
+
+## DEC-028 — `ontology_version` + `schema_version` 모든 새 record에 강제
+
+- Date: 2026-04-26.
+- Status: accepted.
+- Context: taxonomy / schema가 미래에 바뀔 가능성이 매우 높음 (Round 10
+  upgradeability 논의). 새 record에 version 정보가 없으면 기존
+  데이터를 어떤 ontology로 해석해야 할지 불명확.
+- Decision: 모든 새 `judgment_items` row는 `ontology_version`과
+  `schema_version`을 강제 (NOT NULL). 초기 값은
+  `ontology_version: judgment-taxonomy-v0.1`과 `schema_version: 0.1.0`.
+  typed tool layer (`judgment.propose` / `judgment.commit`)에서 자동
+  주입하여 작성 friction 최소화.
+- Alternatives considered: optional 필드로 시작; ontology_version만 강제.
+- Impacted docs: ADR-0011 §Decision 5; Q-030 (migration 전략).
+- Risks / mitigations: ADR-0011 도입 전 row가 NULL이 되어 NOT NULL
+  constraint 위반 → 기존 row는 일괄 backfill (`ontology_version: pre-v0.1`,
+  `schema_version: 0.0`)로 처리. migration script는 Phase 1 schema PR에
+  포함.
+- Review trigger: ontology v0.2로 업그레이드 시; migration tooling이
+  P2 필요하다고 판명 시.
+- Supersedes / superseded by: —
+- Refs: ADR-0011 §Decision 5; Q-030.
+
 ---
 
 ## Incident log

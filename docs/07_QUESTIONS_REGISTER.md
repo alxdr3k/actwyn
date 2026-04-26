@@ -916,6 +916,133 @@ committed for a later milestone.
 - **History**: 2026-04-26 (second-brain Ideation 노트 Round 9 +
   Appendix A.19 import; ADR-0010 framing 확장).
 
+### Q-036 — `rejected` vs `revoked` status 차이 — 둘 다 유지할지, 통합할지?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0009의 status 6 enum에 `rejected`와 `revoked`가
+  모두 있음. ADR-0011이 신규 status (dormant / stale / archived)를
+  추가하면서 9 enum이 됨. 의미적으로 `rejected`(proposal 단계에서
+  채택 안 됨)와 `revoked`(이미 active였다가 폐기됨)는 다르지만,
+  retrieval / context packing 측면에서 동일 처리.
+- **Options**:
+  - (a) 둘 다 유지: lifecycle 의미 차이 보존. 단 application 코드는
+    동일하게 처리.
+  - (b) `rejected` 폐기 + `revoked`로 통합: enum 단순화. proposal 단계
+    실패는 별 status 또는 column으로 표현.
+  - (c) `rejected`를 `proposed`의 substate로: `proposed_rejected` / 혹은
+    별 boolean column.
+- **Recommendation**: (a) 우선 — P0.5는 둘 다 유지하되 application
+  코드는 동일 처리. P1에 evidence 기반 통합 고려.
+- **Trigger**: P1 schema PR / `judgment_events` event_type 정리 시.
+- **History**: 2026-04-26 (ADR-0011 도입 시 부수 질문).
+
+### Q-037 — `architecture_assumption` 구현 형태는?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0011이 시스템 자신의 설계 가정을 first-class judgment로
+  저장하기로 함. 구현 방법이 여러 가지.
+- **Options**:
+  - (a) 별 `kind: 'architecture_assumption'` enum value 추가.
+  - (b) 일반 judgment의 `scope: { area: "system" }` 또는
+    `scope: { entity_ids: ["actwyn"] }`.
+  - (c) 별 schema (`architecture_assumptions` table) — judgment_items에서
+    분리.
+  - (d) (a) + (b) hybrid: kind는 architecture_assumption, scope도 system.
+- **Recommendation**: (d) — kind enum 추가 + scope.area = system. retrieval
+  default exclusion (사용자 명시 요청 시만 포함).
+- **Trigger**: Phase 1 schema PR 작성 시.
+- **History**: 2026-04-26 (ADR-0011 도입 시 부수 질문).
+
+### Q-038 — `activation_score` formula 가중치 default 값은?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0011이 activation_score formula를 정의 (12개 항목).
+  실제 가중치 default 값은 미정. 정적 default vs domain-specific vs
+  학습 기반 (Q-026 / Q-034 cross-ref).
+- **Options**:
+  - (a) 모든 항목 가중치 1.0 균등 시작 + evaluation으로 조정.
+  - (b) domain-specific default (사용자 선호 / current state / decision
+    별로 다른 가중치).
+  - (c) 사용자 행동 기반 학습 (user clicks / overrides / corrections로
+    가중치 갱신) — P2+.
+- **Recommendation**: (a) → P1 도입, P2에 (c) 검토. (b)는 evidence 부족.
+- **Trigger**: P1 attention/activation scoring 구현 시; 사용자가
+  retrieval quality 불만 표시 시.
+- **History**: 2026-04-26 (ADR-0011 §Decision 9; Q-026 / Q-034 trace).
+
+### Q-039 — `research_update_protocol` 7단계 자동화 시점은?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0011이 새 논문 / 서비스 등장 시 처리 프로세스를
+  capture → extract → map → propose → eval → migrate → supersede 7단계로
+  정의. P0.5 / P1은 사람 검토 + Claude proposal 패턴, P2+ 자동화 후보.
+- **Options**:
+  - (a) P2: capture / extract만 자동화 (LLM이 논문 요약), map / propose
+    / eval / migrate / supersede는 사람 + Claude 검토.
+  - (b) P3: map까지 자동화 (LLM이 architecture_assumption과 연결).
+  - (c) 완전 자동화 (autonomous research agent) — 안 함.
+- **Recommendation**: (a) — capture / extract만 P2+ 자동화. map 이상은
+  사용자 검토 필수 (architecture 변경은 신중).
+- **Trigger**: P2 시작 시 / 외부 연구 follow-up 빈도가 사람 검토를
+  burden으로 만들 때.
+- **History**: 2026-04-26 (ADR-0011 §Decision 7).
+
+### Q-040 — `last_verified_at` 갱신 trigger는?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0011이 `last_verified_at` 시간 필드를 신설. 사용자
+  자연어 확인 / `/verify` 명령 / assistant 추론 / `judgment.commit`
+  중 어떤 trigger로 갱신해야 하는지.
+- **Options**:
+  - (a) 사용자 명시 확인 (자연어 "그거 맞아" / `/verify <id>` 등)만
+    `last_verified_at` 갱신.
+  - (b) `judgment.commit` 시점도 갱신.
+  - (c) assistant 추론도 갱신 (단 confidence 낮음 표시).
+- **Recommendation**: (a) — 명시 확인만. `judgment.commit`은
+  `created_at` / `updated_at`만 갱신. assistant 추론은 갱신 안 함
+  (Round 8 token discipline + ADR-0006 explicit-save-first 정합).
+- **Trigger**: P2 typed tool 구현 시.
+- **History**: 2026-04-26 (ADR-0011 §시간 필드 8개; Q-028 second-brain
+  trace).
+
+### Q-041 — `volatility` 결정 주체는?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0011이 `volatility` (low/medium/high) 신규 필드.
+  누가 / 무엇이 결정하는지 미정.
+- **Options**:
+  - (a) `judgment.propose` 시 LLM이 추론 (kind / scope / 사용 패턴 기반).
+  - (b) 사용자 명시 (자연어 "이건 변할 가능성 큼" / 명령).
+  - (c) `kind` 별 default: 사용자 선호 → medium, current state → high,
+    원칙 → low.
+  - (d) (c) default + (a) LLM 추론 + (b) 사용자 override.
+- **Recommendation**: (d) — kind default + LLM 추론 + 사용자 override
+  허용. P0.5는 (c) default만, P1+ (a)/(b) 추가.
+- **Trigger**: P0.5 schema 도입 시 default 매핑 결정.
+- **History**: 2026-04-26 (ADR-0011 §volatility + decay_policy).
+
+### Q-042 — `ontology_version` migration 전략은?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0011이 `ontology_version`을 강제 도입 (DEC-028).
+  v0.1 → v0.2로 변경 시 기존 row 처리 미정.
+- **Options**:
+  - (a) 자동 변환 script (v0.1 → v0.2 매핑이 deterministic할 때).
+  - (b) 명시적 migration script + 사용자 검토.
+  - (c) 양립 운영 (v0.1과 v0.2 row가 공존, application 코드가 둘 다
+    이해).
+- **Recommendation**: (b) — P2까지는 명시적 script. v0.2 도입 시 release
+  notes에 migration 명시. (c)는 enum value 단순 추가일 때만 가능.
+- **Trigger**: 첫 ontology 변경 발생 시.
+- **History**: 2026-04-26 (ADR-0011 §ontology_version + schema_version).
+
 ---
 
 ## Deferred
