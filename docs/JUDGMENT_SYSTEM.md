@@ -1853,7 +1853,9 @@ Eval fixtures the Phase 1A control-plane PR must include:
 Lens identifier: `architecture_critique_lens_v0.1`
 Trigger level: L2 or L3 (Exception Probe Gate)
 Applies to: target_domain ∈ { design, memory, policy, workflow,
-evidence, decision, security }
+evidence, decision, security, architecture } (P0.5 8 enum, DEC-032 정합;
+`architecture`는 lens 이름 자체와 정합 — architecture-tagged candidates가
+lens를 bypass하지 않도록 명시 포함)
 Output: `Tension[]` (control-plane telemetry; commit_allowed = false)
 
 actwyn critic loop의 self-applied algorithm. ADR-0012의 LLM critic prompt

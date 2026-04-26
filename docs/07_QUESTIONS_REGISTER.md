@@ -1240,14 +1240,19 @@ committed for a later milestone.
 
 - **Status**: open.
 - **Owner**: project lead.
-- **Context**: ADR-0013이 kind + epistemic_origin + authority_source +
-  lifecycle_status + activation_state 4축 분리. 사용자가 모두 입력? typed
-  tool layer가 default 자동 주입?
+- **Context**: ADR-0013이 kind + `epistemic_status` (origin axis,
+  ADR-0012 정합 — Round 13 narrative에서 "epistemic_origin"으로 표기됐던
+  것은 schema 필드명이 아니라 axis 명) + authority_source + lifecycle_status
+  + activation_state 4축 분리. 사용자가 모두 입력? typed tool layer가 default
+  자동 주입?
 - **Recommendation**: typed tool layer에서 default 자동 주입 (kind는 사용자
-  / critic model 입력, 나머지 4축은 default + override). epistemic_origin
-  default = `user_stated` 또는 `assistant_generated` (caller에 따라).
-  authority_source default = `none`. lifecycle_status default =
-  `proposed`. activation_state default = `eligible`.
+  / critic model 입력, 나머지 4축은 default + override).
+  **`epistemic_status`** (ADR-0012 §Origin/Authority schema 필드명;
+  Round 13에서 "epistemic_origin"으로 표기됐던 것은 axis 명 abstraction —
+  schema 필드는 `epistemic_status` 그대로) default = `user_stated` 또는
+  `assistant_generated` (caller에 따라). authority_source default = `none`.
+  lifecycle_status default = `proposed`. activation_state default =
+  `eligible`.
 - **Trigger**: P1 typed tool 구현 시.
 - **History**: 2026-04-26 (ADR-0013).
 
