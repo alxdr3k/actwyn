@@ -1,0 +1,116 @@
+# AGENTS.md
+
+Guidance for AI coding agents working in this repo. Keep it short.
+
+## Read order
+
+For a normal implementation task, read in this order and stop as
+soon as you have enough:
+
+1. `docs/ARCHITECTURE.md` — what is implemented, what is planned.
+2. `docs/CODE_MAP.md` — where the relevant module lives.
+3. `docs/TESTING.md` — how to validate.
+4. The task-relevant files in `src/` and `test/`.
+5. The relevant ADR in `docs/adr/` **only if** the task changes
+   architecture.
+
+Do not read the long P0 design docs (`docs/PRD.md`, `docs/02_HLD.md`,
+`docs/00_PROJECT_DELIVERY_PLAYBOOK.md`, `docs/03_RISK_SPIKES.md`,
+`docs/04_IMPLEMENTATION_PLAN.md`, `docs/05_RUNBOOK.md`,
+`docs/06_ACCEPTANCE_TESTS.md`) by default. Open them only when:
+
+- the task requires understanding *why* a P0 decision was made, or
+- the task hits an acceptance criterion that is only described
+  there.
+
+Do not read `docs/JUDGMENT_SYSTEM.md` or `docs/adr/0009-…` …
+`docs/adr/0013-…` by default. Those are the Phase 0 / 0.5
+architectural design record for the planned DB-native AI-first
+Judgment System (per DEC-037, a historical record — none of it is
+implemented yet). Open them only when:
+
+- the task explicitly asks for Judgment System Phase 1A scoping
+  or schema work, or
+- you need to look up agreed terminology
+  (`epistemic_origin` / `authority_source` / `lifecycle_status` /
+  `activation_state` / `retention_state` / `current_operating_view`
+  / `Tension` / `Control Gate`).
+
+Do not read `docs/design/archive/` by default. Those are history.
+
+## Source of truth
+
+- Code, tests, migrations, and any generated schema are
+  **authoritative** for implemented behavior.
+- Thin current-state docs (`docs/ARCHITECTURE.md`, `docs/CODE_MAP.md`,
+  `docs/DATA_MODEL.md`, `docs/RUNTIME.md`, `docs/TESTING.md`,
+  `docs/OPERATIONS.md`) explain the current shape but never override
+  the code.
+- ADRs explain why decisions were made; accepted ADRs are not edited
+  to chase later changes.
+- Long design docs are historical reasoning and an acceptance
+  contract for the P0 vertical. They are not authority for current
+  runtime behavior.
+- The DB-native AI-first Judgment System direction is **committed
+  but not implemented**. ADR-0009 … ADR-0013 and
+  `docs/JUDGMENT_SYSTEM.md` are the architectural authority for
+  *why*; nothing in `src/` or `migrations/` implements it yet
+  (per DEC-037). Do not implement Phase 1A schemas, Control Gate,
+  Tension, ReflectionTriageEvent, `current_operating_view`,
+  vector / graph projections, Critique Lens, or typed-tool surfaces
+  unless the task explicitly asks for them.
+
+## When changing code
+
+- Update tests in the same change. Tests describe the contract;
+  changing behavior without changing the test is a smell.
+- If you change runtime behavior, update `docs/RUNTIME.md`.
+- If you add, move, or rename modules, update `docs/CODE_MAP.md`.
+- If you change schema, add a new migration file
+  (`migrations/<NNN>_<slug>.sql`, contiguous from 001), bump
+  `expected_schema_version` in `src/main.ts`, and update
+  `docs/DATA_MODEL.md`.
+- If you change validation commands or `package.json#scripts`,
+  update `docs/TESTING.md`.
+- If you change env vars, run paths, or operational steps, update
+  `docs/OPERATIONS.md`.
+- If you make an architecture-level decision, add a new ADR (or
+  supersede an existing one) under `docs/adr/`.
+- Do not rewrite long design docs to reflect implementation
+  changes.
+
+## Validation
+
+Use the commands in `docs/TESTING.md`. The pre-PR bundle is:
+
+```sh
+bun run ci
+```
+
+Do not invent validation commands. If you cannot run the validation
+(no Bun, no network, isolated environment), say so explicitly in
+the PR description rather than claiming green.
+
+## Conventions
+
+- Path alias: `~/*` resolves to `src/*` (see `tsconfig.json`).
+- Single-redactor invariant: only `src/observability/redact.ts`
+  may define redaction patterns or emit `[REDACTED:*]` placeholders.
+  Lint is `bun run lint:redactor`.
+- Each table has a single-writer module (see `docs/02_HLD.md` §5.1
+  for the writer map). If you need to mutate a table from a new
+  module, route through the existing owner instead.
+- New env vars must appear in `.env.example` and `src/config.ts`
+  validation.
+- Avoid editing `bun.lock` by hand; let `bun install` regenerate it.
+
+## What to avoid
+
+- Implementing Phase 1A Judgment System schema or runtime in this
+  branch. That is a separate, larger track.
+- Editing accepted ADRs to chase code changes — supersede instead.
+- Rewriting long design docs to "match" implementation drift —
+  patch the thin current-state docs.
+- Adding redaction patterns outside `src/observability/redact.ts` —
+  the lint will fail.
+- Spawning Claude (or any provider) outside `src/providers/`.

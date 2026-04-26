@@ -1,7 +1,25 @@
 # actwyn Judgment System
 
+> **Status banner (added by docs-structure PR; per DEC-037 / Q-063):**
+> Phase 0 / 0.5 architectural design record. This document explains
+> the **intended** Judgment System direction and is the architectural
+> authority for *why* decisions were made. It is **not** the source
+> of truth for implemented runtime behavior.
+>
+> For current implementation state, read:
+> - [`docs/ARCHITECTURE.md`](./ARCHITECTURE.md)
+> - [`docs/CODE_MAP.md`](./CODE_MAP.md)
+> - [`docs/DATA_MODEL.md`](./DATA_MODEL.md)
+> - [`docs/RUNTIME.md`](./RUNTIME.md)
+>
+> Per DEC-037, accepted ADRs and this design spec are not edited to
+> chase implementation drift; they are superseded by new ADRs when
+> the architecture changes.
+>
+> ---
+>
 > Status: living spec (Phase 0 commitment) · Owner: project lead ·
-> Last updated: 2026-04-26 · Architectural authority:
+> Last updated: 2026-04-27 · Architectural authority:
 > [ADR-0009](./adr/0009-db-native-judgment-system.md) +
 > [ADR-0010](./adr/0010-cognitive-extension-of-judgment-system.md)
 >

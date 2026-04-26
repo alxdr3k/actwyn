@@ -1,0 +1,97 @@
+# Documentation Policy
+
+> Status: living policy · Owner: project lead · Last updated: 2026-04-27
+>
+> Codified in **DEC-037** (Implementation Documentation Lifecycle
+> Policy). This file is the operational shape of that policy and the
+> docs-structure follow-up tracked by **Q-063**.
+
+This file defines how docs in this repo relate to the code, who is
+authoritative, and what to update when something changes.
+
+## Source-of-truth hierarchy
+
+1. Code, tests, migrations, and any generated schemas
+2. Thin current-state docs (`docs/ARCHITECTURE.md`, `docs/CODE_MAP.md`,
+   `docs/DATA_MODEL.md`, `docs/RUNTIME.md`, `docs/TESTING.md`,
+   `docs/OPERATIONS.md`)
+3. ADRs in `docs/adr/`
+4. Q / DEC registers and traceability matrix
+   (`docs/07_QUESTIONS_REGISTER.md`, `docs/08_DECISION_REGISTER.md`,
+   `docs/09_TRACEABILITY_MATRIX.md`)
+5. Long design documents and archived design notes
+   (`docs/PRD.md`, `docs/02_HLD.md`, `docs/00_PROJECT_DELIVERY_PLAYBOOK.md`,
+   `docs/03_RISK_SPIKES.md`, `docs/04_IMPLEMENTATION_PLAN.md`,
+   `docs/05_RUNBOOK.md`, `docs/06_ACCEPTANCE_TESTS.md`,
+   `docs/JUDGMENT_SYSTEM.md` (Phase 0 / 0.5 architectural design
+   record, per DEC-037), future `docs/design/archive/*`)
+
+## Rules
+
+- Code, tests, and migrations are **authoritative** for implemented
+  behavior. If a doc and the code disagree, the code wins.
+- Thin current-state docs explain the current code shape but never
+  override the code.
+- ADRs explain **why** major decisions were made.
+- Accepted ADRs are not edited to reflect later changes in
+  implementation. If an architecture decision changes, create a new
+  ADR that supersedes the old one.
+- Long design docs (PRD, HLD, Phase 0 design records, Phase 1+ design
+  records) capture intended direction and historical reasoning. They
+  are not the source of truth for current runtime behavior.
+- Do not rewrite long design docs on every implementation change.
+  Prefer small, targeted patches in the thin current-state docs.
+- Prefer generated docs for schema, API, and enum reference where
+  generation is cheap.
+- If a code change alters runtime behavior, schema, module layout,
+  validation commands, or operational steps, update the matching
+  thin current-state doc **in the same PR**.
+
+## What to update when
+
+| Change type                                  | Required doc action                                |
+| -------------------------------------------- | -------------------------------------------------- |
+| Runtime behavior changes                     | update `docs/RUNTIME.md`                           |
+| Module / file layout changes                 | update `docs/CODE_MAP.md`                          |
+| DB / schema / migration changes              | update `docs/DATA_MODEL.md`                        |
+| Test / lint / typecheck command changes      | update `docs/TESTING.md`                           |
+| Operational, env, or run-loop changes        | update `docs/OPERATIONS.md`                        |
+| Major architecture decision                  | add a new ADR (or supersede an existing one)       |
+| Tactical / policy decision                   | add an entry in `docs/08_DECISION_REGISTER.md`     |
+| Open question that needs an answer           | add an entry in `docs/07_QUESTIONS_REGISTER.md`    |
+| Historical design context only               | do not update current-state docs unless behavior changed |
+
+## Relationship to the existing P0 docs
+
+The P0 deliverables in this repo (`docs/PRD.md`, `docs/02_HLD.md`,
+`docs/00_PROJECT_DELIVERY_PLAYBOOK.md`, `docs/03_RISK_SPIKES.md`,
+`docs/04_IMPLEMENTATION_PLAN.md`, `docs/05_RUNBOOK.md`,
+`docs/06_ACCEPTANCE_TESTS.md`) are the long-form design and acceptance
+record for the Personal Agent P0 vertical. They remain valuable as
+historical reasoning and acceptance-criteria references.
+
+For day-to-day implementation work, agents should prefer the thin
+current-state docs and consult the long docs only when the question is
+about *why* a P0 decision was made or what the original acceptance
+contract requires.
+
+If a long doc and the code diverge, fix the code first (or accept the
+divergence and add an ADR/DEC entry); do not silently rewrite the
+long doc to match.
+
+## Phase 0 / 0.5 Judgment System direction
+
+The DB-native, AI-first Judgment System architectural commitment has
+landed on `main` (ADR-0009 … ADR-0013, `docs/JUDGMENT_SYSTEM.md`,
+DEC-022 … DEC-036, Q-027 … Q-062). Per **DEC-037**, those documents
+are **historical architectural records**: they explain *why* the
+direction was chosen, but they are not the source of truth for
+implemented runtime behavior and are not edited to chase
+implementation drift.
+
+When Phase 1A implementation begins, the operative reference for
+"what is actually running" is the thin current-state docs in this
+directory (`ARCHITECTURE.md`, `CODE_MAP.md`, `DATA_MODEL.md`,
+`RUNTIME.md`, `TESTING.md`, `OPERATIONS.md`) plus the code, tests,
+and migrations themselves. Phase 0 / 0.5 design specs are not
+rewritten; new ADRs supersede them where the architecture changes.
