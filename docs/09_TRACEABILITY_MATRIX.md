@@ -91,6 +91,18 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | Q-048   | `critique_outcomes` artifact link 범위                              | —             | —                          | —                | ADR-0012 §Decision 8                          |
 | Q-049   | DesignTension 자기참조 깊이 제한                                    | decided       | —                          | —                | ADR-0012 §Risks                               |
 | Q-050   | Control-plane / judgment-plane DB 분리 정도                         | DEC-030       | —                          | —                | ADR-0012 §Decision 6                          |
+| Q-051   | Tension target_domain P0.5 도입 범위                                | DEC-032       | —                          | —                | ADR-0013 §Decision 2                          |
+| Q-052   | Tension category 14 enum P0.5 도입 범위                             | —             | —                          | —                | ADR-0013 §Decision 2                          |
+| Q-053   | status 3축 분리 시 ADR-0011 partial retract 형식                    | decided       | —                          | —                | ADR-0013 §Decision 3                          |
+| Q-054   | Reflection 5 sub-action P0.5 도입 범위                              | DEC-035       | —                          | —                | ADR-0013 §Decision 5                          |
+| Q-055   | Workspace 3축 분리 매핑                                             | —             | —                          | —                | ADR-0013 §Decision 6                          |
+| Q-056   | procedure_subtype 마이그레이션 default                              | DEC-034       | —                          | —                | ADR-0013 §Decision 7                          |
+| Q-057   | current_truth → current_operating_view 적용 범위                    | DEC-036       | —                          | —                | ADR-0013 §Decision 4                          |
+| Q-058   | attention/activation/retrieval 3 score P0.5 도입                    | —             | —                          | —                | ADR-0013 §Decision 9                          |
+| Q-059   | architecture_assumption 시드 row 마이그레이션                       | —             | —                          | —                | ADR-0013 §Decision 8                          |
+| Q-060   | JudgmentItem 4축 분리 사용자 작성 default                           | —             | —                          | —                | ADR-0013                                      |
+| Q-061   | Critique Lens v0.1 LLM critic prompt 형식                           | —             | —                          | —                | ADR-0013 §Decision 1                          |
+| Q-062   | Tension target_domain 확장 시점                                     | —             | —                          | —                | ADR-0013 §Decision 2; DEC-032                 |
 
 ## Matrix — ADRs → artifacts
 
@@ -108,6 +120,7 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | ADR-0010 | Cognitive extension of Judgment System                   | §12 (taxonomy 확장 예정) | §11.3                | `docs/JUDGMENT_SYSTEM.md` §Cognitive Architecture Extension; second-brain Ideation Round 9 + Appendix A.19 |
 | ADR-0011 | Architecture upgradeability + memory activation lifecycle | §12 (taxonomy 확장 예정) | §11.3                | `docs/JUDGMENT_SYSTEM.md` §Upgradeability & Memory Activation; second-brain Ideation Round 10 + Appendix A.20 |
 | ADR-0012 | Origin/Authority separation + Metacognitive Critique Loop | §12 (taxonomy 확장 예정) | §11.3                | `docs/JUDGMENT_SYSTEM.md` §Authority Source + §Metacognitive Critique Loop; second-brain Ideation Round 12 + Appendix A.22; ADR-0011 §Refs (RETRACT system_authored) |
+| ADR-0013 | Critique Lens v0.1 + Tension Generalization + Status Axis Separation | §12 (taxonomy 확장 예정) | §11.3                | `docs/JUDGMENT_SYSTEM.md` §Critique Lens v0.1 + §Tension Generalization + §Status Axis Separation; second-brain Ideation Round 13 + Appendix A.23; partial retract ADR-0011 status 9 enum / activation_score 통합; rename ADR-0012 DesignTension → Tension; refine ADR-0010 Reflection / Workspace / procedure |
 
 ## Matrix — DECs → artifacts
 
@@ -144,6 +157,11 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | DEC-029 | `system_authored` 제거 + `authority_source` P0.5 도입 범위    | —                        | —                  | ADR-0012 §Decision 1-3; Q-040  |
 | DEC-030 | Control-plane vs Judgment-plane 분리                          | —                        | —                  | ADR-0012 §Decision 6           |
 | DEC-031 | Critic Loop P0.5 도입 단계 (1-3단계만)                        | —                        | —                  | ADR-0012 §Decision 9; Q-047    |
+| DEC-032 | Tension `target_domain` P0.5 도입 범위 (7 enum)              | —                        | —                  | ADR-0013 §Decision 2; Q-051    |
+| DEC-033 | `status` 9 enum → 3축 분리 (lifecycle / activation / retention) | —                        | —                  | ADR-0013 §Decision 3; **supersedes DEC-026** |
+| DEC-034 | `procedure_subtype` 5 enum + default `skill`                  | —                        | —                  | ADR-0013 §Decision 7; Q-056    |
+| DEC-035 | Reflection 5 sub-action P0.5 도입 (`reflection_triage`만)     | —                        | —                  | ADR-0013 §Decision 5; Q-054    |
+| DEC-036 | `current_truth` → `current_operating_view` 이름 변경          | —                        | —                  | ADR-0013 §Decision 4; Q-057    |
 
 ## Matrix — PRD acceptance criteria → evidence
 

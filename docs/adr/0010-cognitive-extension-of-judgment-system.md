@@ -208,6 +208,12 @@ list)는 **모두 그대로 유효**하다.
   `ReflectionTriageEvent` / `DesignTension` / `interaction_signals` /
   `critique_outcomes` 신규 control-plane object. 사용자 비판 패턴 5종을
   시스템화한 Critic Loop 8단계.
+- ADR-0013 (Critique Lens v0.1 + Tension Generalization + Status Axis
+  Separation) — 본 ADR의 Reflection layer를 5 sub-action으로 분해
+  (`reflection_triage` / `reflection_proposal` / `consolidation` /
+  `critique` / `eval_generation`). Workspace 객체를 3축 분리
+  (`WorkspacePlan` / `ContextPacket` / `WorkspaceTrace`). procedure
+  kind에 `procedure_subtype` 5 enum 추가.
 - ADR-0003 (SQLite canonical), ADR-0006 (explicit memory promotion),
   ADR-0008 (durable ledgers) — 정합 유지.
 - DEC-022 (second-brain repo는 canonical 아님), DEC-023

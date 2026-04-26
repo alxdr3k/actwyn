@@ -254,7 +254,10 @@ source 없는 아이디어는 `hypothesis` 또는 `proposed` 상태로만 유지
 | `JudgmentItem.epistemic_status` | 8 | observed / user_stated / user_confirmed / inferred / assistant_generated / tool_output / decided / deprecated (origin only — Round 12 RETRACTION: system_authored 제거, ADR-0012 §Origin/Authority separation 참조) |
 | `JudgmentItem.authority_source` (optional, 신규 ADR-0012) | 7 | none / user_confirmed / maintainer_approved / merged_adr / runtime_config / compiled_system_policy / safety_policy |
 | `JudgmentItem.approval_state` (optional, 신규 ADR-0012) | 4 | proposed / accepted / active / rejected |
-| `JudgmentItem.status` | 9 | proposed / active / dormant / stale / archived / superseded / revoked / rejected / expired (ADR-0011 §Status enum 확장) |
+| ~~`JudgmentItem.status`~~ (ADR-0013 RETRACT) | ~~9~~ | ~~proposed / active / dormant / stale / archived / superseded / revoked / rejected / expired~~ — ADR-0013이 truth lifecycle / activation / retention 3축 섞은 axis conflation 발견. 3축 분리. |
+| `JudgmentItem.lifecycle_status` (ADR-0013) | 6 | proposed / active / rejected / revoked / superseded / expired |
+| `JudgmentItem.activation_state` (ADR-0013) | 5 | eligible / dormant / stale / history_only / excluded |
+| `JudgmentItem.retention_state` (ADR-0013) | 3 | normal / archived / deleted |
 | `JudgmentItem.confidence` | 3 | low / medium / high |
 | `JudgmentItem.importance` | 5 | 1 / 2 / 3 / 4 / 5 |
 | `JudgmentItem.volatility` | 3 | low / medium / high (ADR-0011) |
@@ -276,7 +279,7 @@ DEC-026, DEC-027 정합).
 | `JudgmentItem.epistemic_status` | 8 모두 (origin gate 필요) |
 | `JudgmentItem.authority_source` (ADR-0012) | DEC-029 — `none` + `user_confirmed`만 P0.5. 나머지 5 enum (maintainer_approved / merged_adr / runtime_config / compiled_system_policy / safety_policy)은 P1+ |
 | `JudgmentItem.approval_state` (ADR-0012) | 4 모두 |
-| `JudgmentItem.status` | DEC-026 — 9 enum schema 모두 + application 코드는 dormant/stale/archived 자동 진입 안 함 |
+| `JudgmentItem.status` (ADR-0011) → 3축 분리 (ADR-0013) | DEC-033 — lifecycle_status 6 enum 모두 + activation_state 3 enum (eligible / history_only / excluded) + retention_state 3 enum 모두. dormant / stale 자동 분류는 P1+ |
 | `JudgmentItem.decay_policy` | DEC-027 — `none` + `supersede_only` 2종만. 나머지 3종은 P1+ |
 
 ### Notes on enum changes (Round 11 must-fix + Round 12 retraction)
@@ -1697,6 +1700,219 @@ P0.5는 1-3단계만, 나머지는 P1+ (DEC-031).
 > **actwyn은 기억을 저장하는 시스템을 넘어, 자기 설계와 자기 판단 안의
 > "미묘한 불일치"를 감지하고, 그것을 open question / decision / schema
 > change / eval case로 승격시키는 critique loop를 가져야 한다.**
+
+## Critique Lens v0.1 + Tension Generalization + Status Axis Separation (ADR-0013)
+
+> Round 13에서 사용자가 5가지 비판 기준으로 전체 설계 재리뷰 +
+> DesignTension 확장 가능성 질문. ADR-0013은 (1) Critique Lens v0.1
+> codify (2) DesignTension → 일반 Tension generalize (3) status 9 enum
+> → 3축 분리 (4) 8개 setting 정교화.
+
+### Critique Lens v0.1 (5 Rules)
+
+actwyn critic loop의 self-applied algorithm. ADR-0012의 LLM critic prompt
+8 failure mode와 정합 (8 mode = "무엇을 보는가", 5 rule = "어떻게
+처리하는가").
+
+```
+Rule 1. Term compression check
+  If term controls storage / retrieval / authority / lifecycle / workspace
+  inclusion AND has multiple plausible meanings,
+  → create Tension(category = ambiguous_term)
+
+Rule 2. Axis separation check
+  If one enum/field is used for two independent implementation decisions,
+  → create Tension(category = axis_conflation)
+
+Rule 3. Workflow friction check
+  If proposed system requires user workflow they already rejected,
+  → create Tension(category = workflow_friction)
+
+Rule 4. Exception probe
+  For any rule, test ≥1 exception case.
+  If exception needs new state / category / policy,
+  → create Tension(category = lifecycle_gap | taxonomy_gap | policy_gap)
+
+Rule 5. Systematization gate
+  If tension is recurring / high-impact / implementation-affecting /
+  future-bug-prone, promote to tracked Tension.
+  Otherwise keep as ephemeral critique telemetry.
+```
+
+### Tension Generalization (DesignTension → Tension)
+
+ADR-0012의 `DesignTension`은 일반 `Tension`으로 schema rename +
+`target_domain` 차원 추가. 별 테이블 X.
+
+```ts
+type Tension = {
+  id: string
+
+  target_domain:    // 신규 차원
+    | "design" | "memory" | "policy" | "workflow" | "evidence" | "decision" | "security"
+    // P0.5: 위 7 enum
+    | "product" | "marketing" | "user_preference" | "research" | "tooling"
+    // P1+: 위 5 enum
+
+  target_type: ...        // ADR-0012 11 enum 그대로
+
+  category:               // 14 enum (ADR-0012 11 + Round 13 신규 3)
+    | "ambiguous_term" | "axis_conflation" | "authority_confusion"
+    | "lifecycle_gap" | "taxonomy_gap" | "policy_gap"
+    | "workflow_friction" | "projection_gap" | "upgradeability_gap"
+    | "evidence_conflict" | "scope_mismatch"
+    | "token_cost_risk" | "security_risk" | "eval_gap"
+
+  signal_source:          // 7 enum (ADR-0012 6 + research_update 신규)
+    | "user_question" | "user_correction" | "critic_model"
+    | "eval_failure" | "telemetry" | "code_review" | "research_update"
+
+  // ... ADR-0012 필드 그대로
+
+  status:                 // 8 enum (ADR-0012 7 + converted_to_eval 신규)
+    | "open" | "accepted" | "rejected" | "resolved"
+    | "converted_to_question" | "converted_to_decision"
+    | "converted_to_eval" | "converted_to_judgment"
+}
+```
+
+`DesignTension`은 사실상 `Tension where target_domain="design"`. 별 테이블
+폭발 방지.
+
+**Tension은 Judgment 아님** (ADR-0012 정합):
+```
+Judgment: actwyn이 현재 믿거나 따르는 판단
+Tension:  어떤 판단/설계/정책/워크플로에 문제가 있을 수 있다는 의심
+```
+
+Tension 변환 경로:
+- Tension → OpenQuestion (Q-### 신설)
+- Tension → Decision (DEC-### 신설)
+- Tension → SchemaChange (PR로 schema 정정)
+- Tension → EvalCase (JudgmentEvalCase fixture 추가)
+- Tension → ProcedureUpdate (procedure judgment 정교화)
+- Tension → No-op (이번엔 변경 없음, 기록만)
+
+### Status Axis Separation (ADR-0011 partial retract)
+
+ADR-0011의 status 9 enum 통합은 truth lifecycle / activation / retention
+3축이 섞임 (axis conflation). 3축 분리:
+
+```ts
+type JudgmentItem = {
+  // ADR-0011 status 9 enum 통합 폐기
+
+  lifecycle_status:        // 진실성/승인/대체 (사람·AI 명시 변경)
+    | "proposed" | "active" | "rejected"
+    | "revoked" | "superseded" | "expired"   // 6 enum
+
+  activation_state:        // 현재 task에서 workspace 후보? (대부분 projection)
+    | "eligible" | "dormant" | "stale"
+    | "history_only" | "excluded"            // 5 enum
+
+  retention_state:         // 보존/노출 정책
+    | "normal" | "archived" | "deleted"      // 3 enum
+}
+```
+
+P0.5 도입 (DEC-033): lifecycle_status 6 enum 모두 + activation_state 3
+enum (eligible / history_only / excluded) + retention_state 3 enum 모두.
+dormant / stale 자동 분류는 P1+ activation_score formula 도입 시.
+
+조합 가능 예시:
+- `active` + `stale` + `normal`: 유효하지만 재검증 필요
+- `superseded` + `history_only` + `normal`: 대체됐지만 audit 시 조회
+- `active` + `eligible` + `archived`: 유효하지만 장기 보관
+
+### `current_truth` → `current_operating_view`
+
+ADR-0009 Law #4 ("Current truth is a projection")의 "truth" 함의 위험.
+"진짜 진실"이 아닌 "현재 운영 기준". DB 필드 `current_state`는 유지
+(ADR-0009 / 0010 정합), 문서 / UX는 `current operating view`.
+
+### Projection rules
+
+```
+Input:
+- active current_state
+- active decisions
+- high-authority procedures (authority_source ∈ user_confirmed /
+  maintainer_approved / merged_adr / runtime_config)
+- high-confidence user preferences
+- active cautions
+- relevant architecture assumptions (target_domain=architecture)
+
+Excluded by default:
+- lifecycle_status ∈ proposed / rejected / revoked / superseded / expired
+- activation_state ∈ history_only / excluded
+- retention_state ∈ archived / deleted
+- stale without warning (P0.5는 stale 자동 분류 안 함)
+
+Conflict resolution priority:
+1. authority_source (compiled_system_policy / safety_policy >
+   merged_adr > maintainer_approved > user_confirmed > none)
+2. scope specificity (narrower wins)
+3. supersede chain (newer wins)
+4. last_verified_at (recent wins)
+5. confidence (high wins)
+6. Unresolved → create Tension(category=evidence_conflict), not current view
+```
+
+### Reflection 5 sub-action (ADR-0010 refine)
+
+| Sub-action | Plane | P0.5 |
+|---|---|---|
+| `reflection_triage` | control-plane (ADR-0012) | ✅ |
+| `reflection_proposal` | control-plane | ❌ P1 |
+| `consolidation` | judgment-plane (commit gate) | ❌ P1+ |
+| `critique` | control-plane (Tension 생성) | ❌ P1 |
+| `eval_generation` | judgment-plane (JudgmentEvalCase) | ❌ P2 |
+
+### Workspace 3축 분리 (ADR-0010 refine)
+
+| 객체 | 의미 | 형태 | P0.5 |
+|---|---|---|---|
+| `WorkspacePlan` | 어떤 항목 가져올지 결정 | ephemeral object | ❌ P1+ |
+| `ContextPacket` | 모델에 실제 투입 압축 context | ephemeral, prompt 일부 | ❌ P1+ |
+| `WorkspaceTrace` | 포함/제외 telemetry | control-plane event | ✅ |
+
+### `procedure_subtype` 5 enum (ADR-0010 refine)
+
+`kind=procedure` 유지, 신규 `procedure_subtype` 필드:
+
+```ts
+procedure_subtype?:
+  | "skill"
+  | "policy"
+  | "preference_adaptation"
+  | "safety_rule"
+  | "workflow_rule"
+```
+
+### `architecture_assumption` → `kind=assumption` + `target_domain` (ADR-0011 refine)
+
+ADR-0011의 `kind=architecture_assumption` 시드는 kind enum 폭발 위험
+(marketing / product / user / research_assumption ...). `kind=assumption` +
+`target_domain` 분리 (Tension target_domain과 동일 enum).
+
+### attention/activation/retrieval 3 score 분리 (ADR-0011 partial retract)
+
+ADR-0011의 attention_score → activation_score 통합은 디버깅 어려움. 3
+score 분리 (P1+ 도입). P0.5는 단일 retrieval priority.
+
+```ts
+type RetrievalScore = { fts_score, vector_score?, graph_score?, combined_retrieval_score }
+type ActivationScore = { /* ADR-0011 §A.20.9 formula */ }
+type AttentionPriority = { position_rank, packing_mode, reason }
+```
+
+### 한 문장 요약
+
+> **actwyn은 판단을 저장하는 시스템에서 한 단계 더 나아가, 자신의
+> 판단·용어·정책·증거·워크플로 안의 tension을 감지하고, 그것을 질문 /
+> 결정 / 스키마 변경 / eval case로 승격시키는 시스템이 되어야 한다.**
+> 사용자의 5가지 비판 기준은 actwyn critic loop의 self-applied algorithm
+> 이다 (Critique Lens v0.1).
 
 ## What this isn't
 

@@ -1146,6 +1146,121 @@ committed for a later milestone.
 - **Trigger**: storage cost가 control-plane에서 폭발할 때.
 - **History**: 2026-04-26 (ADR-0012 §Decision 6; DEC-030).
 
+### Q-051 — Tension `target_domain` P0.5 도입 범위?
+
+- **Status**: decided as DEC-032 (P0.5 7 enum).
+- **Trigger**: 사용자가 reserved 5 enum domain에서 tension 제기 시 enum 추가.
+- **History**: 2026-04-26 (ADR-0013 §Decision 2; DEC-032).
+
+### Q-052 — Tension `category` 14 enum P0.5 도입 범위?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0012 11 + Round 13 신규 4 (taxonomy_gap / policy_gap /
+  evidence_conflict / scope_mismatch) = 15 enum (14 unique 후 정정 — 11+3).
+  P0.5 도입 범위 미정.
+- **Recommendation**: P0.5는 14 모두 schema 도입 (TEXT + CHECK), 사용자
+  / critic model이 실제 사용하는 것만 활용.
+- **Trigger**: P1 schema PR 시.
+- **History**: 2026-04-26 (ADR-0013 §Decision 2).
+
+### Q-053 — status 3축 분리 시 ADR-0011 partial retract 형식?
+
+- **Status**: decided as ADR-0013 (partial retract).
+- **Trigger**: 추가 ADR partial retract 필요 시 동일 패턴.
+- **History**: 2026-04-26 (ADR-0013 §Decision 3 partial retract ADR-0011).
+
+### Q-054 — Reflection 5 sub-action P0.5 도입 범위?
+
+- **Status**: decided as DEC-035 (`reflection_triage`만 P0.5).
+- **Trigger**: 사용자가 critique / proposal 자동화 요구 시.
+- **History**: 2026-04-26 (ADR-0013 §Decision 5; DEC-035).
+
+### Q-055 — Workspace 3축 분리 매핑?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0010의 `Workspace` 객체가 ADR-0013 3축 (Plan / Packet /
+  Trace) 중 어디 매핑?
+- **Recommendation**: ADR-0010 `Workspace`는 ephemeral object → P1+
+  `WorkspacePlan` + `ContextPacket`. P0.5는 `WorkspaceTrace` 이벤트만.
+- **Trigger**: P1 typed tool 구현 시.
+- **History**: 2026-04-26 (ADR-0013 §Decision 6).
+
+### Q-056 — `procedure_subtype` 마이그레이션 default?
+
+- **Status**: decided as DEC-034 (default `skill`).
+- **Trigger**: 기존 procedure 노트 마이그레이션 정확도 문제 시.
+- **History**: 2026-04-26 (ADR-0013 §Decision 7; DEC-034).
+
+### Q-057 — `current_truth` → `current_operating_view` 이름 변경 적용 범위?
+
+- **Status**: decided as DEC-036 (문서/UX만, DB 필드 그대로).
+- **Trigger**: 더 정확한 이름 발견 시.
+- **History**: 2026-04-26 (ADR-0013 §Decision 4; DEC-036).
+
+### Q-058 — `attention/activation/retrieval` 3 score P0.5 도입?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0011 통합 partial retract. P0.5 단일 score (Round 11
+  권고대로) vs 처음부터 3 score 분리.
+- **Recommendation**: P0.5 단일 retrieval priority + WorkspaceTrace에
+  trace만. P1+ 3 score 분리 (디버깅 evidence 기반).
+- **Trigger**: 사용자 / 테스트가 retrieval 디버깅 어려움 보고 시.
+- **History**: 2026-04-26 (ADR-0013 §Decision 9).
+
+### Q-059 — `architecture_assumption` 시드 row 마이그레이션?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0011이 `kind=architecture_assumption` 시드 도입.
+  ADR-0013이 `kind=assumption` + `target_domain=architecture`로 정교화.
+  마이그레이션 형식?
+- **Recommendation**: ADR-0011 commit 시점에 시드 row 없음 (architectural
+  commitment 문서만). Phase 1 schema PR에서 신규 schema (`kind=assumption`)
+  로 깔끔히 적용. 마이그레이션 script 불필요.
+- **Trigger**: P1 schema PR 시.
+- **History**: 2026-04-26 (ADR-0013 §Decision 8).
+
+### Q-060 — JudgmentItem 4축 분리 시 사용자 작성 default?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0013이 kind + epistemic_origin + authority_source +
+  lifecycle_status + activation_state 4축 분리. 사용자가 모두 입력? typed
+  tool layer가 default 자동 주입?
+- **Recommendation**: typed tool layer에서 default 자동 주입 (kind는 사용자
+  / critic model 입력, 나머지 4축은 default + override). epistemic_origin
+  default = `user_stated` 또는 `assistant_generated` (caller에 따라).
+  authority_source default = `none`. lifecycle_status default =
+  `proposed`. activation_state default = `eligible`.
+- **Trigger**: P1 typed tool 구현 시.
+- **History**: 2026-04-26 (ADR-0013).
+
+### Q-061 — Critique Lens v0.1 LLM critic prompt 형식?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0013의 5 rule을 single prompt로 결합 vs 5 separate
+  critic 호출. ADR-0012의 8 failure mode와 정합.
+- **Recommendation**: P1 single prompt로 시작 (5 rule + 8 failure mode
+  결합). token cost vs accuracy trade-off — evidence 기반 P2+ separate
+  호출 검토.
+- **Trigger**: P1 critic model 구현 시.
+- **History**: 2026-04-26 (ADR-0013 §Decision 1).
+
+### Q-062 — Tension `target_domain` 확장 시점?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0013이 P0.5 7 enum + reserved 5 enum (product /
+  marketing / user_preference / research / tooling). 확장 시점?
+- **Recommendation**: 사용자 ideation에서 해당 domain의 tension 발견될
+  때마다 enum 추가 (DEC-032 trigger 정합). 예측 미루지 말고 evidence 기반.
+- **Trigger**: reserved domain의 tension 등장 시.
+- **History**: 2026-04-26 (ADR-0013 §Decision 2; DEC-032).
+
 ---
 
 ## Deferred

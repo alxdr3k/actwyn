@@ -188,6 +188,12 @@ single source로 관리한다.
   (`interaction_signals` / `reflection_triage_events` /
   `design_tensions` / `critique_outcomes`). 본 ADR의 12 Laws / 5 schema
   / 8 typed tool 모두 유효.
+- ADR-0013 (Critique Lens v0.1 + Tension Generalization + Status Axis
+  Separation) — Law #4 ("Current truth is a projection")의 "current
+  truth"는 "current operating view"로 이름 변경 (DB 필드는 그대로).
+  ADR-0012의 `DesignTension` 객체는 일반 `Tension`으로 schema rename +
+  `target_domain` 차원. ADR-0011의 status 9 enum 통합 / activation_score
+  통합은 partial retract (3축 분리 / 3 score 분리).
 - DEC-006 (`/forget` 명령 set), DEC-007 (correction via supersede),
   DEC-022 (second-brain repo는 canonical 아님), DEC-023 (`JudgmentItem.kind`
   v1 enum 범위).

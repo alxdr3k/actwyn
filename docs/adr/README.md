@@ -73,3 +73,4 @@ Register (`DEC-###`), not here.
 | ADR-0010 | Cognitive extension of Judgment System (goal/workspace/attention/metacognition) | accepted |
 | ADR-0011 | Architecture upgradeability and memory activation lifecycle | accepted |
 | ADR-0012 | Origin/Authority separation and Metacognitive Critique Loop | accepted |
+| ADR-0013 | Critique Lens v0.1 + Tension Generalization + Status Axis Separation | accepted |

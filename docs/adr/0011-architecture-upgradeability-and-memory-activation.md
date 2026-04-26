@@ -196,3 +196,11 @@ Memory Activation에 single source로 관리한다.
   origin과 authority 두 축을 한 필드에 섞은 axis conflation. 정정:
   epistemic_status 8 enum 유지 (origin only) + 신규 `authority_source`
   필드 (7 enum, authority 전담). ADR-0011의 다른 commitment는 모두 유효.
+- ADR-0013 (Critique Lens v0.1 + Tension Generalization + Status Axis
+  Separation) — 본 ADR의 status 9 enum 통합은 partial retract (truth
+  lifecycle / activation / retention 3축 섞은 axis conflation 해소).
+  3축 분리: lifecycle_status (6) + activation_state (5) +
+  retention_state (3). attention_score → activation_score 통합도
+  partial retract — 3 score (retrieval / activation / attention_priority)
+  로 분리 (P0.5는 단일, P1+ 분리). architecture_assumption은 kind 아니라
+  `kind=assumption` + `target_domain=architecture`로 정교화.

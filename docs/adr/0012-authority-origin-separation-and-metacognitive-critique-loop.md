@@ -287,3 +287,10 @@ P0.5는 1-3단계만, 나머지는 P1+ 점진 도입 (DEC-031).
 - Q-043 ~ Q-050 (본 ADR과 함께 도입).
 - 외부 근거: 2026 Memory Poisoning 연구 (memory poisoning 차단 논거),
   OWASP AI Agent Security (control-plane vs judgment-plane 분리).
+- ADR-0013 (Critique Lens v0.1 + Tension Generalization + Status Axis
+  Separation) — 본 ADR의 `DesignTension` 객체는 일반 `Tension`으로
+  schema rename + `target_domain` 차원 추가 (12 enum, P0.5 7 enum).
+  category 11 → 14 enum (taxonomy_gap / policy_gap / evidence_conflict /
+  scope_mismatch 신규). 본 ADR의 Critic Loop 8단계와 ADR-0013의 Critique
+  Lens v0.1 (5 rule)은 정합 — 8 mode가 "무엇을 보는가", 5 rule이 "어떻게
+  처리하는가".

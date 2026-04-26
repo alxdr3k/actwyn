@@ -786,8 +786,10 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
   실제 사용; dormant / stale / archived는 schema column에만 존재.
 - Review trigger: P1 activation_score formula 도입 시 자동 stale 분류
   로직 검토; rejected / revoked 통합 결정 (Q-036).
-- Supersedes / superseded by: —
-- Refs: ADR-0011 §Decision 2; Q-036.
+- Supersedes / superseded by: **superseded by DEC-033** (Round 13 Critique
+  Lens로 status 9 enum이 truth lifecycle / activation / retention 3축
+  axis conflation임을 발견. 3축 분리.)
+- Refs: ADR-0011 §Decision 2; Q-036; ADR-0013 §Decision 3; DEC-033.
 
 ## DEC-027 — `decay_policy` enum P0.5 도입 범위 (`none` + `supersede_only`만)
 
@@ -911,6 +913,115 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
   burden을 만들 때.
 - Supersedes / superseded by: —
 - Refs: ADR-0012 §Decision 9; Q-047.
+
+## DEC-032 — Tension `target_domain` P0.5 도입 범위 (7 enum)
+
+- Date: 2026-04-26.
+- Status: accepted.
+- Context: ADR-0013이 `DesignTension`을 일반 `Tension` + `target_domain`
+  차원 (12 enum)으로 일반화. P0.5 도입 범위 결정 필요.
+- Decision: P0.5는 7 enum (`design` / `memory` / `policy` / `workflow` /
+  `evidence` / `decision` / `security`)만 도입. 나머지 5 enum (`product`
+  / `marketing` / `user_preference` / `research` / `tooling`)은 schema
+  reserved (string-like + CHECK constraint enum 확장 가능). P1+ 사용자
+  ideation에서 해당 domain의 tension 발견 시 enum 추가.
+- Alternatives considered: 12 enum 모두 P0.5; 6 enum만 (security 제외).
+- Impacted docs: ADR-0013 §Decision 2; `docs/JUDGMENT_SYSTEM.md`
+  §Tension Generalization.
+- Risks / mitigations: 새 domain 등장 시 enum 확장 비용 → schema는 TEXT
+  column + CHECK constraint, application 코드에서 검증. 마이그레이션 비용
+  최소.
+- Review trigger: 사용자가 reserved 5 enum의 domain에서 tension 제기 시.
+- Supersedes / superseded by: —
+- Refs: ADR-0013 §Decision 2; Q-051.
+
+## DEC-033 — `JudgmentItem.status` 9 enum → 3축 분리 (lifecycle / activation / retention)
+
+- Date: 2026-04-26.
+- Status: accepted.
+- Context: ADR-0011이 status 9 enum 통합을 결정 (DEC-026). Round 13
+  Critique Lens 적용으로 3축 (truth lifecycle / activation /
+  retention) 섞임 발견 (axis conflation). ADR-0013이 partial retract.
+- Decision: status 9 enum 단일 폐기. 3축 분리:
+  (a) `lifecycle_status` 6 enum (proposed / active / rejected / revoked /
+      superseded / expired) — P0.5 모두.
+  (b) `activation_state` 5 enum (eligible / dormant / stale /
+      history_only / excluded) — P0.5는 3 enum (eligible / history_only /
+      excluded). dormant / stale 자동 분류는 P1+.
+  (c) `retention_state` 3 enum (normal / archived / deleted) — P0.5 모두.
+  조합 가능: active+stale / superseded+history_only / active+archived 등.
+- Alternatives considered: status 9 enum 유지 + application 코드에서 분리;
+  2축 분리 (lifecycle + activation, retention 미도입); 4축 분리 (visibility
+  추가).
+- Impacted docs: ADR-0013 §Decision 3; `docs/JUDGMENT_SYSTEM.md` §Status
+  Axis Separation; ADR-0011 §Decision 2 (partial retract).
+- Risks / mitigations: 3축 분리로 SQL filter 복잡도 증가 → 직교 축이라
+  AND 결합 단순. projection rule이 복잡도 흡수.
+- Review trigger: 새 차원 (visibility / acl) 필요 시.
+- Supersedes / superseded by: **supersedes DEC-026** (status 9 enum 통합).
+- Refs: ADR-0013 §Decision 3; DEC-026.
+
+## DEC-034 — `procedure_subtype` 5 enum 추가 + default `skill`
+
+- Date: 2026-04-26.
+- Status: accepted.
+- Context: ADR-0010의 `kind=procedure`가 skill / policy /
+  preference_adaptation / safety_rule / workflow_rule을 묶는 axis
+  conflation. ADR-0013이 분리.
+- Decision: `kind=procedure` 유지. 신규 `procedure_subtype` 필드 5 enum
+  (skill / policy / preference_adaptation / safety_rule / workflow_rule).
+  기존 procedure 노트 마이그레이션 default `subtype=skill` (사용자 명시
+  변경 가능).
+- Alternatives considered: 5 별 kind 추가 (kind enum 폭발); subtype 미도입
+  (axis conflation 유지).
+- Impacted docs: ADR-0013 §Decision 7; `docs/JUDGMENT_SYSTEM.md`
+  §procedure_subtype.
+- Risks / mitigations: 기존 노트 default 분류 오류 — 사용자가 명시
+  override.
+- Review trigger: 새 procedure_subtype 필요 시.
+- Supersedes / superseded by: —
+- Refs: ADR-0013 §Decision 7; Q-056.
+
+## DEC-035 — Reflection 5 sub-action P0.5 도입 (reflection_triage만)
+
+- Date: 2026-04-26.
+- Status: accepted.
+- Context: ADR-0010의 reflection layer 통합은 summary / lesson / critique
+  / consolidation / triage / eval generation을 묶는 axis conflation.
+  ADR-0013이 5 sub-action으로 분해.
+- Decision: P0.5는 `reflection_triage`만 도입 (ADR-0012의
+  `ReflectionTriageEvent` 그대로). 나머지 4 sub-action
+  (`reflection_proposal` / `consolidation` / `critique` /
+  `eval_generation`)은 P1+ 점진 도입.
+- Alternatives considered: 5 sub-action 모두 P0.5; reflection_triage +
+  critique만 P0.5.
+- Impacted docs: ADR-0013 §Decision 5; `docs/JUDGMENT_SYSTEM.md`
+  §Reflection 5 sub-action.
+- Risks / mitigations: P0.5 reflection 기능 협소 — 사용자 명시 trigger로
+  workaround.
+- Review trigger: 사용자가 reflection_proposal / critique 자동화 요구 시.
+- Supersedes / superseded by: —
+- Refs: ADR-0013 §Decision 5; Q-054.
+
+## DEC-036 — `current_truth` → `current_operating_view` 이름 변경
+
+- Date: 2026-04-26.
+- Status: accepted.
+- Context: ADR-0009 Law #4 ("Current truth is a projection")의 "truth"
+  함의 위험. "진짜 진실"이 아닌 "현재 운영 기준". Round 13 Critique Lens
+  Term compression check 발견.
+- Decision: 문서 / UX 차원에서 `current_truth` → `current_operating_view`
+  이름 변경. DB 필드 `current_state`는 유지 (ADR-0009 / 0010 정합 — 코드
+  / migration 영향 없음). ADR-0009 Law #4 본문은 ADR-0013 §Decision 4로
+  cross-ref.
+- Alternatives considered: `current_truth` 유지; `active_baseline_view`
+  대체.
+- Impacted docs: ADR-0009 Law #4 (정정); ADR-0013 §Decision 4;
+  `docs/JUDGMENT_SYSTEM.md` §current_operating_view.
+- Risks / mitigations: 외부 reader에 misleading — 이름 변경으로 해결.
+- Review trigger: 더 정확한 이름 (예: `active_view`) 발견 시.
+- Supersedes / superseded by: —
+- Refs: ADR-0013 §Decision 4; Q-057.
 
 ---
 
