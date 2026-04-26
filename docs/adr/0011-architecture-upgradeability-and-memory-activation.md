@@ -4,6 +4,14 @@
 - Date: 2026-04-26
 - Supersedes: —
 - Superseded by: —
+- **Partially retracted by**: ADR-0013 — (a) status 9 enum 단일 통합 →
+  3축 분리 (`lifecycle_status` / `activation_state` / `retention_state`),
+  (b) `attention_score` ↔ `activation_score` 통합 → 3 score 분리
+  (P0.5 단일 score 유지, P1+ 분리), (c) `kind=architecture_assumption`
+  → `kind=assumption` + `target_domain=architecture` (P0.5는
+  `kind=decision` / `current_state`로 표현, `kind=assumption`은 P1+).
+  본 ADR 본문은 Round 10 시점의 commit이며, 현재 spec은
+  `docs/JUDGMENT_SYSTEM.md` + ADR-0013 cleanup을 source of truth로 본다.
 
 ## Context
 

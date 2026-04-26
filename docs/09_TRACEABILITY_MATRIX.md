@@ -86,10 +86,10 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | Q-043   | Reflection triage critic model 선택                                 | —             | —                          | —                | ADR-0012 §Decision 4                          |
 | Q-044   | Critic model output JSON schema                                     | —             | —                          | —                | ADR-0012 §Decision 4                          |
 | Q-045   | Doubt signal 한국어 keyword 감지 방법                              | —             | —                          | —                | ADR-0012 §Decision 8                          |
-| Q-046   | DesignTension severity 결정 주체                                    | —             | —                          | —                | ADR-0012 §Decision 7                          |
+| Q-046   | `Tension` severity 결정 주체 (legacy: DesignTension)                | —             | —                          | —                | ADR-0012 §Decision 7; ADR-0013 (Tension generalization) |
 | Q-047   | Critic Loop 4-7단계 자동화 시점                                     | DEC-031       | —                          | —                | ADR-0012 §Decision 9                          |
 | Q-048   | `critique_outcomes` artifact link 범위                              | —             | —                          | —                | ADR-0012 §Decision 8                          |
-| Q-049   | DesignTension 자기참조 깊이 제한                                    | ADR-0012      | —                          | —                | ADR-0012 §Risks                               |
+| Q-049   | `Tension` 자기참조 깊이 제한 (legacy: DesignTension)                | ADR-0012      | —                          | —                | ADR-0012 §Risks; ADR-0013 (Tension generalization) |
 | Q-050   | Control-plane / judgment-plane DB 분리 정도                         | DEC-030       | —                          | —                | ADR-0012 §Decision 6                          |
 | Q-051   | Tension target_domain P0.5 도입 범위                                | DEC-032       | —                          | —                | ADR-0013 §Decision 2                          |
 | Q-052   | Tension category 14 enum P0.5 도입 범위                             | —             | —                          | —                | ADR-0013 §Decision 2                          |

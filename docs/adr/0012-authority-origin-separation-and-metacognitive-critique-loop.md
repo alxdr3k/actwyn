@@ -5,6 +5,14 @@
 - Supersedes: —
 - Superseded by: —
 - Partial retraction of: ADR-0011 implicit must-fix #3 (`system_authored` enum addition)
+- **Partially retracted by**: ADR-0013 — (a) `DesignTension` 객체 →
+  generalized `Tension` (single table + `target_domain` 차원), (b) `Tension.status`
+  단일 enum → `lifecycle_status` + `resolution_type` 분리, (c)
+  `epistemic_status` 필드명 → `epistemic_origin` rename, (d) `approval_state`
+  enum (`proposed` / `accepted` / `active` / `rejected`) → `not_required` /
+  `pending` / `approved` / `rejected`로 cleanup. 본 ADR 본문의 schema는
+  Round 12 시점의 commit이며, **현재 spec은 `docs/JUDGMENT_SYSTEM.md` +
+  ADR-0013을 source of truth**로 본다.
 
 ## Context
 

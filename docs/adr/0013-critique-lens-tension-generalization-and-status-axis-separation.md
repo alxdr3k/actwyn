@@ -10,6 +10,35 @@
 - Refines: ADR-0010 §Reflection layer (5 sub-action 분해), ADR-0010
   §Workspace 객체 (3축 분리), ADR-0011 §architecture_assumption (kind
   enum 폭발 방지)
+- **Cleanup applied (post-acceptance, ADR-0013 cleanup batch)**:
+  본 ADR이 commit한 후 사용자 apply-review로 추가 cleanup이 적용됨
+  (Phase 0/0.5 spec 정합화). 핵심:
+  (a) `Exception Probe Gate` → 일반 `Control Gate` rename + 4-phase
+  / `ProbeType` / `ControlGateDecision` 객체 도입,
+  (b) `exception_probe_level` → `control_gate_level` (또는 `level` in
+  `ControlGateDecision`) rename + `ReflectionTriageEvent`에서 gate
+  output 제거,
+  (c) Critique Lens activation typed predicate (`probe_level_in`)
+  로 자유형 string ("L2 or L3") 제거,
+  (d) `epistemic_status` → `epistemic_origin` rename + 6 enum
+  (`decided` / `deprecated` / `system_authored` 제거),
+  (e) `approval_state` 4 enum → `not_required` / `pending` / `approved`
+  / `rejected` (이전 `proposed` / `accepted` / `active` 제거 — lifecycle
+  과 분리),
+  (f) `Tension.status` 단일 enum → `lifecycle_status` (4 enum) +
+  `resolution_type` (8 enum) 분리,
+  (g) `quote_or_span` → `span_locator` + `quote_excerpt` 분리,
+  (h) `current_truth` → `current_operating_view` (DB 필드 `current_state`
+  유지),
+  (i) `target_domain`에서 `design` 제거 (P0.5 7 enum: architecture /
+  memory / policy / workflow / evidence / decision / security; design은
+  P1+ reserved),
+  (j) Phase 1A에서 `kind=assumption` 미사용 (architecture assumptions은
+  `kind=decision` / `current_state`로 P0.5 표현; `kind=assumption` 도입은
+  P1+).
+  Cleanup 적용된 spec은 `docs/JUDGMENT_SYSTEM.md`를 source of truth로
+  본다. 본 ADR의 §Decision body는 ADR-0013 commit 시점의 결정을 보존하되,
+  현재 운영되는 Phase 0/0.5 spec은 cleanup 적용 후의 `docs/JUDGMENT_SYSTEM.md`.
 
 ## Context
 
@@ -356,7 +385,7 @@ type AttentionPriority = {
 | Risk | Mitigation |
 | ---- | ---------- |
 | status 3축 분리로 application 코드 복잡도 증가 | 3축은 직교, SQL filter는 단순 (lifecycle_status='active' AND activation_state IN ('eligible', 'dormant')). projection rule이 복잡도 흡수. |
-| Tension target_domain 13 enum P0.5 도입이 over-engineering | DEC-032 — P0.5는 8 enum (design / memory / policy / workflow / evidence / decision / security / architecture)만. 나머지 5 enum은 schema reserved. (`architecture`는 `kind=assumption` enum 공유로 P0.5 필수.) |
+| Tension target_domain 13 enum P0.5 도입이 over-engineering | DEC-032 — P0.5는 7 enum (architecture / memory / policy / workflow / evidence / decision / security)만 (`design`은 architecture와 중복 회피로 P1+ reserved; ADR-0013 cleanup). 나머지 5 enum은 schema reserved. (`architecture`는 `kind=assumption` enum 공유로 P0.5 필수.) |
 | ADR-0012 DesignTension → Tension rename으로 마이그레이션 비용 | ADR-0012 commit `8679544` 이후 schema migration 전이라 실제 row 없음. 문서 정정만으로 충분. |
 | `current_truth` → `current_operating_view` 이름 변경으로 ADR-0009 Law #4 문구 변경 | DB 필드 `current_state` 유지 — 코드 / migration 영향 없음. ADR-0009 본문은 ADR-0013 §4로 cross-ref + 정정. |
 | Reflection 5 sub-action 분해로 P0.5 scope 확장 | DEC-035 — P0.5는 reflection_triage만. 나머지 4 sub-action은 P1+. |

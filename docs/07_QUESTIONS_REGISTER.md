@@ -1097,7 +1097,7 @@ committed for a later milestone.
 - **Trigger**: P1 telemetry 구현 시.
 - **History**: 2026-04-26 (ADR-0012 §Decision 8).
 
-### Q-046 — DesignTension severity 결정 주체?
+### Q-046 — `Tension` severity 결정 주체? (legacy: DesignTension)
 
 - **Status**: open.
 - **Owner**: project lead.
@@ -1133,7 +1133,7 @@ committed for a later milestone.
 - **Trigger**: P1 critique_outcomes schema PR.
 - **History**: 2026-04-26 (ADR-0012 §Decision 8).
 
-### Q-049 — DesignTension 자기참조 깊이 제한?
+### Q-049 — `Tension` 자기참조 깊이 제한? (legacy name: DesignTension)
 
 - **Status**: decided.
 - **Owner**: project lead.
@@ -1228,14 +1228,19 @@ committed for a later milestone.
 
 - **Status**: open.
 - **Owner**: project lead.
-- **Context**: ADR-0011이 `kind=architecture_assumption` 시드 도입.
+- **Context**: ADR-0011이 `kind=architecture_assumption` 시드 도입을 제안.
   ADR-0013이 `kind=assumption` + `target_domain=architecture`로 정교화.
-  마이그레이션 형식?
+  ADR-0013 cleanup으로 P0.5는 `kind=assumption` 자체를 도입하지 않고
+  `kind=decision` / `current_state`로 architecture assumption 표현 (Phase 1A
+  enforced kind 6종에 `assumption` 미포함). 따라서 P0.5 시드 형식 결정 필요.
 - **Recommendation**: ADR-0011 commit 시점에 시드 row 없음 (architectural
-  commitment 문서만). Phase 1 schema PR에서 신규 schema (`kind=assumption`)
-  로 깔끔히 적용. 마이그레이션 script 불필요.
-- **Trigger**: P1 schema PR 시.
-- **History**: 2026-04-26 (ADR-0013 §Decision 8).
+  commitment 문서만). Phase 1A schema PR에서 architecture assumption은
+  `kind=decision` 또는 `kind=current_state`로 보존. `kind=assumption`은
+  P1+ enable 시점에 evidence 기반 마이그레이션. P0.5 시드는 `kind=assumption`
+  사용 금지.
+- **Trigger**: P1 schema PR 시 또는 `kind=assumption` enable 결정 시.
+- **History**: 2026-04-26 (ADR-0013 §Decision 8). 2026-04-26 follow-up
+  (ADR-0013 cleanup): P0.5에서 `kind=assumption` 도입 미루기 명시.
 
 ### Q-060 — JudgmentItem 4축 분리 시 사용자 작성 default?
 

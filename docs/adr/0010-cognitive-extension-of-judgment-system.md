@@ -4,6 +4,13 @@
 - Date: 2026-04-26
 - Supersedes: —
 - Superseded by: —
+- **Refined by**: ADR-0013 — (a) Reflection layer 5 sub-action 분해
+  + P0.5 scope narrowed to `reflection_triage` only (no automatic
+  lesson candidate append), (b) Workspace 객체 3축 분리 (`WorkspacePlan`
+  / `ContextPacket` / `WorkspaceTrace`; P0.5는 `workspaces` table
+  도입 안 함, `WorkspaceTrace` 이벤트만), (c) `procedure_subtype` 5
+  enum 추가. 본 ADR 본문은 Round 9-10 시점의 commit이며, 현재 운영
+  spec은 `docs/JUDGMENT_SYSTEM.md`를 source of truth로 본다.
 
 ## Context
 

@@ -898,8 +898,10 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
 - Decision: control-plane과 judgment-plane을 명시적으로 분리한다.
   control-plane는 telemetry / audit / debug 용 (durable 아닐 수 있음,
   retention class `session` 기본). judgment-plane는 actwyn 행동의 기준
-  (durable). DesignTension 등 critique object는 judgment_items에 들어가지
-  않으며, judgment_items는 critique 카테고리를 가지지 않는다.
+  (durable). `Tension` 등 critique object (ADR-0012가 `DesignTension`
+  으로 도입한 것을 ADR-0013이 일반 `Tension`으로 generalize)는
+  judgment_items에 들어가지 않으며, judgment_items는 critique 카테고리를
+  가지지 않는다.
 - Alternatives considered: 모두 judgment_items로 통합 (recursive critique
   위험); 별 DB 분리 (운영 cost 증가).
 - Impacted docs: ADR-0012 §Decision 6; `docs/JUDGMENT_SYSTEM.md`
@@ -930,10 +932,10 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
   너무 큼.
 - Impacted docs: ADR-0012 §Decision 9; `docs/JUDGMENT_SYSTEM.md`
   §Metacognitive Critique Loop §Critic Loop 8단계.
-- Risks / mitigations: P0.5 design tensions이 자동 resolution 없이 쌓일
-  위험 → 사용자가 직접 review하여 resolution path 결정. P1에 4단계
-  자동화.
-- Review trigger: P1 schema PR; design tensions queue가 사용자 검토
+- Risks / mitigations: P0.5 `tensions` (ADR-0013 rename)이 자동 resolution
+  없이 쌓일 위험 → 사용자가 직접 review하여 resolution path 결정. P1에
+  4단계 자동화.
+- Review trigger: P1 schema PR; `tensions` queue가 사용자 검토
   burden을 만들 때.
 - Supersedes / superseded by: —
 - Refs: ADR-0012 §Decision 9; Q-047.

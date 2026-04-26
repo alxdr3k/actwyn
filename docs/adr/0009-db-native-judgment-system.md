@@ -1,5 +1,12 @@
 # ADR-0009 — DB-native, AI-first Judgment System
 
+> **Cleanup applied (post-acceptance).** ADR-0013 cleanup으로 Law #4
+> 의 "current truth is a projection" 표현은 "current_operating_view is
+> a projection"으로 rename. DB 필드 `current_state`는 유지. 본 ADR
+> 본문의 Law / commitment는 그대로이며, 현재 운영 spec은
+> `docs/JUDGMENT_SYSTEM.md`를 source of truth로 본다.
+
+
 - Status: accepted
 - Date: 2026-04-26
 - Supersedes: —
