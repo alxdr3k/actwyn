@@ -82,7 +82,7 @@ ADR-0012의 `DesignTension` 객체는 일반 `Tension`으로 이름 변경 +
 type Tension = {
   id: string
 
-  target_domain:    // 신규 차원, 12 enum
+  target_domain:    // 신규 차원, 13 enum (Tension과 kind=assumption 공유)
     | "design"            // P0.5
     | "memory"            // P0.5
     | "policy"            // P0.5
@@ -90,6 +90,7 @@ type Tension = {
     | "evidence"          // P0.5
     | "decision"          // P0.5
     | "security"          // P0.5
+    | "architecture"      // P0.5 (kind=assumption + target_domain=architecture 위함)
     | "product"           // P1+
     | "marketing"         // P1+
     | "user_preference"   // P1+
@@ -130,8 +131,11 @@ type Tension = {
 }
 ```
 
-**P0.5 도입**: 6 + security = 7 target_domain enum. 나머지 5 enum은
-reserved 또는 string-like + 문서 권장 (DEC-032).
+**P0.5 도입**: 6 + security + architecture = 8 target_domain enum.
+`architecture`는 `kind=assumption`이 `target_domain=architecture`로 자기
+자신을 표현해야 하므로 P0.5 필수 (Round 13 codex bot review 정정).
+나머지 5 enum (`product` / `marketing` / `user_preference` / `research` /
+`tooling`)은 reserved 또는 string-like + 문서 권장 (DEC-032).
 
 `DesignTension` 테이블은 `Tension` 테이블로 schema rename. ADR-0012의
 사용 패턴 (target_id / category / signal_source 등) 모두 정합 유지.

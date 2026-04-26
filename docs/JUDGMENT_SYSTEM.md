@@ -1886,9 +1886,9 @@ ADR-0012의 `DesignTension`은 일반 `Tension`으로 schema rename +
 type Tension = {
   id: string
 
-  target_domain:    // 신규 차원
-    | "design" | "memory" | "policy" | "workflow" | "evidence" | "decision" | "security"
-    // P0.5: 위 7 enum
+  target_domain:    // 신규 차원 — Tension과 kind=assumption (target_domain) 공유
+    | "design" | "memory" | "policy" | "workflow" | "evidence" | "decision" | "security" | "architecture"
+    // P0.5: 위 8 enum (architecture 포함 — kind=assumption + target_domain=architecture 사용 위함)
     | "product" | "marketing" | "user_preference" | "research" | "tooling"
     // P1+: 위 5 enum
 

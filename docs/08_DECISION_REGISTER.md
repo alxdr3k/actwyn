@@ -70,9 +70,20 @@ deployment shape). Everything else is a `DEC-###`.
 | DEC-020 | Telegram message chunking at 3,800 chars                       | accepted |
 | DEC-021 | CJK-safer token estimator rule                                 | accepted |
 | DEC-022 | second-brain GitHub repo는 actwyn judgment의 canonical 아님    | accepted |
-| DEC-023 | `JudgmentItem.kind` v1 도입 enum 범위 (5-6개부터 시작)         | accepted |
+| DEC-023 | `JudgmentItem.kind` v1 도입 enum 범위 (6 enforced + 5 deferred) | accepted |
 | DEC-024 | P0.5 cognitive scope (Goal / Workspace / Reflection 최소형)    | accepted |
 | DEC-025 | JudgmentItem metacognitive 필드는 P0.5 schema에 optional 도입  | accepted |
+| DEC-026 | `JudgmentItem.status` enum P0.5 도입 범위 (9 enum 모두)        | superseded by DEC-033 |
+| DEC-027 | `decay_policy` enum P0.5는 `none` + `supersede_only`만         | accepted |
+| DEC-028 | `ontology_version` + `schema_version` 모든 새 record에 강제    | accepted |
+| DEC-029 | `system_authored` enum 제거 + `authority_source` P0.5 범위     | accepted |
+| DEC-030 | Control-plane vs Judgment-plane 분리                          | accepted |
+| DEC-031 | Critic Loop P0.5 도입 단계 (1-3단계만)                        | accepted |
+| DEC-032 | Tension `target_domain` P0.5 도입 범위 (8 enum)               | accepted |
+| DEC-033 | `JudgmentItem.status` 9 enum → 3축 분리 (lifecycle/activation/retention) | accepted |
+| DEC-034 | `procedure_subtype` 5 enum + default `skill`                  | accepted |
+| DEC-035 | Reflection 5 sub-action P0.5 도입 (`reflection_triage`만)     | accepted |
+| DEC-036 | `current_truth` → `current_operating_view` 이름 변경          | accepted |
 
 Decisions that were previously `D01`..`D05` in the flat log have
 been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
@@ -921,26 +932,34 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
 - Supersedes / superseded by: —
 - Refs: ADR-0012 §Decision 9; Q-047.
 
-## DEC-032 — Tension `target_domain` P0.5 도입 범위 (7 enum)
+## DEC-032 — Tension `target_domain` P0.5 도입 범위 (8 enum)
 
 - Date: 2026-04-26.
 - Status: accepted.
 - Context: ADR-0013이 `DesignTension`을 일반 `Tension` + `target_domain`
-  차원 (12 enum)으로 일반화. P0.5 도입 범위 결정 필요.
-- Decision: P0.5는 7 enum (`design` / `memory` / `policy` / `workflow` /
-  `evidence` / `decision` / `security`)만 도입. 나머지 5 enum (`product`
-  / `marketing` / `user_preference` / `research` / `tooling`)은 schema
-  reserved (string-like + CHECK constraint enum 확장 가능). P1+ 사용자
-  ideation에서 해당 domain의 tension 발견 시 enum 추가.
-- Alternatives considered: 12 enum 모두 P0.5; 6 enum만 (security 제외).
-- Impacted docs: ADR-0013 §Decision 2; `docs/JUDGMENT_SYSTEM.md`
-  §Tension Generalization.
+  차원 (13 enum)으로 일반화. P0.5 도입 범위 결정 필요. `target_domain`
+  enum은 `Tension`과 `kind=assumption` (ADR-0011 정교화)이 공유 — 따라서
+  `architecture`도 P0.5 enum에 포함해야 한다 (Round 13 codex bot review
+  정정).
+- Decision: P0.5는 **8 enum** (`design` / `memory` / `policy` /
+  `workflow` / `evidence` / `decision` / `security` / `architecture`)
+  도입. `architecture`는 `kind=assumption` + `target_domain=architecture`
+  형태로 시스템 자신의 설계 가정을 표현하는 데 필수. 나머지 5 enum
+  (`product` / `marketing` / `user_preference` / `research` / `tooling`)은
+  schema reserved (string-like + CHECK constraint enum 확장 가능). P1+
+  사용자 ideation에서 해당 domain의 tension 발견 시 enum 추가.
+- Alternatives considered: 13 enum 모두 P0.5; 7 enum만 (architecture
+  제외 — codex bot이 발견한 일관성 깨짐); 6 enum만 (security 제외).
+- Impacted docs: ADR-0013 §Decision 2 / §Decision 8 (architecture_assumption);
+  `docs/JUDGMENT_SYSTEM.md` §Tension Generalization +
+  §architecture_assumption.
 - Risks / mitigations: 새 domain 등장 시 enum 확장 비용 → schema는 TEXT
   column + CHECK constraint, application 코드에서 검증. 마이그레이션 비용
   최소.
 - Review trigger: 사용자가 reserved 5 enum의 domain에서 tension 제기 시.
 - Supersedes / superseded by: —
-- Refs: ADR-0013 §Decision 2; Q-051.
+- Refs: ADR-0013 §Decision 2 + §Decision 8; Q-051; PR #10 codex bot
+  review (P1 architecture missing).
 
 ## DEC-033 — `JudgmentItem.status` 9 enum → 3축 분리 (lifecycle / activation / retention)
 
