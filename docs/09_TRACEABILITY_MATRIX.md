@@ -1,6 +1,6 @@
 # Traceability Matrix
 
-> Status: living document · Owner: project lead · Last updated: 2026-04-22
+> Status: living document · Owner: project lead · Last updated: 2026-04-26
 >
 > This matrix is the index that connects questions, decisions, and
 > source-of-truth artifacts. See
@@ -67,6 +67,43 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | Q-024   | Summary generation triggers                                        | DEC-019       | §12.3, §12.5               | §11.1            | —                                             |
 | Q-025   | Context packer drop order                                          | —             | §12.5, §12.6               | §10.3            | —                                             |
 | Q-026   | Recording usage when provider does not report it                   | —             | §14.3                      | §8.4, §13.3      | —                                             |
+| Q-027   | `memory_items` ↔ `judgment_items` 관계 (통합 / 분리 / 마이그레이션)  | —             | §12 (taxonomy)             | §11.3            | ADR-0009 §Risks; ADR-0011 §Decision 6 (architecture_assumption) |
+| Q-028   | `JudgmentItem.kind` v1 enum 범위                                    | DEC-023       | —                          | —                | ADR-0009 §Risks; second-brain Round 11 must-fix |
+| Q-029   | Phase 1 SQLite FTS5 vs sqlite-vec leave-room                       | —             | —                          | —                | ADR-0009 §Risks; future Phase 1 ADR            |
+| Q-030   | second-brain repo 기존 정책 문서 처분 (cross-repo)                  | DEC-022 (cross-ref) | —                    | —                | ADR-0009 Phase 0 commitment                    |
+| Q-031   | Eval harness 도입 시점 (P0.5 / P2 / P4 단계별)                      | —             | —                          | —                | ADR-0009 §Eval harness; second-brain Round 11 §A.21.3 |
+| Q-032   | P0.5 layer 우선순위 (cognitive 12-layer 중)                         | DEC-024       | —                          | —                | ADR-0010 §Phase 재구성                          |
+| Q-033   | `procedure` skill library 운영 형태                                 | —             | —                          | —                | ADR-0010 §Skill library                         |
+| Q-034   | Attention scoring formula 가중치 (정적 vs 학습)                     | —             | —                          | —                | ADR-0010 §Attention scoring; ADR-0011 §Decision 9 (activation_score 통합) |
+| Q-035   | Cognitive analogy의 communication 방식                             | —             | —                          | —                | ADR-0010 §Disclaimers                          |
+| Q-036   | `rejected` vs `revoked` status 통합 검토                            | —             | —                          | —                | ADR-0011 §Decision 2; DEC-026                  |
+| Q-037   | `architecture_assumption` 구현 형태 (kind / scope / 별 schema)     | ADR-0013      | —                          | —                | ADR-0011 §Decision 6; ADR-0013 §Decision 8 (kind=assumption + target_domain). Q-059가 후속 마이그레이션 추적 |
+| Q-038   | `activation_score` formula 가중치 default 값                        | —             | —                          | —                | ADR-0011 §Decision 8/9; Q-034 trace            |
+| Q-039   | `research_update_protocol` 7단계 자동화 시점                        | —             | —                          | —                | ADR-0011 §Decision 7                           |
+| Q-040   | `last_verified_at` 갱신 trigger                                     | —             | —                          | —                | ADR-0011 §시간 필드 8개                         |
+| Q-041   | `volatility` 결정 주체                                              | —             | —                          | —                | ADR-0011 §volatility + decay_policy            |
+| Q-042   | `ontology_version` migration 전략                                   | —             | —                          | —                | ADR-0011 §ontology_version + schema_version; DEC-028 |
+| Q-043   | Reflection triage critic model 선택                                 | —             | —                          | —                | ADR-0012 §Decision 4                          |
+| Q-044   | Critic model output JSON schema                                     | —             | —                          | —                | ADR-0012 §Decision 4                          |
+| Q-045   | Doubt signal 한국어 keyword 감지 방법                              | —             | —                          | —                | ADR-0012 §Decision 8                          |
+| Q-046   | `Tension` severity 결정 주체 (legacy: DesignTension)                | —             | —                          | —                | ADR-0012 §Decision 7; ADR-0013 (Tension generalization) |
+| Q-047   | Critic Loop 4-7단계 자동화 시점                                     | DEC-031       | —                          | —                | ADR-0012 §Decision 9                          |
+| Q-048   | `critique_outcomes` artifact link 범위                              | —             | —                          | —                | ADR-0012 §Decision 8                          |
+| Q-049   | `Tension` 자기참조 깊이 제한 (legacy: DesignTension)                | ADR-0012      | —                          | —                | ADR-0012 §Risks; ADR-0013 (Tension generalization) |
+| Q-050   | Control-plane / judgment-plane DB 분리 정도                         | DEC-030       | —                          | —                | ADR-0012 §Decision 6                          |
+| Q-051   | Tension target_domain P0.5 도입 범위                                | DEC-032       | —                          | —                | ADR-0013 §Decision 2                          |
+| Q-052   | Tension category 14 enum P0.5 도입 범위                             | —             | —                          | —                | ADR-0013 §Decision 2                          |
+| Q-053   | status 3축 분리 시 ADR-0011 partial retract 형식                    | ADR-0013      | —                          | —                | ADR-0013 §Decision 3                          |
+| Q-054   | Reflection 5 sub-action P0.5 도입 범위                              | DEC-035       | —                          | —                | ADR-0013 §Decision 5                          |
+| Q-055   | Workspace 3축 분리 매핑                                             | —             | —                          | —                | ADR-0013 §Decision 6                          |
+| Q-056   | procedure_subtype 마이그레이션 default                              | DEC-034       | —                          | —                | ADR-0013 §Decision 7                          |
+| Q-057   | current_truth → current_operating_view 적용 범위                    | DEC-036       | —                          | —                | ADR-0013 §Decision 4                          |
+| Q-058   | attention/activation/retrieval 3 score P0.5 도입                    | —             | —                          | —                | ADR-0013 §Decision 9                          |
+| Q-059   | architecture_assumption 시드 row 마이그레이션                       | —             | —                          | —                | ADR-0013 §Decision 8                          |
+| Q-060   | JudgmentItem 4축 분리 사용자 작성 default                           | —             | —                          | —                | ADR-0013                                      |
+| Q-061   | Critique Lens v0.1 LLM critic prompt 형식                           | —             | —                          | —                | ADR-0013 §Decision 1                          |
+| Q-062   | Tension target_domain 확장 시점                                     | —             | —                          | —                | ADR-0013 §Decision 2; DEC-032                 |
+| Q-063   | docs-structure follow-up PR scope (current-state docs / AGENTS.md / archive) | —    | —                          | —                | DEC-037 §scope clarification                  |
 
 ## Matrix — ADRs → artifacts
 
@@ -80,6 +117,11 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | ADR-0006 | Explicit memory + attachment promotion                   | §12.2, §12.8      | §6.4, §9.3, §11.3       | AC-STO-004, AC-STO-005                     |
 | ADR-0007 | Provider session as cache, internal session as truth     | §12.4             | §8.2, §10.2             | SP-06                          |
 | ADR-0008 | Durable Telegram inbound / outbound ledgers              | §13               | §6.1, §6.3, §7.1, §9    | SP-02, SP-03; AC-TEL-003, AC-JOB-002, AC-STO-001 |
+| ADR-0009 | DB-native, AI-first Judgment System                      | §12 (taxonomy 확장 예정) | §11.3 (judgment layer) | `docs/JUDGMENT_SYSTEM.md`; second-brain Ideation Round 7 + Appendix A |
+| ADR-0010 | Cognitive extension of Judgment System                   | §12 (taxonomy 확장 예정) | §11.3                | `docs/JUDGMENT_SYSTEM.md` §Cognitive Architecture Extension; second-brain Ideation Round 9 + Appendix A.19 |
+| ADR-0011 | Architecture upgradeability + memory activation lifecycle | §12 (taxonomy 확장 예정) | §11.3                | `docs/JUDGMENT_SYSTEM.md` §Upgradeability & Memory Activation; second-brain Ideation Round 10 + Appendix A.20 |
+| ADR-0012 | Origin/Authority separation + Metacognitive Critique Loop | §12 (taxonomy 확장 예정) | §11.3                | `docs/JUDGMENT_SYSTEM.md` §Authority Source + §Metacognitive Critique Loop; second-brain Ideation Round 12 + Appendix A.22; ADR-0011 §Refs (RETRACT system_authored) |
+| ADR-0013 | Critique Lens v0.1 + Tension Generalization + Status Axis Separation | §12 (taxonomy 확장 예정) | §11.3                | `docs/JUDGMENT_SYSTEM.md` §Critique Lens v0.1 + §Tension Generalization + §Status Axis Separation; second-brain Ideation Round 13 + Appendix A.23; partial retract ADR-0011 status 9 enum / activation_score 통합; rename ADR-0012 DesignTension → Tension; refine ADR-0010 Reflection / Workspace / procedure |
 
 ## Matrix — DECs → artifacts
 
@@ -106,6 +148,22 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | DEC-019 | Summary auto-trigger conditions                              | §12.3, §12.5             | §11.1              | —                            |
 | DEC-020 | Telegram message chunking at 3,800 chars                     | §8.4                     | §9.4               | —                            |
 | DEC-021 | CJK-safer token estimator rule                               | §12.6                    | §10.4              | —                            |
+| DEC-022 | second-brain GitHub repo는 actwyn judgment의 canonical 아님    | §12 (taxonomy 확장 예정) | §11.3              | ADR-0009 §1; second-brain Round 7 |
+| DEC-023 | `JudgmentItem.kind` v1 enum 범위 (6 enforced + 5 deferred)   | —                        | —                  | ADR-0009 §Risks; Q-028        |
+| DEC-024 | P0.5 cognitive scope (Goal / Workspace / Reflection 최소형)  | —                        | —                  | ADR-0010 §Phase 재구성; Q-032; **Reflection clause superseded by DEC-035** |
+| DEC-025 | JudgmentItem metacognitive 필드 P0.5 optional 도입           | —                        | —                  | ADR-0010 §Decision 3          |
+| DEC-026 | `JudgmentItem.status` enum P0.5 9 enum 모두 schema 도입 (**superseded by DEC-033**) | —          | —                  | ADR-0011 §Decision 2; Q-036; ADR-0013 §Decision 3 |
+| DEC-027 | `decay_policy` enum P0.5는 `none` + `supersede_only`만        | —                        | —                  | ADR-0011 §Decision 4          |
+| DEC-028 | `ontology_version` + `schema_version` 모든 새 record에 강제   | —                        | —                  | ADR-0011 §Decision 5; Q-042    |
+| DEC-029 | `system_authored` 제거 + `authority_source` P0.5 도입 범위    | —                        | —                  | ADR-0012 §Decision 1-3; ADR-0011 §Refs (system_authored RETRACT cross-ref); second-brain Round 12 사용자 직접 발견 (no upstream Q) |
+| DEC-030 | Control-plane vs Judgment-plane 분리                          | —                        | —                  | ADR-0012 §Decision 6           |
+| DEC-031 | Critic Loop P0.5 도입 단계 (1-3단계만)                        | —                        | —                  | ADR-0012 §Decision 9; Q-047    |
+| DEC-032 | Tension `target_domain` P0.5 도입 범위 (8 enum, architecture 포함) | —                        | —                  | ADR-0013 §Decision 2; Q-051    |
+| DEC-033 | `status` 9 enum → 3축 분리 (lifecycle / activation / retention) | —                        | —                  | ADR-0013 §Decision 3; **supersedes DEC-026** |
+| DEC-034 | `procedure_subtype` 5 enum + default `skill`                  | —                        | —                  | ADR-0013 §Decision 7; Q-056    |
+| DEC-035 | Reflection 5 sub-action P0.5 도입 (`reflection_triage`만)     | —                        | —                  | ADR-0013 §Decision 5; Q-054    |
+| DEC-036 | `current_truth` → `current_operating_view` 이름 변경          | —                        | —                  | ADR-0013 §Decision 4; Q-057    |
+| DEC-037 | Implementation Documentation Lifecycle Policy                  | —                        | —                  | ADR README §Promotion rules; Q-063 (follow-up docs-structure PR) |
 
 ## Matrix — PRD acceptance criteria → evidence
 

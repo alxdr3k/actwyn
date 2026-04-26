@@ -1,6 +1,6 @@
 # Personal Agent — Questions Register
 
-> Status: living document · Owner: project lead · Last updated: 2026-04-22
+> Status: living document · Owner: project lead · Last updated: 2026-04-26
 >
 > This file is the **question ledger**: it captures questions, proposed
 > answers, and the promotion pointers that route each decided answer
@@ -690,7 +690,635 @@ task loops, client-side encryption). An entry here signals "we
 expect to need this eventually"; promote to an ADR when scope is
 committed for a later milestone.
 
-*No entries yet.*
+### Q-027 — `memory_items`(ADR-0006)와 새 `judgment_items` 관계: 통합 / 분리 / 단계적 마이그레이션 중 무엇?
+
+- **Section**: Future Architecture
+- **Status**: open (2026-04-26).
+- **Top 10 priority**: —
+- **Owner**: Staff Eng + Product
+- **Proposed answer**: ADR-0009 Phase 0에서는 **분리** 방향으로
+  commit (memory layer는 그대로 유지, judgment layer는 별 schema로
+  추가). Phase 1 schema 구현 시 다음 중 결정:
+  - Option A — 영구 분리. `memory_items`는 session summary candidate
+    중심, `judgment_items`는 source-grounded judgment 중심.
+  - Option B — 단계적 마이그레이션. `memory_items`의 `user_stated` /
+    `user_confirmed` row를 source-grounded judgment로 promotion.
+    `memory_items`는 deprecation track.
+  - Option C — 통합. 한 테이블로 합치고 `kind` / `epistemic_origin` (ADR-0013
+    rename)으로 구분.
+  현 commitment는 Option A. Phase 1에서 evidence 기반 재결정.
+- **Decision**: ADR-0009 (Phase 0 commit), Phase 1에서 별 ADR / DEC
+  필요.
+- **Impacted docs**: ADR-0006, ADR-0009; PRD §12.1a Taxonomy;
+  `docs/JUDGMENT_SYSTEM.md` §Relationship to memory layer.
+- **Follow-up**: Phase 1 schema PR에서 결정.
+- **History**: 2026-04-26 ADR-0009 채택 시 분리 방향으로 출발점
+  설정 (second-brain Ideation 노트 Open Question Q4 import).
+
+### Q-028 — `JudgmentItem.kind` v1 enum 범위는 어디까지인가?
+
+- **Section**: Future Architecture
+- **Status**: decided (2026-04-26, 잠정 출발점).
+- **Top 10 priority**: —
+- **Owner**: Staff Eng + Product
+- **Proposed answer**: Phase 1 schema 첫 도입은 5-6개 핵심 kind
+  (`fact` / `preference` / `decision` / `current_state` /
+  `procedure` / `caution`)에서 시작. 나머지 (`claim` / `principle` /
+  `hypothesis` / `experiment` / `result`)는 evidence 기반 후속 추가.
+- **Decision**: DEC-023.
+- **Impacted docs**: `docs/JUDGMENT_SYSTEM.md` §Enum catalog.
+- **Follow-up**: Phase 1 schema PR에서 enum TEXT validation 형태
+  확정. Phase 2 typed tool에서 누락 kind surface 시 별 DEC.
+- **History**: 2026-04-26 ADR-0009 + DEC-023과 함께 출발점 결정
+  (second-brain Ideation 노트 Open Question Q3 import).
+
+### Q-029 — Phase 1 schema에서 SQLite FTS5만 vs 처음부터 sqlite-vec leave-room?
+
+- **Section**: Future Architecture
+- **Status**: open (2026-04-26).
+- **Top 10 priority**: —
+- **Owner**: Staff Eng
+- **Proposed answer**: Phase 1은 **FTS5만**으로 시작. embedding
+  projection은 Phase 4 trigger (`source_grounding_rate` /
+  `current_operating_view_accuracy` eval metric이 부족 evidence를 줄 때).
+  단, schema와 module structure는 embedding projection이 추가되어도
+  비파괴적으로 들어올 수 있는 형태로 작성 (`judgment.project` 모듈
+  분리, projection table 별도 권장).
+- **Decision**: ADR-0009 §6 (vector / graph는 derived projection,
+  본 ADR에서 채택 결정 안 함).
+- **Impacted docs**: ADR-0003; `docs/JUDGMENT_SYSTEM.md` §SQL schema
+  sketch / §Phase 4.
+- **Follow-up**: Phase 1 schema PR에서 projection seam 확정. Phase
+  4 trigger 시 별 ADR (sqlite-vec vs pgvector vs Qdrant).
+- **History**: 2026-04-26 (second-brain Ideation 노트 Open Question
+  Q5 import).
+
+### Q-030 — second-brain repo의 기존 정책 문서는 어떻게 되는가?
+
+- **Section**: Future Architecture
+- **Status**: open (2026-04-26).
+- **Top 10 priority**: —
+- **Owner**: Product + Staff Eng (cross-repo)
+- **Proposed answer**: ADR-0009 + DEC-022는 second-brain repo의
+  **canonical 역할 박탈**과 **새 4가지 역할** (seed corpus /
+  human-readable export / backup / publishing layer)을 결정했지만,
+  기존 정책 문서 (SOURCE_OF_TRUTH / INGESTION_RULES / PROMPTING_GUIDE
+  / IDEATION_GUIDE / VAULT_MANIFEST 등)의 처분은 미정. 후보:
+  - Option A — 그대로 유지 (seed corpus 운영용 문서로 남김).
+  - Option B — Deprecate (Markdown vault canonical 전제 위에서만
+    의미 있는 문서들을 archive).
+  - Option C — actwyn judgment system으로 흡수 (개념 / 정책을
+    `docs/JUDGMENT_SYSTEM.md` 또는 후속 spec으로 import).
+  본 결정은 second-brain repo 측의 별 PR에서 처리. actwyn 측에서는
+  ADR-0009 + DEC-022로 충분.
+- **Decision**: —  (cross-repo, second-brain repo 측 결정 대기).
+- **Impacted docs**: (second-brain repo) `_System/AI/*.md`,
+  `_System/Schemas/*.md`. actwyn 쪽은 영향 없음.
+- **Follow-up**: second-brain repo에서 별도 PR / 결정.
+- **History**: 2026-04-26 (second-brain Ideation 노트 Open Question
+  Q6 import; cross-ref).
+
+### Q-031 — Eval harness 도입 시점은?
+
+- **Section**: Future Architecture
+- **Status**: open (2026-04-26).
+- **Top 10 priority**: —
+- **Owner**: Staff Eng + Product
+- **Proposed answer**: 단계적 도입.
+  - Phase 0 (지금): 평가 질문 세트만 명문화 (`docs/JUDGMENT_SYSTEM.md`
+    §Eval harness — Core 10 + Security 5).
+  - Phase 2 (typed tool): tool round-trip + judgment commit /
+    supersede / explain 자동 평가 시작 (CI에서 기본 평가 세트
+    실행).
+  - Phase 4 (embedding projection): RAGAS metric 통합 + actwyn 추가
+    metric (`current_operating_view_accuracy` / `supersede_respect_rate` /
+    `source_grounding_rate` / `negative_knowledge_recall` /
+    `memory_poisoning_rejection_rate` / `decision_explainability`).
+  Law 12 (No eval, no intelligence) 준수 — 자동화 시점이 늦더라도
+  평가 질문 세트는 Phase 0에서 명문화.
+- **Decision**: ADR-0009 (Phase 0 명문화), 후속 Phase별 별 ADR /
+  DEC 필요.
+- **Impacted docs**: `docs/JUDGMENT_SYSTEM.md` §Eval harness.
+- **Follow-up**: Phase 2 PR에서 자동화 trigger / CI 통합 결정.
+- **History**: 2026-04-26 (second-brain Ideation 노트 Open Question
+  Q8 import).
+
+### Q-032 — 12-layer 중 P0.5에 들어갈 layer 우선순위는?
+
+- **Section**: Future Architecture
+- **Status**: decided (2026-04-26, 잠정 출발점).
+- **Top 10 priority**: —
+- **Owner**: Staff Eng + Product
+- **Proposed answer**: ADR-0010 §12-layer cognitive architecture가
+  12 layer를 카탈로그로 식별했다. P0.5에는 다음 6 layer만 도입:
+  (1) Event Memory(이미 P0), (2) Episodic(ADR-0006 `memory_summaries`),
+  (3) Semantic(`memory_items` + `judgment_items`), (4) Judgment Ledger
+  (`judgment_items` 5 tables), (5) Goal / Value 최소형, (6) Working
+  Memory / Workspace 최소형. Reflection 최소형은 운영 layer라기보다
+  flow(turn 종료 시 lesson candidate append)이므로 6 layer에는
+  포함하지 않지만 P0.5 산출물에는 들어간다. 나머지 layer(Attention /
+  Deliberation / Action+Experiment / Procedural library / Forgetting
+  policy 4-5)는 P1.
+- **Decision**: DEC-024 (P0.5 cognitive scope).
+- **Impacted docs**: `docs/JUDGMENT_SYSTEM.md` §Cognitive Architecture
+  Extension §Phase 재구성; ADR-0010 §Decision 6.
+- **Follow-up**: Phase 1 schema PR에서 Goal / Workspace 객체의 schema
+  형태(별 table vs view vs in-memory) 결정. eval harness가 layer
+  gap을 surface하면 P0.5 layer 추가 trigger.
+- **History**: 2026-04-26 ADR-0010 + DEC-024와 함께 출발점 결정
+  (second-brain Ideation 노트 Round 9 + Appendix A.18 import).
+
+### Q-033 — `kind: 'procedure'` skill library 운영 형태는?
+
+- **Section**: Future Architecture
+- **Status**: open (2026-04-26).
+- **Top 10 priority**: —
+- **Owner**: Staff Eng + Product
+- **Proposed answer**: ADR-0010 §Skill / Procedure library가 P1
+  도입을 commit했다. 운영 형태 후보.
+  - Option A — **단일 enum + 기존 `judgment_items`에 row.** 가장
+    단순, schema 변경 없음. 검색은 FTS5 + `kind = 'procedure'`
+    필터.
+  - Option B — **별 schema(`procedures` table) 분리.** procedure는
+    judgment보다 더 엄격한 provenance / scope / preconditions /
+    expected_outcome 필드가 필요할 수 있음. 차원이 다르면 분리.
+  - Option C — **LLM에 inject되는 system prompt block.** Letta
+    core memory blocks 패턴. retrieval 없이 매 turn 자동 inject.
+    procedure 수가 늘면 토큰 비용 폭발.
+  - Hybrid — A로 시작, evidence 누적 시 B로 마이그레이션, 일부
+    high-priority procedure는 C 형태로 inject.
+  현 commitment는 A 출발점. P1에서 evidence 기반 결정.
+- **Decision**: ADR-0010 (Phase 0 commit), Phase 1에서 별 ADR / DEC
+  필요.
+- **Impacted docs**: `docs/JUDGMENT_SYSTEM.md` §Skill / Procedure
+  library; ADR-0010 §Decision 5.
+- **Follow-up**: P1 procedure library PR에서 결정. 사용자 procedure
+  활용 빈도 / hallucination 발생률이 trigger.
+- **History**: 2026-04-26 (second-brain Ideation 노트 Round 9 +
+  Appendix A.19 import).
+
+### Q-034 — Attention scoring formula 가중치는 정적 vs 학습 기반?
+
+- **Section**: Future Architecture
+- **Status**: open (2026-04-26).
+- **Top 10 priority**: —
+- **Owner**: Staff Eng
+- **Proposed answer**: ADR-0010 §Attention scoring이 10개 항목
+  (semantic_relevance / current_scope_match / recency / importance /
+  user_emphasis / decision_impact / risk_level / uncertainty_reduction /
+  superseded_penalty / expired_penalty / low_confidence_penalty)을
+  formula로 spec했다. 가중치 결정 방식 후보.
+  - Option A — **정적 가중치 + 휴리스틱 튜닝.** P1 시작점으로 단순.
+  - Option B — **사용자 행동 기반 학습.** 사용자가 retrieval 결과를
+    explicit feedback / silent ignore로 분리해서 가중치를 점진
+    조정. 단일 사용자 데이터가 적어 RL이 불안정할 수 있음.
+  - Option C — **task-conditioned 가중치.** query classifier(현재
+    7 task) 별로 다른 가중치 set. 단순한 다중 정적 가중치.
+  현 commitment는 P1 implementation 시 A로 시작, eval metric
+  (`source_grounding_rate` / `current_operating_view_accuracy`)가 부족 evidence를
+  주면 C로 확장. B(학습 기반)는 multi-user / 풍부 telemetry가 생긴
+  P2+에서 검토.
+- **Decision**: —  (P1 Attention scoring PR에서 결정).
+- **Impacted docs**: `docs/JUDGMENT_SYSTEM.md` §Attention scoring;
+  ADR-0010 §Decision 2 (Attention layer P1).
+- **Follow-up**: P1 Attention scoring PR. eval harness가 가중치 후보
+  비교를 자동화.
+- **History**: 2026-04-26 (second-brain Ideation 노트 Round 9 +
+  Appendix A.19 import).
+
+### Q-035 — Cognitive analogy를 사용자에게 어떻게 설명하나(psychology vs engineering terminology)?
+
+- **Section**: Product
+- **Status**: open (2026-04-26).
+- **Top 10 priority**: —
+- **Owner**: Product + project lead
+- **Proposed answer**: ADR-0010이 actwyn judgment system을 cognitive
+  architecture로 framing 확장하면서 _engineering approximation_임을
+  명시했다. 그러나 사용자 communication / docs / onboarding에서 어떤
+  용어를 우선할지는 미정.
+  - Option A — **Engineering 용어 우선** (judgment / source / evidence /
+    typed tool / projection / retrieval). 정확하지만 차별화 narrative
+    약함.
+  - Option B — **Psychology / cognitive 용어 우선** (memory / attention /
+    reflection / metacognition / working memory / goal stack). 사용자
+    framing("AI 판단 기관")과 일치하지만 anthropomorphic 오해 위험.
+  - Option C — **Hybrid**: 내부 spec(본 문서)은 cognitive 용어,
+    사용자-facing UI / docs는 engineering 용어. 마케팅 narrative만
+    cognitive 용어("개인 AI의 판단 기관")로.
+  현 출발점은 C(hybrid). 본 spec은 cognitive 용어로 작성하되 §Disclaimers
+  에 anthropomorphic 한계를 명시. 사용자 product copy / onboarding은
+  engineering 용어로 시작.
+- **Decision**: —  (별 PR에서 결정).
+- **Impacted docs**: 향후 product copy / onboarding doc / `docs/JUDGMENT_SYSTEM.md`
+  §Disclaimers.
+- **Follow-up**: P1 사용자-facing copy PR. 사용자 피드백 / 외부
+  blog / 사용자 ideation에서 cognitive analogy 채택 빈도가 trigger.
+- **History**: 2026-04-26 (second-brain Ideation 노트 Round 9 +
+  Appendix A.19 import; ADR-0010 framing 확장).
+
+### Q-036 — `rejected` vs `revoked` status 차이 — 둘 다 유지할지, 통합할지?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0009의 status 6 enum에 `rejected`와 `revoked`가
+  모두 있음. ADR-0011이 신규 status (dormant / stale / archived)를
+  추가하면서 9 enum이 됨. 의미적으로 `rejected`(proposal 단계에서
+  채택 안 됨)와 `revoked`(이미 active였다가 폐기됨)는 다르지만,
+  retrieval / context packing 측면에서 동일 처리.
+- **Options**:
+  - (a) 둘 다 유지: lifecycle 의미 차이 보존. 단 application 코드는
+    동일하게 처리.
+  - (b) `rejected` 폐기 + `revoked`로 통합: enum 단순화. proposal 단계
+    실패는 별 status 또는 column으로 표현.
+  - (c) `rejected`를 `proposed`의 substate로: `proposed_rejected` / 혹은
+    별 boolean column.
+- **Recommendation**: (a) 우선 — P0.5는 둘 다 유지하되 application
+  코드는 동일 처리. P1에 evidence 기반 통합 고려.
+- **Trigger**: P1 schema PR / `judgment_events` event_type 정리 시.
+- **History**: 2026-04-26 (ADR-0011 도입 시 부수 질문).
+
+### Q-037 — `architecture_assumption` 구현 형태는?
+
+- **Status**: superseded by Q-059 (ADR-0013).
+- **Owner**: project lead.
+- **Context**: ADR-0011이 시스템 자신의 설계 가정을 first-class judgment로
+  저장하기로 함. 구현 방법이 여러 가지.
+- **Options**:
+  - (a) 별 `kind: 'architecture_assumption'` enum value 추가.
+  - (b) 일반 judgment의 `scope: { area: "system" }` 또는
+    `scope: { entity_ids: ["actwyn"] }`.
+  - (c) 별 schema (`architecture_assumptions` table) — judgment_items에서
+    분리.
+  - (d) (a) + (b) hybrid: kind는 architecture_assumption, scope도 system.
+- **Recommendation**: ~~(d) — kind enum 추가 + scope.area = system.~~
+  **Updated by ADR-0013 / Q-059:** `kind = "assumption"` +
+  `target_domain = "architecture"` (별 `architecture_assumption` kind는
+  kind enum 폭발 위험으로 폐기). 단, `kind = "assumption"`은 P0.5
+  enforced kind 6종 (fact / preference / decision / current_state /
+  procedure / caution)에 포함되지 않으므로, **P0.5에서는 architecture
+  assumption을 `kind = "assumption"`으로 시드하지 않는다** — ADR/DEC seed
+  또는 `kind = "decision"` / `current_state` 표현을 사용하고,
+  `kind = "assumption"` 도입은 P1로 deferred. retrieval default exclusion
+  정책은 Q-059 권고 그대로.
+- **Trigger**: P1 typed tool / kind enum 확장 시.
+- **History**: 2026-04-26 (ADR-0011 도입 시 부수 질문); 2026-04-26
+  Round 13에서 ADR-0013 / Q-059로 정정.
+
+### Q-038 — `activation_score` formula 가중치 default 값은?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0011이 activation_score formula를 정의 (12개 항목).
+  실제 가중치 default 값은 미정. 정적 default vs domain-specific vs
+  학습 기반 (Q-026 / Q-034 cross-ref).
+- **Options**:
+  - (a) 모든 항목 가중치 1.0 균등 시작 + evaluation으로 조정.
+  - (b) domain-specific default (사용자 선호 / current state / decision
+    별로 다른 가중치).
+  - (c) 사용자 행동 기반 학습 (user clicks / overrides / corrections로
+    가중치 갱신) — P2+.
+- **Recommendation**: (a) → P1 도입, P2에 (c) 검토. (b)는 evidence 부족.
+- **Trigger**: P1 attention/activation scoring 구현 시; 사용자가
+  retrieval quality 불만 표시 시.
+- **History**: 2026-04-26 (ADR-0011 §Decision 9; Q-026 / Q-034 trace).
+
+### Q-039 — `research_update_protocol` 7단계 자동화 시점은?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0011이 새 논문 / 서비스 등장 시 처리 프로세스를
+  capture → extract → map → propose → eval → migrate → supersede 7단계로
+  정의. P0.5 / P1은 사람 검토 + Claude proposal 패턴, P2+ 자동화 후보.
+- **Options**:
+  - (a) P2: capture / extract만 자동화 (LLM이 논문 요약), map / propose
+    / eval / migrate / supersede는 사람 + Claude 검토.
+  - (b) P3: map까지 자동화 (LLM이 architecture_assumption과 연결).
+  - (c) 완전 자동화 (autonomous research agent) — 안 함.
+- **Recommendation**: (a) — capture / extract만 P2+ 자동화. map 이상은
+  사용자 검토 필수 (architecture 변경은 신중).
+- **Trigger**: P2 시작 시 / 외부 연구 follow-up 빈도가 사람 검토를
+  burden으로 만들 때.
+- **History**: 2026-04-26 (ADR-0011 §Decision 7).
+
+### Q-040 — `last_verified_at` 갱신 trigger는?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0011이 `last_verified_at` 시간 필드를 신설. 사용자
+  자연어 확인 / `/verify` 명령 / assistant 추론 / `judgment.commit`
+  중 어떤 trigger로 갱신해야 하는지.
+- **Options**:
+  - (a) 사용자 명시 확인 (자연어 "그거 맞아" / `/verify <id>` 등)만
+    `last_verified_at` 갱신.
+  - (b) `judgment.commit` 시점도 갱신.
+  - (c) assistant 추론도 갱신 (단 confidence 낮음 표시).
+- **Recommendation**: (a) — 명시 확인만. `judgment.commit`은
+  `created_at` / `updated_at`만 갱신. assistant 추론은 갱신 안 함
+  (Round 8 token discipline + ADR-0006 explicit-save-first 정합).
+- **Trigger**: P2 typed tool 구현 시.
+- **History**: 2026-04-26 (ADR-0011 §시간 필드 8개; Q-028 second-brain
+  trace).
+
+### Q-041 — `volatility` 결정 주체는?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0011이 `volatility` (low/medium/high) 신규 필드.
+  누가 / 무엇이 결정하는지 미정.
+- **Options**:
+  - (a) `judgment.propose` 시 LLM이 추론 (kind / scope / 사용 패턴 기반).
+  - (b) 사용자 명시 (자연어 "이건 변할 가능성 큼" / 명령).
+  - (c) `kind` 별 default: 사용자 선호 → medium, current state → high,
+    원칙 → low.
+  - (d) (c) default + (a) LLM 추론 + (b) 사용자 override.
+- **Recommendation**: (d) — kind default + LLM 추론 + 사용자 override
+  허용. P0.5는 (c) default만, P1+ (a)/(b) 추가.
+- **Trigger**: P0.5 schema 도입 시 default 매핑 결정.
+- **History**: 2026-04-26 (ADR-0011 §volatility + decay_policy).
+
+### Q-042 — `ontology_version` migration 전략은?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0011이 `ontology_version`을 강제 도입 (DEC-028).
+  v0.1 → v0.2로 변경 시 기존 row 처리 미정.
+- **Options**:
+  - (a) 자동 변환 script (v0.1 → v0.2 매핑이 deterministic할 때).
+  - (b) 명시적 migration script + 사용자 검토.
+  - (c) 양립 운영 (v0.1과 v0.2 row가 공존, application 코드가 둘 다
+    이해).
+- **Recommendation**: (b) — P2까지는 명시적 script. v0.2 도입 시 release
+  notes에 migration 명시. (c)는 enum value 단순 추가일 때만 가능.
+- **Trigger**: 첫 ontology 변경 발생 시.
+- **History**: 2026-04-26 (ADR-0011 §ontology_version + schema_version).
+
+### Q-043 — Reflection triage critic model 선택 (Claude Haiku vs main vs other)?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0012가 reflection triage layer를 control-plane에 두고
+  critic model 사용을 권장 (commit_allowed: false 강제). main model
+  self-critique vs 별 cheap model vs 다른 provider 중 선택 미정.
+- **Options**:
+  - (a) Claude Haiku (cheap, 같은 provider, prompt cache 호환)
+  - (b) Main model (Claude Opus 4.7) self-critique — 자기 답변에 self-bias
+    위험
+  - (c) 다른 provider cheap model (GPT-4o-mini 등) — diversity 좋지만 운영
+    cost 증가
+- **Recommendation**: (a) Claude Haiku — P1+ 도입 시점.
+- **Trigger**: P1 typed tool 구현 시.
+- **History**: 2026-04-26 (ADR-0012 §Decision 4).
+
+### Q-044 — Critic model output JSON schema 정확한 형태?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0012가 critic model 출력은 constrained JSON, `commit_allowed:
+  false` 강제하라고 함. 정확한 schema (durability / novelty / risk_if_ignored
+  score 0-1, source_turn_ids 필수 등) 미정.
+- **Recommendation**: P1 typed tool 구현 시 결정. 초기 JSON schema 후보:
+  `{ should_reflect, reflection_type, durability, novelty, risk_if_ignored,
+  source_turn_ids, reason, commit_allowed: false }`.
+- **Trigger**: P1.
+- **History**: 2026-04-26 (ADR-0012 §Decision 4).
+
+### Q-045 — Doubt signal 한국어 keyword 감지 방법?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: `interaction_signals.signal_type=doubt` 감지에 한국어 표현
+  ("흠" / "아니다" / "미묘하게" / "앞뒤가 안 맞아") + LLM classifier 결합 필요.
+- **Options**:
+  - (a) keyword/regex만 (cheap, 정확도 낮음)
+  - (b) LLM classifier만 (정확도 높지만 모든 turn에 호출은 비쌈)
+  - (c) keyword/regex 1차 필터 + LLM 2차 검증
+- **Recommendation**: (c) — Round 8 token discipline 정합 (cheap classifier
+  gate).
+- **Trigger**: P1 telemetry 구현 시.
+- **History**: 2026-04-26 (ADR-0012 §Decision 8).
+
+### Q-046 — `Tension` severity 결정 주체? (legacy: DesignTension)
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: critic model 자체 평가 vs 사용자 confirm vs maintainer 결정.
+- **Options**:
+  - (a) critic model 초기 평가 + 사용자 review (open status에서)
+  - (b) 사용자 직접 입력
+  - (c) maintainer가 PR review 시 결정
+- **Recommendation**: (a) — critic 초기 평가 후 사용자 review로 final.
+- **Trigger**: P1 `tensions` schema PR (ADR-0013이 `design_tensions` →
+  `tensions` rename + target_domain 차원).
+- **History**: 2026-04-26 (ADR-0012 §Decision 7).
+
+### Q-047 — Critic Loop 4-7단계 자동화 시점?
+
+- **Status**: decided as DEC-031.
+- **Owner**: project lead.
+- **Context**: ADR-0012가 8단계 정의. P0.5 도입 범위 미정.
+- **Decision**: DEC-031 — P0.5는 1-3단계만 (capture / signal detection /
+  tension proposal). 4-7단계는 P1+, 8단계는 P3+.
+- **Trigger**: P1 도입 시점.
+- **History**: 2026-04-26 (ADR-0012 §Decision 9; DEC-031).
+
+### Q-048 — `critique_outcomes` artifact link 범위?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: outcome trace 시 git commit hash / PR number / DEC-### /
+  Q-### / ADR-#### 어디까지 link?
+- **Recommendation**: 모두 link 가능하게 일반 string field (`changed_artifact_ids`)
+  로 둠. application 코드에서 prefix 인식 (예: `git:abc123`, `pr:10`,
+  `dec:031`).
+- **Trigger**: P1 critique_outcomes schema PR.
+- **History**: 2026-04-26 (ADR-0012 §Decision 8).
+
+### Q-049 — `Tension` 자기참조 깊이 제한? (legacy name: DesignTension)
+
+- **Status**: decided.
+- **Owner**: project lead.
+- **Context**: `Tension` (ADR-0012가 `DesignTension`으로 도입; ADR-0013
+  cleanup으로 generalize) 자체가 `axis_conflation` 카테고리에 빠질 위험
+  — 즉 `Tension` on `Tension` 재귀.
+- **Decision**: 깊이 제한 1 — `Tension` on `Tension` 금지. `target_type`
+  enum에서 critique-object self-target (예: 별도 `tension` target_type)
+  제외. 메타-critique이 필요하면 사용자 명시 또는 별 ADR.
+- **Trigger**: 깊이 제한 2 이상이 필요한 use case 발견 시.
+- **History**: 2026-04-26 (ADR-0012 §Risks). 2026-04-26 follow-up
+  (ADR-0013 cleanup): `DesignTension` → `Tension` rename 반영.
+
+### Q-050 — Control-plane과 judgment-plane DB 분리 정도?
+
+- **Status**: decided as DEC-030.
+- **Owner**: project lead.
+- **Context**: 같은 SQLite DB vs 별 DB.
+- **Decision**: DEC-030 — 같은 SQLite DB, schema prefix 분리
+  (`control_plane_*` vs `judgment_*`). cross-reference는 link table만,
+  foreign key 없음.
+- **Trigger**: storage cost가 control-plane에서 폭발할 때.
+- **History**: 2026-04-26 (ADR-0012 §Decision 6; DEC-030).
+
+### Q-051 — Tension `target_domain` P0.5 도입 범위?
+
+- **Status**: decided as DEC-032 (P0.5 **8 enum**: design / memory / policy
+  / workflow / evidence / decision / security / architecture). `architecture`
+  는 Tension과 `kind=assumption`이 enum을 공유하므로 P0.5 필수 (PR #10
+  codex bot P1 review 정정으로 7 → 8).
+- **Trigger**: 사용자가 reserved 5 enum domain에서 tension 제기 시 enum 추가.
+- **History**: 2026-04-26 (ADR-0013 §Decision 2; DEC-032). follow-up:
+  codex bot 발견 — DEC-032 본문은 8 enum이지만 Q-051은 7로 stale → 정정.
+
+### Q-052 — Tension `category` 14 enum P0.5 도입 범위?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0012 11 + Round 13 신규 4 (taxonomy_gap / policy_gap /
+  evidence_conflict / scope_mismatch) = 15 enum (14 unique 후 정정 — 11+3).
+  P0.5 도입 범위 미정.
+- **Recommendation**: P0.5는 14 모두 schema 도입 (TEXT + CHECK), 사용자
+  / critic model이 실제 사용하는 것만 활용.
+- **Trigger**: P1 schema PR 시.
+- **History**: 2026-04-26 (ADR-0013 §Decision 2).
+
+### Q-053 — status 3축 분리 시 ADR-0011 partial retract 형식?
+
+- **Status**: decided as ADR-0013 (partial retract).
+- **Trigger**: 추가 ADR partial retract 필요 시 동일 패턴.
+- **History**: 2026-04-26 (ADR-0013 §Decision 3 partial retract ADR-0011).
+
+### Q-054 — Reflection 5 sub-action P0.5 도입 범위?
+
+- **Status**: decided as DEC-035 (`reflection_triage`만 P0.5).
+- **Trigger**: 사용자가 critique / proposal 자동화 요구 시.
+- **History**: 2026-04-26 (ADR-0013 §Decision 5; DEC-035).
+
+### Q-055 — Workspace 3축 분리 매핑?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0010의 `Workspace` 객체가 ADR-0013 3축 (Plan / Packet /
+  Trace) 중 어디 매핑?
+- **Recommendation**: ADR-0010 `Workspace`는 ephemeral object → P1+
+  `WorkspacePlan` + `ContextPacket`. P0.5는 `WorkspaceTrace` 이벤트만.
+- **Trigger**: P1 typed tool 구현 시.
+- **History**: 2026-04-26 (ADR-0013 §Decision 6).
+
+### Q-056 — `procedure_subtype` 마이그레이션 default?
+
+- **Status**: decided as DEC-034 (default `skill`).
+- **Trigger**: 기존 procedure 노트 마이그레이션 정확도 문제 시.
+- **History**: 2026-04-26 (ADR-0013 §Decision 7; DEC-034).
+
+### Q-057 — `current_truth` → `current_operating_view` 이름 변경 적용 범위?
+
+- **Status**: decided as DEC-036 (문서/UX만, DB 필드 그대로).
+- **Trigger**: 더 정확한 이름 발견 시.
+- **History**: 2026-04-26 (ADR-0013 §Decision 4; DEC-036).
+
+### Q-058 — `attention/activation/retrieval` 3 score P0.5 도입?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0011 통합 partial retract. P0.5 단일 score (Round 11
+  권고대로) vs 처음부터 3 score 분리.
+- **Recommendation**: P0.5 단일 retrieval priority + WorkspaceTrace에
+  trace만. P1+ 3 score 분리 (디버깅 evidence 기반).
+- **Trigger**: 사용자 / 테스트가 retrieval 디버깅 어려움 보고 시.
+- **History**: 2026-04-26 (ADR-0013 §Decision 9).
+
+### Q-059 — `architecture_assumption` 시드 row 마이그레이션?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0011이 `kind=architecture_assumption` 시드 도입을 제안.
+  ADR-0013이 `kind=assumption` + `target_domain=architecture`로 정교화.
+  ADR-0013 cleanup으로 P0.5는 `kind=assumption` 자체를 도입하지 않고
+  `kind=decision` / `current_state`로 architecture assumption 표현 (Phase 1A
+  enforced kind 6종에 `assumption` 미포함). 따라서 P0.5 시드 형식 결정 필요.
+- **Recommendation**: ADR-0011 commit 시점에 시드 row 없음 (architectural
+  commitment 문서만). Phase 1A schema PR에서 architecture assumption은
+  `kind=decision` 또는 `kind=current_state`로 보존. `kind=assumption`은
+  P1+ enable 시점에 evidence 기반 마이그레이션. P0.5 시드는 `kind=assumption`
+  사용 금지.
+- **Trigger**: P1 schema PR 시 또는 `kind=assumption` enable 결정 시.
+- **History**: 2026-04-26 (ADR-0013 §Decision 8). 2026-04-26 follow-up
+  (ADR-0013 cleanup): P0.5에서 `kind=assumption` 도입 미루기 명시.
+
+### Q-060 — JudgmentItem 4축 분리 시 사용자 작성 default?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0013 cleanup으로 schema 필드는 4축 분리 — kind +
+  `epistemic_origin` (ADR-0012 origin axis, ADR-0013 cleanup으로 필드명
+  `epistemic_status` → `epistemic_origin` rename) + `authority_source`
+  + `lifecycle_status` + `activation_state`. 사용자가 모두 입력? typed
+  tool layer가 default 자동 주입?
+- **Recommendation**: typed tool layer에서 default 자동 주입 (kind는
+  사용자 / critic model 입력, 나머지 4축은 default + override).
+  `epistemic_origin` default = `user_stated` 또는 `assistant_generated`
+  (caller에 따라). `authority_source` default = `none`.
+  `approval_state` default = `pending` (low-risk fact는 `not_required`).
+  `lifecycle_status` default = `proposed`. `activation_state` default =
+  `eligible`. `retention_state` default = `normal`.
+- **Trigger**: P1 typed tool 구현 시.
+- **History**: 2026-04-26 (ADR-0013). 2026-04-26 follow-up (ADR-0013
+  cleanup): schema 필드명 `epistemic_status` → `epistemic_origin`
+  rename 확정. approval_state default 추가.
+
+### Q-061 — Critique Lens v0.1 LLM critic prompt 형식?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0013의 5 rule을 single prompt로 결합 vs 5 separate
+  critic 호출. ADR-0012의 8 failure mode와 정합.
+- **Recommendation**: P1 single prompt로 시작 (5 rule + 8 failure mode
+  결합). token cost vs accuracy trade-off — evidence 기반 P2+ separate
+  호출 검토.
+- **Trigger**: P1 critic model 구현 시.
+- **History**: 2026-04-26 (ADR-0013 §Decision 1).
+
+### Q-062 — Tension `target_domain` 확장 시점?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: ADR-0013이 P0.5 **8 enum** (design / memory / policy /
+  workflow / evidence / decision / security / architecture; DEC-032 정합)
+  + reserved 5 enum (product / marketing / user_preference / research /
+  tooling). 확장 시점?
+- **Recommendation**: 사용자 ideation에서 해당 domain의 tension 발견될
+  때마다 enum 추가 (DEC-032 trigger 정합). 예측 미루지 말고 evidence 기반.
+- **Trigger**: reserved domain의 tension 등장 시.
+- **History**: 2026-04-26 (ADR-0013 §Decision 2; DEC-032). follow-up:
+  codex bot 발견 — Q-062 baseline이 7 enum stale → DEC-032 (8 enum)
+  정합으로 정정.
+
+### Q-063 — docs-structure follow-up PR scope
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: DEC-037이 Implementation Documentation Lifecycle Policy를
+  commit했지만, 구체적 docs 구조 (current-state docs / `AGENTS.md` /
+  archive location)는 본 PR scope 밖으로 분리. Phase 1A 첫 implementation
+  PR 또는 별도 docs-structure PR에서 결정 필요.
+- **Required follow-up items**:
+  1. **Thin current-state docs 도입** — `docs/JUDGMENT_SYSTEM_CURRENT.md`
+     또는 동등한 위치에 implementation 시점의 동작·schema·tool contract를
+     얇게 기록. design spec과 별개로 유지.
+  2. **`AGENTS.md` 생성 또는 갱신** — 새 contributor / agent가 어디를
+     source of truth로 봐야 할지 onboarding. code = source of truth /
+     ADR = historical / current-state docs = thin behavior 명시.
+  3. **Phase 0 design specs archive location 결정** — `docs/design/`
+     vs `docs/archive/phase-0/` vs in-place 유지 + ADR README의 retired
+     marker. 후보 비교 + 결정.
+  4. **Drift detection mechanism** — design spec과 implementation이
+     drift할 때 감지 방법 (CI grep / eval fixture / manual review
+     cadence).
+- **Recommendation**: Phase 1A 첫 implementation PR 머지 후 별도
+  docs-structure PR로 처리. 본 PR scope 밖.
+- **Trigger**: Phase 1A 첫 implementation PR이 열릴 때 또는 docs
+  drift가 감지될 때.
+- **History**: 2026-04-26 (DEC-037 §scope clarification으로 follow-up
+  분리).
 
 ---
 
