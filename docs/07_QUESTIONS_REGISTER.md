@@ -939,7 +939,7 @@ committed for a later milestone.
 
 ### Q-037 — `architecture_assumption` 구현 형태는?
 
-- **Status**: open.
+- **Status**: superseded by Q-059 (ADR-0013).
 - **Owner**: project lead.
 - **Context**: ADR-0011이 시스템 자신의 설계 가정을 first-class judgment로
   저장하기로 함. 구현 방법이 여러 가지.
@@ -950,10 +950,19 @@ committed for a later milestone.
   - (c) 별 schema (`architecture_assumptions` table) — judgment_items에서
     분리.
   - (d) (a) + (b) hybrid: kind는 architecture_assumption, scope도 system.
-- **Recommendation**: (d) — kind enum 추가 + scope.area = system. retrieval
-  default exclusion (사용자 명시 요청 시만 포함).
-- **Trigger**: Phase 1 schema PR 작성 시.
-- **History**: 2026-04-26 (ADR-0011 도입 시 부수 질문).
+- **Recommendation**: ~~(d) — kind enum 추가 + scope.area = system.~~
+  **Updated by ADR-0013 / Q-059:** `kind = "assumption"` +
+  `target_domain = "architecture"` (별 `architecture_assumption` kind는
+  kind enum 폭발 위험으로 폐기). 단, `kind = "assumption"`은 P0.5
+  enforced kind 6종 (fact / preference / decision / current_state /
+  procedure / caution)에 포함되지 않으므로, **P0.5에서는 architecture
+  assumption을 `kind = "assumption"`으로 시드하지 않는다** — ADR/DEC seed
+  또는 `kind = "decision"` / `current_state` 표현을 사용하고,
+  `kind = "assumption"` 도입은 P1로 deferred. retrieval default exclusion
+  정책은 Q-059 권고 그대로.
+- **Trigger**: P1 typed tool / kind enum 확장 시.
+- **History**: 2026-04-26 (ADR-0011 도입 시 부수 질문); 2026-04-26
+  Round 13에서 ADR-0013 / Q-059로 정정.
 
 ### Q-038 — `activation_score` formula 가중치 default 값은?
 

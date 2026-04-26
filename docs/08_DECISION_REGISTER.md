@@ -706,9 +706,12 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
   Layer **최소형**(Goal table 또는 view, decision_criteria 별 객체
   형태는 schema PR에서), (6) Working Memory / Workspace **최소형**
   (task / goal_stack / active_scope / current_state / relevant_memory /
-  decision_criteria 슬롯만). 추가로 Reflection / Consolidation
-  **최소형**(turn 종료 시 lesson candidate를 `judgment_events`에
-  append, 자동 commit 안 함). 본격 Attention scoring formula /
+  decision_criteria 슬롯만). 추가로 Reflection 최소형 — 단,
+  Reflection clause는 **DEC-035로 refined.** P0.5 reflection scope는
+  `reflection_triage`만 (ADR-0012 `ReflectionTriageEvent`). turn 종료
+  시점의 lesson candidate append와 나머지 4 sub-action
+  (`reflection_proposal` / `consolidation` / `critique` /
+  `eval_generation`)은 P1+로 미룬다. 본격 Attention scoring formula /
   Procedure library / Active experiment loop / Forgetting policy
   4-5(`archive` / `compress`)는 P1로 분리.
 - Alternatives considered: 12-layer 전체를 P0.5에 도입; Goal /
@@ -723,9 +726,13 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
 - Review trigger: Phase 1 schema PR에서 6 layer로 부족하다는 use case;
   사용자가 procedure library / attention scoring을 P0.5로 당겨달라고
   요청; eval harness가 layer gap을 surface.
-- Supersedes / superseded by: —
-- Refs: ADR-0010 §Decision 6 / §Phase 재구성; second-brain Ideation
-  노트 Round 9; Q-032.
+- Supersedes / superseded by: Reflection / Consolidation 최소형 clause
+  ("turn 종료 시 lesson candidate를 `judgment_events`에 append") is
+  **superseded by DEC-035** — P0.5 reflection scope is narrowed to
+  `reflection_triage` only. The rest of the DEC-024 decision (P0.5
+  cognitive layer 6종, Goal / Workspace 최소형) remains accepted.
+- Refs: ADR-0010 §Decision 6 / §Phase 재구성; ADR-0013 §Decision 5;
+  DEC-035; second-brain Ideation 노트 Round 9; Q-032; Q-054.
 
 ## DEC-025 — JudgmentItem metacognitive 필드 (`would_change_if` / `missing_evidence` / `review_trigger`)는 P0.5 schema에 optional 도입
 
