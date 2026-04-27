@@ -38,6 +38,7 @@ import {
   validateImportance,
   validateKind,
   validateScopeJson,
+  validateScopeObject,
   validateStatement,
   validateStringArray,
   type ValidationResult,
@@ -209,7 +210,12 @@ export function proposeJudgment(
   // TOCTOU gap: a stateful toJSON() could return a valid shape the first time and
   // undefined/scalar the second, causing a raw SQLiteError or a corrupted column value.
 
-  // scope: serialize once, validate via the string-form validator.
+  // scope: structural check first (rejects class instances like Map/Date via proto check),
+  // then serialize once and re-validate the string form.  The proto check is necessary
+  // because validateScopeJson alone accepts class instances that serialize to '{}' (e.g.
+  // new Map()), which would persist '{}' while returning the live instance — diverging
+  // stored vs. returned data.
+  assertValid(validateScopeObject(input.scope), "scope");
   const scopeJson = serializeOnce(input.scope, "scope");
   assertValid(validateScopeJson(scopeJson), "scope");
 
@@ -364,7 +370,7 @@ export function proposeJudgment(
     epistemic_origin: input.epistemic_origin as EpistemicOrigin,
     confidence: input.confidence as Confidence,
     importance,
-    scope: input.scope,
+    scope: JSON.parse(scopeJson) as Record<string, unknown>,
     lifecycle_status: "proposed",
     approval_state: "pending",
     activation_state: "history_only",
@@ -374,8 +380,8 @@ export function proposeJudgment(
     ontology_version: ONTOLOGY_VERSION,
     schema_version: SCHEMA_VERSION,
     procedure_subtype: procedureSubtype,
-    source_ids: input.source_ids ?? null,
-    evidence_ids: input.evidence_ids ?? null,
+    source_ids: sourceIdsJson != null ? JSON.parse(sourceIdsJson) as string[] : null,
+    evidence_ids: evidenceIdsJson != null ? JSON.parse(evidenceIdsJson) as string[] : null,
     created_at: row?.created_at ?? "",
     updated_at: row?.updated_at ?? "",
   };

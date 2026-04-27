@@ -329,6 +329,15 @@ describe("proposeJudgment — validation rejections", () => {
     assertRejectedBeforeInsert({ ...validInput, scope: new Date() as unknown as Record<string, unknown> });
   });
 
+  test("scope = Map instance is rejected before DB insert", () => {
+    // Map serializes to {} — silently loses all entries; stored scope_json diverges from
+    // the live value returned by proposeJudgment.  proto check must catch this.
+    assertRejectedBeforeInsert({
+      ...validInput,
+      scope: new Map([["k", "v"]]) as unknown as Record<string, unknown>,
+    });
+  });
+
   test("scope with toJSON() returning undefined is rejected before DB insert", () => {
     // JSON.stringify returns undefined → non-bindable scope_json causes SQLite error without this guard.
     const undefinedJson = { toJSON() { return undefined; } } as unknown as Record<string, unknown>;
