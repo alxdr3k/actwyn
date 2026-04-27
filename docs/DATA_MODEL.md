@@ -199,7 +199,9 @@ and `judgment_events`. It supports five operations:
   existing source. Also updates the denormalized `source_ids_json`
   and `evidence_ids_json` arrays on `judgment_items`, and appends a
   `judgment.evidence.linked` event. **Does not activate, approve, or
-  commit a judgment.**
+  commit a judgment.** Only links judgments with
+  `retention_state = normal`; archived or deleted judgments cannot
+  receive evidence links through the repository.
 
 No active/eligible/context-visible judgment write path exists yet.
 No activation workflow, supersede, revoke, or expire write path

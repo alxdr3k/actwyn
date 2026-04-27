@@ -1037,10 +1037,11 @@ export function linkJudgmentEvidence(
       throw new JudgmentNotFoundError(`judgment ${judgment_id} not found`, judgment_id);
     }
 
-    // Reject deleted judgments regardless of lifecycle.
-    if (existingJudgment.retention_state === "deleted") {
+    // Only normal-retention judgments may receive evidence.
+    // archived and deleted judgments are rejected, as are any future non-normal values.
+    if (existingJudgment.retention_state !== "normal") {
       throw new JudgmentStateError(
-        `judgment ${judgment_id} cannot receive evidence: retention_state=deleted`,
+        `judgment ${judgment_id} cannot receive evidence: retention_state=${existingJudgment.retention_state}`,
         judgment_id,
       );
     }

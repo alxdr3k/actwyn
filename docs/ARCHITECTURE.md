@@ -139,9 +139,11 @@ Detailed module / state-machine diagrams live in `docs/02_HLD.md`.
 - **Architecture decisions** — `docs/adr/*` (ADR-0001 … ADR-0013
   accepted on `main`; ADR-0009 … ADR-0013 cover the Judgment System
   direction; Phase 1A.1 schema/types/validators, Phase 1A.2 proposal
-  repository/tool contract, and Phase 1A.3 proposal review
-  repository/tool contracts are implemented —
-  Phase 1A.4+ runtime wiring is not yet implemented).
+  repository/tool contract, Phase 1A.3 proposal review repository/tool
+  contracts, and Phase 1A.4 source/evidence-link repository/tool
+  contracts are implemented — full Judgment System runtime is not
+  implemented; Phase 1A.5+ lifecycle/runtime surfaces remain future
+  work; runtime wiring remains future work).
 - **Tactical decisions and open questions** —
   `docs/08_DECISION_REGISTER.md`, `docs/07_QUESTIONS_REGISTER.md`
   (DEC-037 records the documentation lifecycle policy this set of
