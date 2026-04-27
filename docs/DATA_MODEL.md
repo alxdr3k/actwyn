@@ -179,6 +179,7 @@ ADR-0013 and `docs/JUDGMENT_SYSTEM.md`.
 `src/judgment/repository.ts` is the **sole writer** for
 `judgment_items`, `judgment_sources`, `judgment_evidence_links`,
 and `judgment_events`. It supports six operations:
+
 - **Proposal-only insert** (`proposeJudgment`) — creates rows with
   `lifecycle_status=proposed` / `approval_state=pending` /
   `activation_state=history_only`.
