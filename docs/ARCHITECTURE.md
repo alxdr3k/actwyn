@@ -22,7 +22,7 @@
 | Redaction at the persistence boundary             | implemented |
 | Memory summaries with provenance + confidence     | implemented |
 | Telegram attachment two-phase capture             | implemented |
-| DB-native AI-first Judgment System (Phase 1A+)    | schema skeleton + proposal repository + unregistered tool contract (not runtime-wired) |
+| DB-native AI-first Judgment System (Phase 1A+)    | schema skeleton + proposal repository + proposal review repository + unregistered tool contracts (not runtime-wired) |
 | Vector / graph derived projections                | planned     |
 | second-brain repo as canonical runtime memory     | not planned (history/seed only) |
 | Obsidian / Markdown active write path             | not planned |
@@ -38,17 +38,29 @@ Phase 1A.1 landed the **judgment schema skeleton**:
 `migrations/004_judgment_skeleton.sql` (5 tables + FTS5),
 `src/judgment/types.ts`, and `src/judgment/validators.ts`.
 
-Phase 1A.2 has added a **proposal-only write surface**:
+Phase 1A.2 landed a **proposal-only write surface**:
 `src/judgment/repository.ts` (`proposeJudgment`) and a local
 **unregistered typed-tool contract** `src/judgment/tool.ts`
 (`judgment.propose`). The repository can create rows with
 `lifecycle_status = proposed` / `approval_state = pending` /
-`activation_state = history_only` only. The tool is not registered
-anywhere in the runtime.
+`activation_state = history_only` only.
 
-No Control Gate, no approval workflow, no activation workflow, no
-context-compiler integration, no provider runtime hookup, and no
-memory-promotion path exists yet — those remain Phase 1A+ work.
+Phase 1A.3 has added **proposal review transitions**:
+`src/judgment/repository.ts` now also exports
+`approveProposedJudgment` and `rejectProposedJudgment`, and
+`src/judgment/tool.ts` now also exports `JUDGMENT_APPROVE_TOOL` /
+`JUDGMENT_REJECT_TOOL` and `executeJudgmentApproveTool` /
+`executeJudgmentRejectTool`. Approval sets `approval_state =
+approved` but does **not** activate or make the judgment
+context-visible (`lifecycle_status` remains `proposed`,
+`activation_state` remains `history_only`). Rejection sets
+`approval_state = rejected` / `lifecycle_status = rejected` /
+`activation_state = excluded` for audit purposes. None of these
+tools are registered anywhere in the runtime.
+
+No Control Gate, no activation workflow, no context-compiler
+integration, no provider runtime hookup, and no memory-promotion
+path exists yet — those remain Phase 1A+ work.
 
 ## System overview
 
@@ -111,9 +123,10 @@ Detailed module / state-machine diagrams live in `docs/02_HLD.md`.
   `/var/lib/actwyn/actwyn.db` on prod).
 - **Architecture decisions** — `docs/adr/*` (ADR-0001 … ADR-0013
   accepted on `main`; ADR-0009 … ADR-0013 cover the Judgment System
-  direction; Phase 1A.1 schema/types/validators and Phase 1A.2
-  proposal repository/tool contract are partially implemented —
-  Phase 1A.3+ runtime wiring is not yet implemented).
+  direction; Phase 1A.1 schema/types/validators, Phase 1A.2 proposal
+  repository/tool contract, and Phase 1A.3 proposal review
+  repository/tool contracts are implemented —
+  Phase 1A.4+ runtime wiring is not yet implemented).
 - **Tactical decisions and open questions** —
   `docs/08_DECISION_REGISTER.md`, `docs/07_QUESTIONS_REGISTER.md`
   (DEC-037 records the documentation lifecycle policy this set of
@@ -159,9 +172,10 @@ A short summary; the full file map lives in `docs/CODE_MAP.md`.
   `running` jobs (force `interrupted`, requeue if `safe_retry`, kill
   orphan PIDs); offset fast-forward; one-shot `storage_sync` for
   `failed` / `delete_failed` rows only.
-- `src/judgment/*` — Phase 1A types, validators, proposal-only
-  repository, and unregistered `judgment.propose` tool contract.
-  Not wired into any runtime module; see §Phase 1A below.
+- `src/judgment/*` — Phase 1A types, validators, proposal + proposal
+  review repository, and unregistered `judgment.propose` /
+  `judgment.approve` / `judgment.reject` tool contracts. Not wired
+  into any runtime module; see §Phase 1A below.
 
 ## Phase 1A current slice and planned architecture
 
@@ -174,27 +188,44 @@ Phase 1A.2 landed the **proposal-only write surface**:
 **unregistered typed-tool contract** `src/judgment/tool.ts`
 (`judgment.propose`). The repository writes only rows with
 `lifecycle_status = proposed` / `approval_state = pending` /
-`activation_state = history_only`. No approval, activation,
-supersede, revoke, or expire write path exists. The tool is not
-registered in any runtime module.
+`activation_state = history_only`.
+
+Phase 1A.3 landed the **proposal review transitions**:
+`approveProposedJudgment` and `rejectProposedJudgment` in
+`src/judgment/repository.ts`, and `JUDGMENT_APPROVE_TOOL` /
+`JUDGMENT_REJECT_TOOL` / `executeJudgmentApproveTool` /
+`executeJudgmentRejectTool` in `src/judgment/tool.ts`. These are
+local, unregistered DB operations only. Approval/rejection review
+exists only as local unregistered DB operations:
+- Approval does **not** activate a judgment.
+- Approved judgments remain `lifecycle_status = proposed` and
+  `activation_state = history_only`.
+- Rejected judgments become `lifecycle_status = rejected` and
+  `activation_state = excluded`.
+- No active/eligible/context-visible judgment write path exists yet.
 
 The DB-native AI-first Judgment System direction (ADR-0009 …
 ADR-0013, `docs/JUDGMENT_SYSTEM.md`) defines the following
-components. **Implemented** (Phase 1A.1 / 1A.2):
+components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3):
 
 - **Schema skeleton** — `judgment_sources`, `judgment_items`,
   `judgment_evidence_links`, `judgment_edges`, `judgment_events`,
   `judgment_items_fts` in migration 004.
-- **Proposal-only repository** — `src/judgment/repository.ts`
+- **Proposal repository** — `src/judgment/repository.ts`
   (`proposeJudgment`). Writes `judgment_items` and
-  `judgment_events` only. Forces `lifecycle_status=proposed` /
+  `judgment_events` with `lifecycle_status=proposed` /
   `approval_state=pending` / `activation_state=history_only`.
   `judgment_sources`, `judgment_evidence_links`, and
   `judgment_edges` have no runtime writer yet.
-- **Unregistered typed-tool contract** — `src/judgment/tool.ts`
-  (`judgment.propose`). Not imported from any runtime module.
+- **Proposal review repository** — `src/judgment/repository.ts`
+  (`approveProposedJudgment`, `rejectProposedJudgment`). Review
+  transitions only. Approval does not activate. No
+  active/eligible/context-visible write path exists.
+- **Unregistered typed-tool contracts** — `src/judgment/tool.ts`
+  (`judgment.propose`, `judgment.approve`, `judgment.reject`).
+  Not imported from any runtime module.
 
-**Not implemented** (Phase 1A.3+ and beyond):
+**Not implemented** (Phase 1A.4+ and beyond):
 
 - `Control Gate` evaluators and the `control_gate_events` /
   `control_plane_events` ledger (table name open per
@@ -214,14 +245,15 @@ components. **Implemented** (Phase 1A.1 / 1A.2):
 - Provider / context / memory-promotion runtime integration —
   **not implemented**. The judgment tables are not read or written
   by `src/providers/*`, `src/context/*`, `src/queue/worker.ts`,
-  `src/memory/*`, or `src/telegram/*`. The `judgment.propose` tool
-  is not wired into any of these modules.
+  `src/memory/*`, or `src/telegram/*`. None of the judgment tools
+  are wired into any of these modules.
 
 These are listed so AI coding agents do not mistake design
 documents for implemented behavior. Phase 1A.1 (schema + types +
-validators) and Phase 1A.2 (proposal repository + unregistered
-tool contract) have landed. **Phase 1A.3+ runtime wiring** —
-provider integration, context compiler, Control Gate, approval /
+validators), Phase 1A.2 (proposal repository + unregistered tool
+contract), and Phase 1A.3 (proposal review repository + unregistered
+approve/reject tool contracts) have landed. **Phase 1A.4+ runtime
+wiring** — provider integration, context compiler, Control Gate,
 activation workflows, memory promotion, Telegram, and commands —
 **remains future scope**. See `docs/RUNTIME.md` and
 `docs/DATA_MODEL.md` for how the implemented slice sits next to

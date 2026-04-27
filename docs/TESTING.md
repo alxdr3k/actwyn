@@ -97,15 +97,22 @@ Migration shape is asserted by:
 - `src/db/migrator.ts` — refuses missing prior versions at runtime,
   records applied versions in `settings`.
 
-Judgment System proposal-surface tests (Phase 1A.2) live under:
+Judgment System proposal-surface and review-surface tests
+(Phase 1A.2/1A.3) live under:
 
-- `test/judgment/validators.test.ts` — pure-TS validator behavior.
+- `test/judgment/validators.test.ts` — pure-TS validator behavior
+  including `validateNonEmptyString` / `validatePlainJsonObject`
+  (Phase 1A.3).
 - `test/judgment/repository.test.ts` — `proposeJudgment` DB
   integration: insert, defaults, validation rejections, FTS trigger,
-  transaction rollback.
-- `test/judgment/tool.test.ts` — `executeJudgmentProposeTool`
-  contract + static boundary assertions (no bun:* import in
-  `src/judgment/*`; tool not imported by runtime modules).
+  transaction rollback; plus `approveProposedJudgment` /
+  `rejectProposedJudgment` approval/rejection transitions, event
+  payloads, state guards, transaction rollback (Phase 1A.3).
+- `test/judgment/tool.test.ts` — `executeJudgmentProposeTool` /
+  `executeJudgmentApproveTool` / `executeJudgmentRejectTool`
+  contracts + static boundary assertions (no bun:* import in
+  `src/judgment/*`; tools not imported by runtime modules)
+  (Phase 1A.3).
 
 When you add a migration:
 

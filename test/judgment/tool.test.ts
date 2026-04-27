@@ -14,10 +14,17 @@ import { join } from "node:path";
 import { openDatabase, type DbHandle } from "../../src/db.ts";
 import { migrate } from "../../src/db/migrator.ts";
 import {
+  JUDGMENT_APPROVE_TOOL,
   JUDGMENT_PROPOSE_TOOL,
+  JUDGMENT_REJECT_TOOL,
+  executeJudgmentApproveTool,
   executeJudgmentProposeTool,
+  executeJudgmentRejectTool,
+  type ApproveInput,
   type ProposalInput,
+  type RejectInput,
 } from "../../src/judgment/tool.ts";
+import { proposeJudgment } from "../../src/judgment/repository.ts";
 
 const MIGRATIONS_DIR = join(import.meta.dir, "..", "..", "migrations");
 const SRC_DIR = join(import.meta.dir, "..", "..", "src");
@@ -181,6 +188,214 @@ describe("executeJudgmentProposeTool — error path", () => {
 });
 
 // ---------------------------------------------------------------
+// Phase 1A.3 — review tool constants
+// ---------------------------------------------------------------
+
+describe("JUDGMENT_APPROVE_TOOL", () => {
+  test("tool contract name is judgment.approve", () => {
+    expect(JUDGMENT_APPROVE_TOOL.name).toBe("judgment.approve");
+  });
+
+  test("tool has a description string", () => {
+    expect(typeof JUDGMENT_APPROVE_TOOL.description).toBe("string");
+    expect(JUDGMENT_APPROVE_TOOL.description.length).toBeGreaterThan(0);
+  });
+});
+
+describe("JUDGMENT_REJECT_TOOL", () => {
+  test("tool contract name is judgment.reject", () => {
+    expect(JUDGMENT_REJECT_TOOL.name).toBe("judgment.reject");
+  });
+
+  test("tool has a description string", () => {
+    expect(typeof JUDGMENT_REJECT_TOOL.description).toBe("string");
+    expect(JUDGMENT_REJECT_TOOL.description.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------
+// Phase 1A.3 — approve executor
+// ---------------------------------------------------------------
+
+const validApproveInput: ApproveInput = {
+  judgment_id: "", // filled per test
+  reviewer: "tool-reviewer",
+};
+
+const validRejectInput: RejectInput = {
+  judgment_id: "", // filled per test
+  reviewer: "tool-reviewer",
+  reason: "not accurate",
+};
+
+describe("executeJudgmentApproveTool — happy path", () => {
+  test("valid approval returns ok: true with judgment result", () => {
+    const j = proposeJudgment(db, validInput);
+    const result = executeJudgmentApproveTool(db, { ...validApproveInput, judgment_id: j.id });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.judgment.id).toBe(j.id);
+      expect(result.judgment.approval_state).toBe("approved");
+      expect(result.judgment.event_type).toBe("judgment.approved");
+    }
+  });
+
+  test("approved judgment is not activated", () => {
+    const j = proposeJudgment(db, validInput);
+    const result = executeJudgmentApproveTool(db, { ...validApproveInput, judgment_id: j.id });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.judgment.lifecycle_status).toBe("proposed");
+      expect(result.judgment.activation_state).toBe("history_only");
+      expect(result.judgment.lifecycle_status).not.toBe("active");
+      expect(result.judgment.activation_state).not.toBe("eligible");
+    }
+  });
+});
+
+describe("executeJudgmentApproveTool — error path", () => {
+  test("invalid input (null) returns ok: false with validation_error", () => {
+    const result = executeJudgmentApproveTool(db, null as never);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("validation_error");
+  });
+
+  test("empty judgment_id returns ok: false with validation_error", () => {
+    const result = executeJudgmentApproveTool(db, { ...validApproveInput, judgment_id: "" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("validation_error");
+      expect(result.error.field).toBe("judgment_id");
+    }
+  });
+
+  test("missing target returns ok: false with not_found", () => {
+    const result = executeJudgmentApproveTool(db, { ...validApproveInput, judgment_id: "no-such-id" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("not_found");
+  });
+
+  test("invalid state (already approved) returns ok: false with invalid_state", () => {
+    const j = proposeJudgment(db, validInput);
+    executeJudgmentApproveTool(db, { ...validApproveInput, judgment_id: j.id });
+    const result = executeJudgmentApproveTool(db, { ...validApproveInput, judgment_id: j.id });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("invalid_state");
+  });
+
+  test("failed tool call does not write status updates", () => {
+    const j = proposeJudgment(db, validInput);
+    const rowBefore = db
+      .prepare<{ approval_state: string }, [string]>("SELECT approval_state FROM judgment_items WHERE id = ?")
+      .get(j.id)!;
+    executeJudgmentApproveTool(db, { ...validApproveInput, judgment_id: "nonexistent" });
+    const rowAfter = db
+      .prepare<{ approval_state: string }, [string]>("SELECT approval_state FROM judgment_items WHERE id = ?")
+      .get(j.id)!;
+    expect(rowAfter.approval_state).toBe(rowBefore.approval_state);
+  });
+
+  test("failed tool call does not append events", () => {
+    const before = db
+      .prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_events")
+      .get()!.n;
+    executeJudgmentApproveTool(db, { ...validApproveInput, judgment_id: "nonexistent" });
+    const after = db
+      .prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_events")
+      .get()!.n;
+    expect(after).toBe(before);
+  });
+});
+
+// ---------------------------------------------------------------
+// Phase 1A.3 — reject executor
+// ---------------------------------------------------------------
+
+describe("executeJudgmentRejectTool — happy path", () => {
+  test("valid rejection returns ok: true with judgment result", () => {
+    const j = proposeJudgment(db, validInput);
+    const result = executeJudgmentRejectTool(db, { ...validRejectInput, judgment_id: j.id });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.judgment.id).toBe(j.id);
+      expect(result.judgment.approval_state).toBe("rejected");
+      expect(result.judgment.lifecycle_status).toBe("rejected");
+      expect(result.judgment.activation_state).toBe("excluded");
+      expect(result.judgment.event_type).toBe("judgment.rejected");
+    }
+  });
+
+  test("rejected judgment is not activated", () => {
+    const j = proposeJudgment(db, validInput);
+    const result = executeJudgmentRejectTool(db, { ...validRejectInput, judgment_id: j.id });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.judgment.lifecycle_status).not.toBe("active");
+      expect(result.judgment.activation_state).not.toBe("eligible");
+    }
+  });
+});
+
+describe("executeJudgmentRejectTool — error path", () => {
+  test("invalid input (null) returns ok: false with validation_error", () => {
+    const result = executeJudgmentRejectTool(db, null as never);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("validation_error");
+  });
+
+  test("missing reason returns ok: false with validation_error", () => {
+    const j = proposeJudgment(db, validInput);
+    const result = executeJudgmentRejectTool(db, {
+      judgment_id: j.id,
+      reviewer: "alice",
+      reason: "" as string,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("validation_error");
+      expect(result.error.field).toBe("reason");
+    }
+  });
+
+  test("missing target returns ok: false with not_found", () => {
+    const result = executeJudgmentRejectTool(db, { ...validRejectInput, judgment_id: "no-such-id" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("not_found");
+  });
+
+  test("invalid state (already rejected) returns ok: false with invalid_state", () => {
+    const j = proposeJudgment(db, validInput);
+    executeJudgmentRejectTool(db, { ...validRejectInput, judgment_id: j.id });
+    const result = executeJudgmentRejectTool(db, { ...validRejectInput, judgment_id: j.id });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("invalid_state");
+  });
+
+  test("failed tool call does not write status updates", () => {
+    const j = proposeJudgment(db, validInput);
+    const rowBefore = db
+      .prepare<{ lifecycle_status: string }, [string]>("SELECT lifecycle_status FROM judgment_items WHERE id = ?")
+      .get(j.id)!;
+    executeJudgmentRejectTool(db, { ...validRejectInput, judgment_id: "nonexistent" });
+    const rowAfter = db
+      .prepare<{ lifecycle_status: string }, [string]>("SELECT lifecycle_status FROM judgment_items WHERE id = ?")
+      .get(j.id)!;
+    expect(rowAfter.lifecycle_status).toBe(rowBefore.lifecycle_status);
+  });
+
+  test("failed tool call does not append events", () => {
+    const before = db
+      .prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_events")
+      .get()!.n;
+    executeJudgmentRejectTool(db, { ...validRejectInput, judgment_id: "nonexistent" });
+    const after = db
+      .prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_events")
+      .get()!.n;
+    expect(after).toBe(before);
+  });
+});
+
+// ---------------------------------------------------------------
 // Static boundary tests
 // ---------------------------------------------------------------
 
@@ -199,10 +414,12 @@ describe("static boundary — ADR-0014 Bun boundary", () => {
   });
 });
 
-describe("static boundary — judgment tool not registered", () => {
+describe("static boundary — judgment tools not registered", () => {
   const TOOL_IMPORT_PATTERNS = [
     /['"][^'"]*judgment\/tool/,
     /['"]judgment\.propose['"]/,
+    /['"]judgment\.approve['"]/,
+    /['"]judgment\.reject['"]/,
   ];
 
   function checkDir(dirName: string): void {

@@ -18,6 +18,8 @@ import {
   validateImportance,
   validateJsonValue,
   validateKind,
+  validateNonEmptyString,
+  validatePlainJsonObject,
   validateScopeJson,
   validateScopeObject,
   validateStatement,
@@ -292,6 +294,103 @@ describe("validateStringArraySerialization", () => {
     // non-string IDs — re-validate element types on the reparsed array.
     const arr = Object.assign(["s1"], { toJSON() { return [1, 2]; } });
     expect(validateStringArraySerialization(arr, "ids").ok).toBe(false);
+  });
+});
+
+// Phase 1A.3 additions
+
+describe("validateNonEmptyString", () => {
+  test("accepts non-empty string", () => {
+    expect(validateNonEmptyString("hello", "field").ok).toBe(true);
+  });
+
+  test("accepts string with leading/trailing whitespace (non-empty after trim)", () => {
+    expect(validateNonEmptyString("  hi  ", "field").ok).toBe(true);
+  });
+
+  test("rejects empty string", () => {
+    const r = validateNonEmptyString("", "field");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/field/);
+  });
+
+  test("rejects whitespace-only string", () => {
+    expect(validateNonEmptyString("   ", "field").ok).toBe(false);
+    expect(validateNonEmptyString("\t\n\r ", "field").ok).toBe(false);
+  });
+
+  test("rejects non-string", () => {
+    expect(validateNonEmptyString(42, "field").ok).toBe(false);
+    expect(validateNonEmptyString(null, "field").ok).toBe(false);
+    expect(validateNonEmptyString(undefined, "field").ok).toBe(false);
+    expect(validateNonEmptyString({}, "field").ok).toBe(false);
+  });
+
+  test("error reason includes field name", () => {
+    const r = validateNonEmptyString("", "judgment_id");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain("judgment_id");
+  });
+});
+
+describe("validatePlainJsonObject", () => {
+  test("accepts plain object", () => {
+    expect(validatePlainJsonObject({ a: 1 }, "payload").ok).toBe(true);
+  });
+
+  test("accepts Object.create(null)", () => {
+    expect(validatePlainJsonObject(Object.create(null), "payload").ok).toBe(true);
+  });
+
+  test("accepts empty plain object", () => {
+    expect(validatePlainJsonObject({}, "payload").ok).toBe(true);
+  });
+
+  test("rejects null", () => {
+    const r = validatePlainJsonObject(null, "payload");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain("payload");
+  });
+
+  test("rejects array", () => {
+    expect(validatePlainJsonObject([], "payload").ok).toBe(false);
+    expect(validatePlainJsonObject(["x"], "payload").ok).toBe(false);
+  });
+
+  test("rejects primitives", () => {
+    expect(validatePlainJsonObject("string", "payload").ok).toBe(false);
+    expect(validatePlainJsonObject(42, "payload").ok).toBe(false);
+    expect(validatePlainJsonObject(true, "payload").ok).toBe(false);
+  });
+
+  test("rejects Date instance (class instance)", () => {
+    expect(validatePlainJsonObject(new Date(), "payload").ok).toBe(false);
+  });
+
+  test("rejects Map instance", () => {
+    expect(validatePlainJsonObject(new Map(), "payload").ok).toBe(false);
+  });
+
+  test("rejects unserializable object", () => {
+    const circ: Record<string, unknown> = {};
+    circ["self"] = circ;
+    expect(validatePlainJsonObject(circ, "payload").ok).toBe(false);
+  });
+
+  test("rejects object whose toJSON() returns undefined", () => {
+    const undefinedJson = { toJSON() { return undefined; } };
+    expect(validatePlainJsonObject(undefinedJson, "payload").ok).toBe(false);
+  });
+
+  test("rejects object whose toJSON() returns a scalar", () => {
+    const scalarJson = { toJSON() { return "scalar"; } };
+    expect(validatePlainJsonObject(scalarJson, "payload").ok).toBe(false);
+  });
+
+  test("error reason includes field name", () => {
+    const r = validatePlainJsonObject(null, "my_payload");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain("my_payload");
   });
 });
 

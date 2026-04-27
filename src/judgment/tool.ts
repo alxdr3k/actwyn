@@ -1,13 +1,14 @@
-// Personal Agent — Judgment System Phase 1A.2 typed-tool contract.
+// Personal Agent — Judgment System Phase 1A.2/1A.3 typed-tool contracts.
 //
-// Exports a narrow, unregistered tool contract for judgment proposal:
+// Exports narrow, unregistered tool contracts:
 //   JUDGMENT_PROPOSE_TOOL  — name + description constant
 //   executeJudgmentProposeTool(db, input, deps?) → ToolResult
+//   JUDGMENT_APPROVE_TOOL  — name + description constant  (Phase 1A.3)
+//   executeJudgmentApproveTool(db, input, deps?) → ReviewToolResult
+//   JUDGMENT_REJECT_TOOL   — name + description constant  (Phase 1A.3)
+//   executeJudgmentRejectTool(db, input, deps?) → ReviewToolResult
 //
-// The executor wraps `proposeJudgment` from the repository and
-// converts `JudgmentValidationError` into a stable error result.
-//
-// This tool is NOT registered anywhere. It must not be imported from
+// These tools are NOT registered anywhere. They must not be imported from
 // src/main.ts, src/providers/*, src/context/*, src/queue/worker.ts,
 // src/memory/*, src/telegram/*, or src/commands/*.
 //
@@ -17,15 +18,23 @@
 import type { DbHandle } from "~/db.ts";
 
 import {
+  JudgmentNotFoundError,
+  JudgmentStateError,
   JudgmentValidationError,
+  approveProposedJudgment,
   proposeJudgment,
+  rejectProposedJudgment,
+  type ApproveInput,
   type ProposalDeps,
   type ProposalInput,
   type ProposedJudgment,
+  type RejectInput,
+  type ReviewDeps,
+  type ReviewedJudgment,
 } from "~/judgment/repository.ts";
 
 // ---------------------------------------------------------------
-// Tool contract constant
+// Tool contract constants
 // ---------------------------------------------------------------
 
 export const JUDGMENT_PROPOSE_TOOL = {
@@ -33,8 +42,20 @@ export const JUDGMENT_PROPOSE_TOOL = {
   description: "proposes a judgment candidate for later review",
 } as const;
 
+export const JUDGMENT_APPROVE_TOOL = {
+  name: "judgment.approve" as const,
+  description:
+    "approves a proposed judgment for later activation review, without activating it",
+} as const;
+
+export const JUDGMENT_REJECT_TOOL = {
+  name: "judgment.reject" as const,
+  description:
+    "rejects a proposed judgment and excludes it from activation/context use",
+} as const;
+
 // ---------------------------------------------------------------
-// Result types
+// Propose tool result types
 // ---------------------------------------------------------------
 
 export type ToolSuccess = {
@@ -54,11 +75,33 @@ export type ToolError = {
 
 export type ToolResult = ToolSuccess | ToolError;
 
+// ---------------------------------------------------------------
+// Review tool result types (Phase 1A.3)
+// ---------------------------------------------------------------
+
+export type ReviewToolErrorCode = "validation_error" | "not_found" | "invalid_state";
+
+export type ReviewToolError = {
+  readonly ok: false;
+  readonly error: {
+    readonly code: ReviewToolErrorCode;
+    readonly field: string | undefined;
+    readonly message: string;
+  };
+};
+
+export type ReviewToolSuccess = {
+  readonly ok: true;
+  readonly judgment: ReviewedJudgment;
+};
+
+export type ReviewToolResult = ReviewToolSuccess | ReviewToolError;
+
 // Re-export input/deps types so callers import from tool.ts only.
-export type { ProposalInput, ProposalDeps };
+export type { ProposalInput, ProposalDeps, ApproveInput, RejectInput, ReviewDeps, ReviewedJudgment };
 
 // ---------------------------------------------------------------
-// Executor
+// Propose executor
 // ---------------------------------------------------------------
 
 export function executeJudgmentProposeTool(
@@ -81,5 +124,65 @@ export function executeJudgmentProposeTool(
       };
     }
     throw e;
+  }
+}
+
+// ---------------------------------------------------------------
+// Review error mapper (Phase 1A.3)
+// ---------------------------------------------------------------
+
+function mapReviewError(e: unknown): ReviewToolError {
+  if (e instanceof JudgmentValidationError) {
+    return {
+      ok: false,
+      error: { code: "validation_error", field: e.field, message: e.message },
+    };
+  }
+  if (e instanceof JudgmentNotFoundError) {
+    return {
+      ok: false,
+      error: { code: "not_found", field: undefined, message: e.message },
+    };
+  }
+  if (e instanceof JudgmentStateError) {
+    return {
+      ok: false,
+      error: { code: "invalid_state", field: undefined, message: e.message },
+    };
+  }
+  throw e;
+}
+
+// ---------------------------------------------------------------
+// Approve executor (Phase 1A.3)
+// ---------------------------------------------------------------
+
+export function executeJudgmentApproveTool(
+  db: DbHandle,
+  input: ApproveInput,
+  deps?: ReviewDeps,
+): ReviewToolResult {
+  try {
+    const judgment = approveProposedJudgment(db, input, deps);
+    return { ok: true, judgment };
+  } catch (e) {
+    return mapReviewError(e);
+  }
+}
+
+// ---------------------------------------------------------------
+// Reject executor (Phase 1A.3)
+// ---------------------------------------------------------------
+
+export function executeJudgmentRejectTool(
+  db: DbHandle,
+  input: RejectInput,
+  deps?: ReviewDeps,
+): ReviewToolResult {
+  try {
+    const judgment = rejectProposedJudgment(db, input, deps);
+    return { ok: true, judgment };
+  } catch (e) {
+    return mapReviewError(e);
   }
 }
