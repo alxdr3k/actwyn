@@ -24,7 +24,7 @@ bash .claude/scripts/wait-codex-review.sh
    |------|------|-----------|
    | 0 | codex가 👍 reaction 추가 — 리뷰 통과 | PR 머지 |
    | 1 | 새 코멘트/리뷰가 stdout에 출력됨 | 분석 → 코드 수정 → commit → push → 1번부터 재시도 |
-   | 2 | 타임아웃 (default 1시간) | 사용자에게 보고 |
+   | 2 | 타임아웃 (default 10분) | 사용자에게 보고 |
    | 3 | PR 감지 실패 | 첫 인자로 PR 번호 또는 URL 전달 |
    | 4 | 영구 API 에러 (401/403/404) | 사용자에게 인증·권한 점검 요청 |
 
@@ -35,7 +35,7 @@ bash .claude/scripts/wait-codex-review.sh
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
 | `CODEX_POLL_INTERVAL` | 20 | 폴링 간격 (초) |
-| `CODEX_POLL_TIMEOUT` | 3600 | 전체 대기 한도 (초) |
+| `CODEX_POLL_TIMEOUT` | 600 | 전체 대기 한도 (초) |
 | `CODEX_BASELINE` | (auto) | 이 ISO timestamp 이전 활동 무시 |
 | `CODEX_REPO` | (auto) | fork 워크플로 시 base repo 명시 (`owner/repo`) |
 | `CODEX_PASS_ACTOR` | `chatgpt-codex-connector[bot]` | 통과 reaction을 다는 봇 login |

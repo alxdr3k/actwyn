@@ -27,7 +27,7 @@
 #
 # Env:
 #   CODEX_POLL_INTERVAL  seconds between polls (default 20)
-#   CODEX_POLL_TIMEOUT   total wait limit in seconds (default 3600)
+#   CODEX_POLL_TIMEOUT   total wait limit in seconds (default 600)
 #   CODEX_BASELINE       ISO timestamp; activity at/before this is ignored.
 #   CODEX_REPO           owner/repo override (helpful in fork workflows).
 #   CODEX_PASS_ACTOR     exact GitHub login that signals pass via reaction
@@ -67,7 +67,7 @@ if [ -z "$repo" ]; then
 fi
 
 interval="${CODEX_POLL_INTERVAL:-20}"
-timeout="${CODEX_POLL_TIMEOUT:-3600}"
+timeout="${CODEX_POLL_TIMEOUT:-600}"
 pass_actor="${CODEX_PASS_ACTOR:-chatgpt-codex-connector[bot]}"
 pass_reaction="${CODEX_PASS_REACTION:-+1}"
 
