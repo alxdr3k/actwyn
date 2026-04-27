@@ -241,6 +241,12 @@ describe("proposeJudgment — validation rejections", () => {
     expect(countItems()).toBe(before);
   }
 
+  test("null input throws JudgmentValidationError (not a raw TypeError)", () => {
+    const before = countItems();
+    expect(() => proposeJudgment(db, null as never)).toThrow(JudgmentValidationError);
+    expect(countItems()).toBe(before);
+  });
+
   test("empty statement is rejected before DB insert", () => {
     assertRejectedBeforeInsert({ ...validInput, statement: "" });
   });

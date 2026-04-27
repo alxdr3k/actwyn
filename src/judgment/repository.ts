@@ -36,12 +36,10 @@ import {
   validateConfidenceLabel,
   validateEpistemicOrigin,
   validateImportance,
-  validateJsonValue,
   validateKind,
-  validateScopeObject,
+  validateScopeJson,
   validateStatement,
   validateStringArray,
-  validateStringArraySerialization,
   type ValidationResult,
 } from "~/judgment/validators.ts";
 
@@ -130,6 +128,23 @@ function assertValid(result: ValidationResult, field: string): void {
   }
 }
 
+/** Serialize `v` to a JSON string exactly once, throwing JudgmentValidationError on failure. */
+function serializeOnce(v: unknown, field: string): string {
+  let raw: string | undefined;
+  try {
+    raw = JSON.stringify(v);
+  } catch (e) {
+    throw new JudgmentValidationError(
+      `${field} cannot be serialized to JSON: ${(e as Error).message}`,
+      field,
+    );
+  }
+  if (typeof raw !== "string") {
+    throw new JudgmentValidationError(`${field} cannot be serialized to a JSON string`, field);
+  }
+  return raw;
+}
+
 // ---------------------------------------------------------------
 // proposeJudgment
 // ---------------------------------------------------------------
@@ -139,12 +154,18 @@ export function proposeJudgment(
   input: ProposalInput,
   deps: ProposalDeps = {},
 ): ProposedJudgment {
-  // --- Validate all inputs before any DB write ---
+  // Guard against null / non-object input (untyped tool payloads can be any value).
+  // Without this, accessing input.kind on null throws a TypeError that bypasses
+  // JudgmentValidationError and escapes executeJudgmentProposeTool as an uncaught exception.
+  if (input === null || typeof input !== "object") {
+    throw new JudgmentValidationError("input must be a plain object");
+  }
+
+  // --- Validate scalar fields ---
   assertValid(validateKind(input.kind), "kind");
   assertValid(validateStatement(input.statement), "statement");
   assertValid(validateEpistemicOrigin(input.epistemic_origin), "epistemic_origin");
   assertValid(validateConfidenceLabel(input.confidence), "confidence");
-  assertValid(validateScopeObject(input.scope), "scope");
 
   if (input.importance !== undefined) {
     assertValid(validateImportance(input.importance), "importance");
@@ -169,28 +190,7 @@ export function proposeJudgment(
     );
   }
 
-  if (input.source_ids !== undefined) {
-    assertValid(validateStringArray(input.source_ids, "source_ids"), "source_ids");
-    assertValid(validateStringArraySerialization(input.source_ids, "source_ids"), "source_ids");
-  }
-  if (input.evidence_ids !== undefined) {
-    assertValid(validateStringArray(input.evidence_ids, "evidence_ids"), "evidence_ids");
-    assertValid(validateStringArraySerialization(input.evidence_ids, "evidence_ids"), "evidence_ids");
-  }
-  if (input.would_change_if !== undefined) {
-    assertValid(validateJsonValue(input.would_change_if), "would_change_if");
-  }
-  if (input.missing_evidence !== undefined) {
-    assertValid(validateJsonValue(input.missing_evidence), "missing_evidence");
-  }
-  if (input.review_trigger !== undefined) {
-    assertValid(validateJsonValue(input.review_trigger), "review_trigger");
-  }
-
   // Guard optional string fields against runtime misuse (e.g. untyped tool input).
-  // Without this check, a non-string would cause a TypeError inside db.tx(), which
-  // would bypass JudgmentValidationError and surface as an unhandled throw from
-  // executeJudgmentProposeTool instead of the documented { ok: false, error } shape.
   for (const [field, val] of [
     ["observed_at", input.observed_at],
     ["valid_from", input.valid_from],
@@ -204,22 +204,79 @@ export function proposeJudgment(
     }
   }
 
-  // --- Prepare serialized values ---
+  // --- Serialize JSON fields once; validate the serialized strings ---
+  // Serializing before validation (and reusing the same string for the DB write) closes the
+  // TOCTOU gap: a stateful toJSON() could return a valid shape the first time and
+  // undefined/scalar the second, causing a raw SQLiteError or a corrupted column value.
+
+  // scope: serialize once, validate via the string-form validator.
+  const scopeJson = serializeOnce(input.scope, "scope");
+  assertValid(validateScopeJson(scopeJson), "scope");
+
+  // source_ids / evidence_ids: validate live element types, then serialize once and
+  // re-validate element types on the reparsed array to catch toJSON mutations.
+  let sourceIdsJson: string | null = null;
+  if (input.source_ids != null) {
+    assertValid(validateStringArray(input.source_ids, "source_ids"), "source_ids");
+    const raw = serializeOnce(input.source_ids, "source_ids");
+    const reparsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(reparsed)) {
+      throw new JudgmentValidationError("source_ids must serialize to a JSON array", "source_ids");
+    }
+    assertValid(validateStringArray(reparsed, "source_ids"), "source_ids");
+    sourceIdsJson = raw;
+  }
+
+  let evidenceIdsJson: string | null = null;
+  if (input.evidence_ids != null) {
+    assertValid(validateStringArray(input.evidence_ids, "evidence_ids"), "evidence_ids");
+    const raw = serializeOnce(input.evidence_ids, "evidence_ids");
+    const reparsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(reparsed)) {
+      throw new JudgmentValidationError("evidence_ids must serialize to a JSON array", "evidence_ids");
+    }
+    assertValid(validateStringArray(reparsed, "evidence_ids"), "evidence_ids");
+    evidenceIdsJson = raw;
+  }
+
+  // metacognitive fields: serialize once, verify reparsed shape is object or array.
+  let wouldChangeIfJson: string | null = null;
+  if (input.would_change_if !== undefined) {
+    const raw = serializeOnce(input.would_change_if, "would_change_if");
+    const reparsed = JSON.parse(raw) as unknown;
+    if (reparsed === null || typeof reparsed !== "object") {
+      throw new JudgmentValidationError("would_change_if must serialize to a JSON object or array", "would_change_if");
+    }
+    wouldChangeIfJson = raw;
+  }
+
+  let missingEvidenceJson: string | null = null;
+  if (input.missing_evidence !== undefined) {
+    const raw = serializeOnce(input.missing_evidence, "missing_evidence");
+    const reparsed = JSON.parse(raw) as unknown;
+    if (reparsed === null || typeof reparsed !== "object") {
+      throw new JudgmentValidationError("missing_evidence must serialize to a JSON object or array", "missing_evidence");
+    }
+    missingEvidenceJson = raw;
+  }
+
+  let reviewTriggerJson: string | null = null;
+  if (input.review_trigger !== undefined) {
+    const raw = serializeOnce(input.review_trigger, "review_trigger");
+    const reparsed = JSON.parse(raw) as unknown;
+    if (reparsed === null || typeof reparsed !== "object") {
+      throw new JudgmentValidationError("review_trigger must serialize to a JSON object or array", "review_trigger");
+    }
+    reviewTriggerJson = raw;
+  }
+
+  // --- Prepare remaining values ---
   const makeId = deps.newId ?? (() => crypto.randomUUID());
   const id = makeId();
   const eventId = crypto.randomUUID();
   const actor = deps.actor ?? "system";
   const trimmedStatement = input.statement.trim();
   const importance = input.importance ?? 3;
-  const scopeJson = JSON.stringify(input.scope);
-  const sourceIdsJson = input.source_ids != null ? JSON.stringify(input.source_ids) : null;
-  const evidenceIdsJson = input.evidence_ids != null ? JSON.stringify(input.evidence_ids) : null;
-  const wouldChangeIfJson =
-    input.would_change_if !== undefined ? JSON.stringify(input.would_change_if) : null;
-  const missingEvidenceJson =
-    input.missing_evidence !== undefined ? JSON.stringify(input.missing_evidence) : null;
-  const reviewTriggerJson =
-    input.review_trigger !== undefined ? JSON.stringify(input.review_trigger) : null;
 
   // --- DB writes in a single transaction ---
   db.tx(() => {

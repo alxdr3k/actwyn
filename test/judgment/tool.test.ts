@@ -91,6 +91,22 @@ describe("executeJudgmentProposeTool — happy path", () => {
 // ---------------------------------------------------------------
 
 describe("executeJudgmentProposeTool — error path", () => {
+  test("null input returns ok: false (not an uncaught TypeError)", () => {
+    const result = executeJudgmentProposeTool(db, null as never);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("validation_error");
+    }
+  });
+
+  test("primitive input returns ok: false (not an uncaught TypeError)", () => {
+    const result = executeJudgmentProposeTool(db, 42 as never);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("validation_error");
+    }
+  });
+
   test("invalid input returns ok: false with validation_error", () => {
     const result = executeJudgmentProposeTool(db, {
       ...validInput,
