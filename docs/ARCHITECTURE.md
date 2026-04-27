@@ -155,12 +155,9 @@ Detailed module / state-machine diagrams live in `docs/02_HLD.md`.
   `/var/lib/actwyn/actwyn.db` on prod).
 - **Architecture decisions** — `docs/adr/*` (ADR-0001 … ADR-0013
   accepted on `main`; ADR-0009 … ADR-0013 cover the Judgment System
-  direction; Phase 1A.1 schema/types/validators, Phase 1A.2 proposal
-  repository/tool contract, Phase 1A.3 proposal review repository/tool
-  contracts, and Phase 1A.4 source/evidence-link repository/tool
-  contracts are implemented — full Judgment System runtime is not
-  implemented; Phase 1A.5+ lifecycle/runtime surfaces remain future
-  work; runtime wiring remains future work).
+  direction; Phase 1A.1 through Phase 1A.5 are implemented — full
+  Judgment System runtime is not implemented; runtime wiring remains
+  future work).
 - **Tactical decisions and open questions** —
   `docs/08_DECISION_REGISTER.md`, `docs/07_QUESTIONS_REGISTER.md`
   (DEC-037 records the documentation lifecycle policy this set of
@@ -207,9 +204,10 @@ A short summary; the full file map lives in `docs/CODE_MAP.md`.
   orphan PIDs); offset fast-forward; one-shot `storage_sync` for
   `failed` / `delete_failed` rows only.
 - `src/judgment/*` — Phase 1A types, validators, proposal + proposal
-  review + source/evidence-link repository, and unregistered
-  `judgment.propose` / `judgment.approve` / `judgment.reject` /
-  `judgment.record_source` / `judgment.link_evidence` tool contracts.
+  review + source/evidence-link + commit/activation repository, and
+  unregistered `judgment.propose` / `judgment.approve` /
+  `judgment.reject` / `judgment.record_source` /
+  `judgment.link_evidence` / `judgment.commit` tool contracts.
   Not wired into any runtime module; see §Phase 1A below.
 
 ## Phase 1A current slice and planned architecture
@@ -237,11 +235,13 @@ exists only as local unregistered DB operations:
   `activation_state = history_only`.
 - Rejected judgments become `lifecycle_status = rejected` and
   `activation_state = excluded`.
-- No active/eligible/context-visible judgment write path exists yet.
+- Active/eligible write path exists only through local unregistered
+  `commitApprovedJudgment` (Phase 1A.5). Active/eligible rows are
+  not context-visible because runtime context does not read them.
 
 The DB-native AI-first Judgment System direction (ADR-0009 …
 ADR-0013, `docs/JUDGMENT_SYSTEM.md`) defines the following
-components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4):
+components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4 / 1A.5):
 
 - **Schema skeleton** — `judgment_sources`, `judgment_items`,
   `judgment_evidence_links`, `judgment_edges`, `judgment_events`,
@@ -252,8 +252,8 @@ components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4):
   `approval_state=pending` / `activation_state=history_only`.
 - **Proposal review repository** — `src/judgment/repository.ts`
   (`approveProposedJudgment`, `rejectProposedJudgment`). Review
-  transitions only. Approval does not activate. No
-  active/eligible/context-visible write path exists.
+  transitions only. Approval does not activate. Approved judgments
+  remain `lifecycle_status=proposed` / `activation_state=history_only`.
 - **Source recording** — `src/judgment/repository.ts`
   (`recordJudgmentSource`). Writes `judgment_sources` +
   `judgment_events`. Does not create or mutate `judgment_items`.
@@ -261,14 +261,21 @@ components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4):
   (`linkJudgmentEvidence`). Writes `judgment_evidence_links`,
   updates denormalized arrays on `judgment_items`, appends
   `judgment.evidence.linked` event. Does not activate or approve.
+- **Commit / activation** — `src/judgment/repository.ts`
+  (`commitApprovedJudgment`). Requires approved+evidence, sets
+  `lifecycle_status=active` / `activation_state=eligible` /
+  `authority_source=user_confirmed`, syncs denormalized arrays,
+  appends `judgment.committed`. Active/eligible rows can now exist
+  in DB, but runtime context does not read them — no Context
+  Compiler or provider integration exists.
 - **Unregistered typed-tool contracts** — `src/judgment/tool.ts`
   (`judgment.propose`, `judgment.approve`, `judgment.reject`,
-  `judgment.record_source`, `judgment.link_evidence`).
-  Not imported from any runtime module.
+  `judgment.record_source`, `judgment.link_evidence`,
+  `judgment.commit`). Not imported from any runtime module.
 
 `judgment_edges` has no runtime writer yet.
 
-**Not implemented** (Phase 1A.5+ and beyond):
+**Not implemented** (beyond Phase 1A.5):
 
 - `Control Gate` evaluators and the `control_gate_events` /
   `control_plane_events` ledger (table name open per
@@ -281,10 +288,9 @@ components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4):
 - `current_operating_view` projection (DEC-036) — **not
   implemented**.
 - Vector and graph derived projections — **not implemented**.
-- Further typed tools (`commit` / `supersede` / `revoke` /
-  `query` / `explain` / `update_current_state` / activation
-  workflow) and Critique Lens v0.1 integration (ADR-0013) —
-  **not implemented**.
+- Further typed tools (`supersede` / `revoke` / `expire` /
+  `query` / `explain` / `update_current_state`) and Critique Lens
+  v0.1 integration (ADR-0013) — **not implemented**.
 - Provider / context / memory-promotion runtime integration —
   **not implemented**. The judgment tables are not read or written
   by `src/providers/*`, `src/context/*`, `src/queue/worker.ts`,
@@ -292,17 +298,13 @@ components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4):
   are wired into any of these modules.
 
 These are listed so AI coding agents do not mistake design
-documents for implemented behavior. Phase 1A.1 (schema + types +
-validators), Phase 1A.2 (proposal repository + unregistered tool
-contract), Phase 1A.3 (proposal review repository + unregistered
-approve/reject tool contracts), and Phase 1A.4 (source/evidence-link
-repository + unregistered tool contracts) have landed.
-**Activation, commit, supersede, revoke, expire, query, explain,
-context integration, and Control Gate work remains future scope.**
-See `docs/RUNTIME.md` and `docs/DATA_MODEL.md` for how the
-implemented slice sits next to the runtime, and
-`docs/JUDGMENT_SYSTEM.md` §Implementation Readiness for the broader
-Phase 1A scope.
+documents for implemented behavior. Phase 1A.1 through Phase 1A.5
+have landed. Local commit/activation exists. **Supersede, revoke,
+expire, query, explain, runtime context integration, and Control
+Gate work remain future scope.** See `docs/RUNTIME.md` and
+`docs/DATA_MODEL.md` for how the implemented slice sits next to
+the runtime, and `docs/JUDGMENT_SYSTEM.md` §Implementation
+Readiness for the broader Phase 1A scope.
 
 ## Existing implementation re-classification (2026-04 salvage audit)
 

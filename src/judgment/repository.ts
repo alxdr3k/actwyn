@@ -1282,7 +1282,8 @@ export function commitApprovedJudgment(
       );
     }
 
-    // Validate denormalized JSON arrays if present — malformed arrays fail before any update.
+    // Validate denormalized JSON arrays if present — malformed arrays and invalid element
+    // types fail before any update.
     if (existing.source_ids_json !== null) {
       let parsed: unknown;
       try {
@@ -1298,6 +1299,10 @@ export function commitApprovedJudgment(
           `judgment ${judgment_id} source_ids_json must be a JSON array`,
           "source_ids_json",
         );
+      }
+      const srcElemCheck = validateStringArray(parsed, "source_ids_json");
+      if (!srcElemCheck.ok) {
+        throw new JudgmentValidationError(srcElemCheck.reason, "source_ids_json");
       }
     }
 
@@ -1316,6 +1321,10 @@ export function commitApprovedJudgment(
           `judgment ${judgment_id} evidence_ids_json must be a JSON array`,
           "evidence_ids_json",
         );
+      }
+      const evElemCheck = validateStringArray(parsed, "evidence_ids_json");
+      if (!evElemCheck.ok) {
+        throw new JudgmentValidationError(evElemCheck.reason, "evidence_ids_json");
       }
     }
 
