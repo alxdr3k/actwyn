@@ -170,7 +170,7 @@ Attaches meaning to an artifact.
 - `relation_type ∈ { evidence, attachment, generated_output, reference, source }`.
 - CHECK requires `memory_summary_id` or `turn_id` to be non-null.
 
-### judgment_* (Phase 1A schema skeleton — not wired into runtime)
+### `judgment_*` (Phase 1A schema skeleton — not wired into runtime)
 
 Migration 004 (`migrations/004_judgment_skeleton.sql`) added the
 following tables and an FTS5 virtual table per ADR-0009 ..
@@ -210,11 +210,14 @@ P0.5 enum subsets enforced as DB-level CHECK constraints:
 - `scope_json` and the `*_json` columns are guarded by
   `json_valid(...)` CHECK constraints.
 
-This is the only judgment_* table that does **not** use
-`WITHOUT ROWID`. The external-content FTS5 virtual table
-(`judgment_items_fts`) requires a usable rowid on the content
-table; see migration 004's header comment for the full
-rationale.
+This is the only `judgment_*` table that does **not** use
+`WITHOUT ROWID`. It declares an explicit
+`fts_rowid INTEGER PRIMARY KEY` column to give the
+external-content FTS5 virtual table (`judgment_items_fts`) a
+stable rowid alias that survives `VACUUM` / compaction. The
+application-facing identifier is `id TEXT NOT NULL UNIQUE`; FK
+references from sibling tables target that column. See migration
+004's header comment for the full rationale.
 
 #### `judgment_evidence_links`
 
@@ -314,7 +317,7 @@ to keep in mind:
 ## Judgment System schema (Phase 1A.1 schema skeleton landed; runtime not wired)
 
 The DB-native AI-first Judgment System direction defines a separate
-schema family. As of migration 004, **the five judgment_* tables
+schema family. As of migration 004, **the five `judgment_*` tables
 and the FTS5 virtual table exist in `migrations/`**; the remaining
 control-plane / tensions / reflection rows below are still
 documentation only. Names and constraints come from the Phase 0 /

@@ -32,9 +32,14 @@ The Phase 0 / 0.5 Judgment System architectural design has landed on
 Per **DEC-037** (Implementation Documentation Lifecycle Policy),
 those documents are the architectural authority for *why* the
 direction was chosen but are **not** the source of truth for
-implemented runtime behavior. None of the planned schemas, typed
-tools, Control Gate evaluators, or projections are implemented yet
-(Phase 1A is a separate, future track).
+implemented runtime behavior.
+
+Phase 1A.1 has landed the **judgment schema skeleton only**:
+`migrations/004_judgment_skeleton.sql` (5 tables + FTS5),
+`src/judgment/types.ts`, and `src/judgment/validators.ts`. No typed
+tool surface, no repository writer, no Control Gate, no
+context-compiler integration, no provider runtime hookup, and no
+memory-promotion path exists yet — those remain Phase 1A+ work.
 
 ## System overview
 
@@ -146,45 +151,54 @@ A short summary; the full file map lives in `docs/CODE_MAP.md`.
 
 ## Planned but not implemented
 
-As of this PR, the Judgment System schema skeleton (5 tables +
-FTS5 virtual table in `migrations/004_judgment_skeleton.sql`) and
-the `src/judgment/types.ts` / `src/judgment/validators.ts`
-types-and-validators module exist in tree, but no runtime writer,
-typed tool, Control Gate, or context-compiler wiring is
-implemented — those remain Phase 1A+ follow-ups.
+As of this PR (Phase 1A.1), the Judgment System schema skeleton
+(5 tables + FTS5 virtual table in
+`migrations/004_judgment_skeleton.sql`) and the
+`src/judgment/types.ts` / `src/judgment/validators.ts`
+types-and-validators module exist in tree. They are intentionally
+runtime-inert: no runtime writer, typed tool, Control Gate, or
+context-compiler wiring uses them yet.
 
 The DB-native AI-first Judgment System direction (ADR-0009 …
 ADR-0013, `docs/JUDGMENT_SYSTEM.md`) defines the following
-components. The architectural commitment is on `main`; **none of
-them are implemented in code today**.
+components. The pieces below remain **not implemented**:
 
-- `JudgmentItem` and the supporting Phase 1A schema skeleton
-  (`judgment_sources`, `judgment_items`, `judgment_evidence_links`,
-  `judgment_edges`, `judgment_events`).
+- The Phase 1A schema skeleton (`judgment_sources`,
+  `judgment_items`, `judgment_evidence_links`, `judgment_edges`,
+  `judgment_events`) **is now implemented** as schema-only in
+  migration 004; nothing under `src/` currently writes to it.
 - `Control Gate` evaluators and the `control_gate_events` /
   `control_plane_events` ledger (the table name choice between the
   two is itself open per `docs/JUDGMENT_SYSTEM.md` §Implementation
-  Readiness).
-- `Tension` telemetry and the `tensions` table.
-- `ReflectionTriageEvent` and the `reflection_triage_events` ledger.
+  Readiness) — **not implemented**.
+- `Tension` telemetry and the `tensions` table — **not
+  implemented**.
+- `ReflectionTriageEvent` and the `reflection_triage_events` ledger
+  — **not implemented**.
 - `current_operating_view` projection (DEC-036; supersedes the
-  earlier "current truth" framing).
+  earlier "current truth" framing) — **not implemented**.
 - Vector and graph derived projections (FTS5 first; vector / graph
-  deferred per ADR-0009).
+  deferred per ADR-0009) — **not implemented**.
 - Typed tool surface (`judgment.propose` / `commit` / `supersede` /
   `revoke` / `query` / `explain` / `link_evidence` /
   `update_current_state`) and Critique Lens v0.1 integration
-  (ADR-0013).
-- `epistemic_origin` (ADR-0012), `authority_source` (ADR-0012),
-  `lifecycle_status` / `activation_state` / `retention_state`
-  (ADR-0013, DEC-033) field semantics on judgment rows.
+  (ADR-0013) — **not implemented**.
+- Repository / writer module under `src/judgment/*` — **not
+  implemented**. Only `src/judgment/types.ts` and
+  `src/judgment/validators.ts` exist today (pure-TS literal sets
+  and field validators per ADR-0014).
+- Provider / context / memory-promotion runtime integration —
+  **not implemented**. The judgment tables are not read or written
+  by `src/providers/*`, `src/context/*`, `src/queue/worker.ts`,
+  `src/memory/*`, or `src/telegram/*`.
 
 These are listed here so AI coding agents do not mistake design
-documents for implemented behavior. Phase 1A implementation is **out
-of scope** for this PR; see `docs/RUNTIME.md` and
-`docs/DATA_MODEL.md` for how the planned shape sits next to the
-implemented shape, and `docs/JUDGMENT_SYSTEM.md` §Implementation
-Readiness for the Phase 1A scope itself.
+documents for implemented behavior. Beyond Phase 1A.1's schema +
+types + validators landing, **Phase 1A implementation work
+remains future scope** — see `docs/RUNTIME.md` and
+`docs/DATA_MODEL.md` for how the schema sits next to the
+implemented runtime, and `docs/JUDGMENT_SYSTEM.md` §Implementation
+Readiness for the broader Phase 1A scope.
 
 ## Existing implementation re-classification (2026-04 salvage audit)
 

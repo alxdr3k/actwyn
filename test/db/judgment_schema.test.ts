@@ -187,12 +187,83 @@ describe("judgment_items — NOT NULL rejections", () => {
 });
 
 // ---------------------------------------------------------------
-// CHECK rejection: empty statement
+// CHECK rejection: empty / whitespace-only statement
 // ---------------------------------------------------------------
 
 describe("judgment_items — statement length CHECK", () => {
   test("empty statement is rejected", () => {
     expect(tryInsert(db, { statement: "" })).toThrow();
+  });
+
+  test("whitespace-only statement is rejected (trim-based CHECK)", () => {
+    // Mirrors validateStatement() in src/judgment/validators.ts —
+    // both layers must agree on whitespace-only being invalid.
+    expect(tryInsert(db, { statement: "   " })).toThrow();
+    expect(tryInsert(db, { statement: "\t\n\r " })).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------
+// id NOT NULL — explicit NOT NULL + UNIQUE invariants
+// ---------------------------------------------------------------
+
+describe("judgment_items — id NOT NULL invariants", () => {
+  // Using a partial-column insert lets us probe the NOT NULL
+  // constraint directly. The full insert helper always fills id
+  // with crypto.randomUUID(), which would mask the bug.
+  function insertWithoutId(): void {
+    db.prepare(
+      `INSERT INTO judgment_items (
+         kind, scope_json, statement, epistemic_origin,
+         ontology_version, schema_version
+       ) VALUES (
+         $kind, $scope_json, $statement, $epistemic_origin,
+         $ontology_version, $schema_version
+       )`,
+    ).run({
+      kind: "fact",
+      scope_json: '{"project":"actwyn"}',
+      statement: "id-omitted statement",
+      epistemic_origin: "user_stated",
+      ontology_version: "judgment-taxonomy-v0.1",
+      schema_version: "0.1.0",
+    } as never);
+  }
+
+  function insertWithNullId(): void {
+    db.prepare(
+      `INSERT INTO judgment_items (
+         id, kind, scope_json, statement, epistemic_origin,
+         ontology_version, schema_version
+       ) VALUES (
+         NULL, $kind, $scope_json, $statement, $epistemic_origin,
+         $ontology_version, $schema_version
+       )`,
+    ).run({
+      kind: "fact",
+      scope_json: '{"project":"actwyn"}',
+      statement: "id-null statement",
+      epistemic_origin: "user_stated",
+      ontology_version: "judgment-taxonomy-v0.1",
+      schema_version: "0.1.0",
+    } as never);
+  }
+
+  test("INSERT without id is rejected (NOT NULL on id)", () => {
+    expect(insertWithoutId).toThrow();
+  });
+
+  test("INSERT with NULL id is rejected (NOT NULL on id)", () => {
+    expect(insertWithNullId).toThrow();
+  });
+
+  test("normal valid INSERT still passes", () => {
+    expect(() => insertValidJudgmentItem(db)).not.toThrow();
+  });
+
+  test("duplicate id is rejected (UNIQUE on id)", () => {
+    const id = insertValidJudgmentItem(db);
+    expect(() => insertValidJudgmentItem(db, { id })).toThrow();
   });
 });
 
@@ -283,11 +354,16 @@ describe("judgment_items — default values", () => {
 // ---------------------------------------------------------------
 
 describe("judgment_items_fts — external-content + triggers under bun:sqlite", () => {
+  // Look up the FTS hit by joining on the stable `fts_rowid`
+  // alias rather than the implicit `rowid`. This documents the
+  // operational contract: external-content keys are bound to
+  // `judgment_items.fts_rowid`, not to whatever value SQLite
+  // happens to assign to `rowid` at the moment.
   function fts(query: string): string[] {
     return db
       .prepare<{ id: string }, [string]>(
         `SELECT id FROM judgment_items
-         WHERE rowid IN (
+         WHERE fts_rowid IN (
            SELECT rowid FROM judgment_items_fts
            WHERE judgment_items_fts MATCH ?
          )
@@ -297,7 +373,24 @@ describe("judgment_items_fts — external-content + triggers under bun:sqlite", 
       .map((r) => r.id);
   }
 
-  test("INSERT triggers index the new row", () => {
+  test("fts_rowid mirrors the implicit rowid (INTEGER PK alias)", () => {
+    const id = insertValidJudgmentItem(db, {
+      statement: "rowid alias mirror check",
+    });
+    // Both column names refer to the same INTEGER PK alias, so we
+    // must alias them to distinct result keys to read them back.
+    const row = db
+      .prepare<{ implicit_rowid: number; fts_rowid: number }, [string]>(
+        `SELECT rowid AS implicit_rowid, fts_rowid AS fts_rowid
+         FROM judgment_items WHERE id = ?`,
+      )
+      .get(id);
+    expect(row).not.toBeNull();
+    expect(typeof row!.fts_rowid).toBe("number");
+    expect(row!.fts_rowid).toBe(row!.implicit_rowid);
+  });
+
+  test("INSERT triggers index the new row (lookup via fts_rowid)", () => {
     const a = insertValidJudgmentItem(db, {
       statement: "the user prefers dark mode",
     });
@@ -333,6 +426,33 @@ describe("judgment_items_fts — external-content + triggers under bun:sqlite", 
     db.prepare<unknown, [string]>(`DELETE FROM judgment_items WHERE id = ?`).run(a);
 
     expect(fts("light")).toEqual([]);
+  });
+
+  test("FTS index survives VACUUM (fts_rowid stability)", () => {
+    const a = insertValidJudgmentItem(db, {
+      statement: "the user prefers dark mode",
+    });
+    const b = insertValidJudgmentItem(db, {
+      statement: "backup retention is 30 days",
+    });
+
+    // VACUUM rebuilds the database file. The implicit rowid of a
+    // non-INTEGER-PK rowid table is *not* guaranteed to survive
+    // such operations, but our INTEGER PRIMARY KEY alias is —
+    // that is the entire point of the fts_rowid column.
+    db.prepare("VACUUM").run();
+
+    expect(fts("dark")).toEqual([a].sort());
+    expect(fts("retention")).toEqual([b].sort());
+
+    // The fts_rowid value itself is preserved (rowid alias
+    // semantics). Pull both rows back and confirm.
+    const got = db
+      .prepare<{ id: string; fts_rowid: number }, never[]>(
+        `SELECT id, fts_rowid FROM judgment_items ORDER BY fts_rowid`,
+      )
+      .all();
+    expect(got.map((r) => r.id)).toEqual([a, b]);
   });
 });
 

@@ -300,6 +300,7 @@ describe("schema — representative column coverage", () => {
       "captured_at",
     ],
     judgment_items: [
+      "fts_rowid",
       "id",
       "kind",
       "scope_json",
@@ -398,4 +399,50 @@ describe("schema — required indices exist", () => {
       expect(hasIndex(db, ix)).toBe(true);
     });
   }
+});
+
+// ---------------------------------------------------------------
+// judgment_items — id / fts_rowid invariants (review feedback)
+// ---------------------------------------------------------------
+
+describe("schema — judgment_items column invariants", () => {
+  beforeEach(() => {
+    migrate(db, MIGRATIONS_DIR);
+  });
+
+  test("fts_rowid is INTEGER PRIMARY KEY (rowid alias)", () => {
+    const cols = columns(db, "judgment_items");
+    const ftsRowid = cols.find((c) => c.name === "fts_rowid");
+    expect(ftsRowid).toBeDefined();
+    expect(ftsRowid!.type.toUpperCase()).toBe("INTEGER");
+    expect(ftsRowid!.pk).toBe(1);
+  });
+
+  test("id is TEXT NOT NULL with a UNIQUE index", () => {
+    const cols = columns(db, "judgment_items");
+    const id = cols.find((c) => c.name === "id");
+    expect(id).toBeDefined();
+    expect(id!.type.toUpperCase()).toBe("TEXT");
+    expect(id!.notnull).toBe(1);
+
+    // UNIQUE constraints surface as an auto-index on the column.
+    interface IdxRow {
+      name: string;
+      unique: number;
+    }
+    const idxs = db
+      .prepare<IdxRow, [string]>(`SELECT * FROM pragma_index_list(?)`)
+      .all("judgment_items");
+    const uniqueOnId = idxs.some((row) => {
+      if (row.unique !== 1) return false;
+      interface IdxColRow {
+        name: string;
+      }
+      const cols = db
+        .prepare<IdxColRow, [string]>(`SELECT * FROM pragma_index_info(?)`)
+        .all(row.name);
+      return cols.length === 1 && cols[0]!.name === "id";
+    });
+    expect(uniqueOnId).toBe(true);
+  });
 });

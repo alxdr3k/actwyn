@@ -30,16 +30,28 @@
 --
 -- Rowid + FTS5 design choice
 -- ---------------------------------------------------------------
--- SQLite external-content FTS5 (`content='judgment_items'`,
--- `content_rowid='rowid'`) requires the content table to expose a
--- usable rowid. A `WITHOUT ROWID` table cannot be used as the
--- content table.
+-- SQLite external-content FTS5 (`content='judgment_items'`)
+-- requires the content table to expose a usable rowid. A
+-- `WITHOUT ROWID` table cannot be used as an FTS5 content table.
 --
--- We declare `judgment_items` with `id TEXT PRIMARY KEY` and
--- *without* the `WITHOUT ROWID` clause. SQLite therefore gives
--- the table an implicit auto-rowid that the FTS5 virtual table
--- can index against, while `id` remains the application-facing
--- primary key.
+-- The implicit `rowid` of a non-INTEGER-PK rowid table is **not
+-- guaranteed** to be stable across `VACUUM` or other compaction
+-- operations. To guarantee stability we declare an explicit
+-- `fts_rowid INTEGER PRIMARY KEY` column on `judgment_items`
+-- (which makes it the rowid alias — see SQLite docs on
+-- "ROWIDs and the INTEGER PRIMARY KEY"), and point
+-- `judgment_items_fts.content_rowid` at that column. The FTS
+-- triggers reference `new.fts_rowid` / `old.fts_rowid` so the
+-- index stays in sync regardless of any internal rowid
+-- renumbering.
+--
+-- The application-facing primary key is `id TEXT NOT NULL UNIQUE`.
+-- The `NOT NULL` is required because, on a rowid table, a
+-- non-INTEGER `PRIMARY KEY` does not by itself imply NOT NULL
+-- in SQLite (a long-standing bug-compatible quirk —
+-- https://www.sqlite.org/lang_createtable.html#the_primary_key).
+-- The `UNIQUE` lets sibling tables continue to reference
+-- `judgment_items(id)` by foreign key.
 --
 -- The four sibling tables (`judgment_sources`,
 -- `judgment_evidence_links`, `judgment_edges`, `judgment_events`)
@@ -93,13 +105,22 @@ CREATE INDEX IF NOT EXISTS idx_judgment_sources_kind
 -- docs/JUDGMENT_SYSTEM.md §SQL schema sketch (P0.5) plus the
 -- P0.5 enum subsets cited above.
 --
--- NOTE: this table deliberately does NOT use `WITHOUT ROWID`
--- because the `judgment_items_fts` external-content FTS5 virtual
--- table needs a stable rowid on the content table. See header
--- comment for the full rationale.
+-- NOTE: this table deliberately does NOT use `WITHOUT ROWID` and
+-- declares an explicit `fts_rowid INTEGER PRIMARY KEY` column.
+-- The FTS5 virtual table (`judgment_items_fts`) is configured
+-- with `content_rowid='fts_rowid'`, so the FTS index keys are
+-- stable across VACUUM / compaction. See header comment.
 -- ---------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS judgment_items (
-  id                   TEXT PRIMARY KEY,
+  -- INTEGER PRIMARY KEY → the rowid alias. Stable identifier the
+  -- FTS5 external-content table indexes against.
+  fts_rowid            INTEGER PRIMARY KEY,
+
+  -- Application-facing identifier. NOT NULL is explicit because
+  -- a TEXT PRIMARY KEY on a rowid table does not by itself imply
+  -- NOT NULL in SQLite. UNIQUE lets sibling tables foreign-key to
+  -- this column.
+  id                   TEXT    NOT NULL UNIQUE,
 
   kind                 TEXT    NOT NULL
                                CHECK (kind IN (
@@ -107,8 +128,13 @@ CREATE TABLE IF NOT EXISTS judgment_items (
                                  'current_state', 'procedure', 'caution')),
   scope_json           TEXT    NOT NULL
                                CHECK (json_valid(scope_json)),
+  -- Trim-based check: must contain at least one non-whitespace
+  -- character. SQLite's `trim(X)` defaults to stripping ASCII
+  -- spaces only, so we pass an explicit charset of TAB / LF / CR
+  -- / SPACE to match the policy in `validateStatement()` (see
+  -- `src/judgment/validators.ts`).
   statement            TEXT    NOT NULL
-                               CHECK (length(statement) > 0),
+                               CHECK (length(trim(statement, char(9, 10, 13, 32))) > 0),
 
   -- Origin axis (ADR-0012, ADR-0013): "where did this content
   -- come from?". `decided` / `deprecated` / `system_authored`
@@ -294,29 +320,30 @@ CREATE INDEX IF NOT EXISTS idx_judgment_events_created_at
 -- ---------------------------------------------------------------
 -- judgment_items_fts (FTS5 virtual table over `statement`)
 --
--- External-content table backed by `judgment_items.rowid`. The
--- three triggers below keep the FTS index consistent with the
--- content table on every INSERT / UPDATE / DELETE.
+-- External-content table backed by `judgment_items.fts_rowid`
+-- (a stable INTEGER PRIMARY KEY column — see header comment).
+-- The three triggers below keep the FTS index consistent with
+-- the content table on every INSERT / UPDATE / DELETE.
 -- ---------------------------------------------------------------
 CREATE VIRTUAL TABLE IF NOT EXISTS judgment_items_fts
-  USING fts5(statement, content='judgment_items', content_rowid='rowid', tokenize='unicode61');
+  USING fts5(statement, content='judgment_items', content_rowid='fts_rowid', tokenize='unicode61');
 
 CREATE TRIGGER IF NOT EXISTS judgment_items_fts_ai
 AFTER INSERT ON judgment_items BEGIN
   INSERT INTO judgment_items_fts(rowid, statement)
-  VALUES (new.rowid, new.statement);
+  VALUES (new.fts_rowid, new.statement);
 END;
 
 CREATE TRIGGER IF NOT EXISTS judgment_items_fts_ad
 AFTER DELETE ON judgment_items BEGIN
   INSERT INTO judgment_items_fts(judgment_items_fts, rowid, statement)
-  VALUES ('delete', old.rowid, old.statement);
+  VALUES ('delete', old.fts_rowid, old.statement);
 END;
 
 CREATE TRIGGER IF NOT EXISTS judgment_items_fts_au
 AFTER UPDATE ON judgment_items BEGIN
   INSERT INTO judgment_items_fts(judgment_items_fts, rowid, statement)
-  VALUES ('delete', old.rowid, old.statement);
+  VALUES ('delete', old.fts_rowid, old.statement);
   INSERT INTO judgment_items_fts(rowid, statement)
-  VALUES (new.rowid, new.statement);
+  VALUES (new.fts_rowid, new.statement);
 END;
