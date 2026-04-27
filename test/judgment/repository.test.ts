@@ -1166,3 +1166,49 @@ describe("rejectProposedJudgment — validation", () => {
     expect(countItems()).toBe(before);
   });
 });
+
+// ---------------------------------------------------------------
+// Stateful toJSON() — TOCTOU serialization regression
+// ---------------------------------------------------------------
+
+describe("approveProposedJudgment — stateful toJSON payload", () => {
+  test("payload with toJSON that throws on second call is rejected as JudgmentValidationError", () => {
+    // Guards against double-serialize bug: validatePlainJsonObject serializes once
+    // internally; a second JSON.stringify call on a stateful toJSON would throw a
+    // raw SyntaxError instead of a structured JudgmentValidationError.
+    const j = proposeJudgment(db, validInput);
+    let callCount = 0;
+    const badPayload: Record<string, unknown> = {};
+    (badPayload as Record<string, unknown>).toJSON = () => {
+      callCount++;
+      if (callCount >= 2) throw new SyntaxError("stateful toJSON exhausted");
+      return { x: 1 };
+    };
+    expect(() =>
+      approveProposedJudgment(db, { ...validApproveInput, judgment_id: j.id, payload: badPayload }),
+    ).toThrow(JudgmentValidationError);
+    // The row must remain in its original proposed/pending state
+    const row = getFullItem(j.id)!;
+    expect(row.approval_state).toBe("pending");
+    expect(row.lifecycle_status).toBe("proposed");
+  });
+});
+
+describe("rejectProposedJudgment — stateful toJSON payload", () => {
+  test("payload with toJSON that throws on second call is rejected as JudgmentValidationError", () => {
+    const j = proposeJudgment(db, validInput);
+    let callCount = 0;
+    const badPayload: Record<string, unknown> = {};
+    (badPayload as Record<string, unknown>).toJSON = () => {
+      callCount++;
+      if (callCount >= 2) throw new SyntaxError("stateful toJSON exhausted");
+      return { x: 1 };
+    };
+    expect(() =>
+      rejectProposedJudgment(db, { ...validRejectInput, judgment_id: j.id, payload: badPayload }),
+    ).toThrow(JudgmentValidationError);
+    const row = getFullItem(j.id)!;
+    expect(row.approval_state).toBe("pending");
+    expect(row.lifecycle_status).toBe("proposed");
+  });
+});

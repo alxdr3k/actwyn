@@ -493,9 +493,20 @@ export function approveProposedJudgment(
 
   let payloadJsonObj: Record<string, unknown> | undefined;
   if (input.payload !== undefined) {
+    // serializeOnce converts SyntaxError (stateful toJSON) → JudgmentValidationError.
+    // validatePlainJsonObject runs structural checks (null/array/class-instance) on the
+    // live value AFTER serializeOnce so we never call JSON.stringify twice.
+    const payloadSerialized = serializeOnce(input.payload, "payload");
     assertValid(validatePlainJsonObject(input.payload, "payload"), "payload");
-    // Serialize once and reparse to freeze a clean, mutation-safe copy.
-    payloadJsonObj = JSON.parse(JSON.stringify(input.payload)) as Record<string, unknown>;
+    const payloadReparsed = JSON.parse(payloadSerialized) as unknown;
+    if (
+      payloadReparsed === null ||
+      Array.isArray(payloadReparsed) ||
+      typeof payloadReparsed !== "object"
+    ) {
+      throw new JudgmentValidationError("payload must serialize to a plain JSON object", "payload");
+    }
+    payloadJsonObj = payloadReparsed as Record<string, unknown>;
   }
 
   const makeEventId = deps.newEventId ?? (() => crypto.randomUUID());
@@ -638,8 +649,17 @@ export function rejectProposedJudgment(
 
   let payloadJsonObj: Record<string, unknown> | undefined;
   if (input.payload !== undefined) {
+    const payloadSerialized = serializeOnce(input.payload, "payload");
     assertValid(validatePlainJsonObject(input.payload, "payload"), "payload");
-    payloadJsonObj = JSON.parse(JSON.stringify(input.payload)) as Record<string, unknown>;
+    const payloadReparsed = JSON.parse(payloadSerialized) as unknown;
+    if (
+      payloadReparsed === null ||
+      Array.isArray(payloadReparsed) ||
+      typeof payloadReparsed !== "object"
+    ) {
+      throw new JudgmentValidationError("payload must serialize to a plain JSON object", "payload");
+    }
+    payloadJsonObj = payloadReparsed as Record<string, unknown>;
   }
 
   const makeEventId = deps.newEventId ?? (() => crypto.randomUUID());
