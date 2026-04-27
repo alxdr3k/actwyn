@@ -222,6 +222,7 @@ export function proposeJudgment(
   // source_ids / evidence_ids: validate live element types, then serialize once and
   // re-validate element types on the reparsed array to catch toJSON mutations.
   let sourceIdsJson: string | null = null;
+  let sourceIdsParsed: string[] | null = null;
   if (input.source_ids != null) {
     assertValid(validateStringArray(input.source_ids, "source_ids"), "source_ids");
     const raw = serializeOnce(input.source_ids, "source_ids");
@@ -231,9 +232,11 @@ export function proposeJudgment(
     }
     assertValid(validateStringArray(reparsed, "source_ids"), "source_ids");
     sourceIdsJson = raw;
+    sourceIdsParsed = reparsed as string[];
   }
 
   let evidenceIdsJson: string | null = null;
+  let evidenceIdsParsed: string[] | null = null;
   if (input.evidence_ids != null) {
     assertValid(validateStringArray(input.evidence_ids, "evidence_ids"), "evidence_ids");
     const raw = serializeOnce(input.evidence_ids, "evidence_ids");
@@ -243,6 +246,7 @@ export function proposeJudgment(
     }
     assertValid(validateStringArray(reparsed, "evidence_ids"), "evidence_ids");
     evidenceIdsJson = raw;
+    evidenceIdsParsed = reparsed as string[];
   }
 
   // metacognitive fields: serialize once, verify reparsed shape is object or array.
@@ -342,8 +346,8 @@ export function proposeJudgment(
       epistemic_origin: input.epistemic_origin,
       confidence: input.confidence,
     };
-    if (input.source_ids != null) eventPayload.source_ids = input.source_ids;
-    if (input.evidence_ids != null) eventPayload.evidence_ids = input.evidence_ids;
+    if (sourceIdsParsed != null) eventPayload.source_ids = sourceIdsParsed;
+    if (evidenceIdsParsed != null) eventPayload.evidence_ids = evidenceIdsParsed;
 
     db.prepare(
       `INSERT INTO judgment_events (id, event_type, judgment_id, payload_json, actor)
@@ -380,8 +384,8 @@ export function proposeJudgment(
     ontology_version: ONTOLOGY_VERSION,
     schema_version: SCHEMA_VERSION,
     procedure_subtype: procedureSubtype,
-    source_ids: sourceIdsJson != null ? JSON.parse(sourceIdsJson) as string[] : null,
-    evidence_ids: evidenceIdsJson != null ? JSON.parse(evidenceIdsJson) as string[] : null,
+    source_ids: sourceIdsParsed,
+    evidence_ids: evidenceIdsParsed,
     created_at: row?.created_at ?? "",
     updated_at: row?.updated_at ?? "",
   };
