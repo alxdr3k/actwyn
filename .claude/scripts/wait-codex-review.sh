@@ -102,13 +102,17 @@ fetch_list_or_empty() {
   printf '%s' "$out" | jq -s 'add // []'
 }
 
+FETCH_BASELINE_PERMANENT_RC=99
 fetch_baseline() {
   local raw push_ts head_sha head_repo branch pr_info pr_err
   # PR lookup: distinguish permanent from transient failures.
+  # NOTE: cannot use `exit 4` here — caller invokes us via command substitution
+  # (which runs in a subshell), so exit only terminates the subshell. Return a
+  # sentinel rc instead and let the caller propagate it.
   if ! pr_info=$(gh api "repos/$repo/pulls/$pr" 2>&1); then
     if [ "$(classify_api_error "$pr_info")" = "permanent" ]; then
       echo "ERROR: PR lookup permanent failure for $repo#$pr: $pr_info" >&2
-      exit 4
+      return $FETCH_BASELINE_PERMANENT_RC
     fi
     return 1
   fi
@@ -137,9 +141,11 @@ fetch_baseline() {
       | max // empty')
     if [ -n "$push_ts" ]; then echo "$push_ts"; return 0; fi
   fi
-  # 3) HEAD commit committer.date (head_sha already extracted above)
+  # 3) HEAD commit committer.date — query head repo when known (fork PRs),
+  #    falling back to base only when head repo is unavailable.
   [ -z "$head_sha" ] && return 1
-  gh api "repos/$repo/commits/$head_sha" -q .commit.committer.date 2>/dev/null
+  local commit_repo="${head_repo:-$repo}"
+  gh api "repos/$commit_repo/commits/$head_sha" -q .commit.committer.date 2>/dev/null
 }
 
 clamp_to_now() {
@@ -167,7 +173,14 @@ while :; do
   if [ -n "${CODEX_BASELINE:-}" ]; then
     baseline="$CODEX_BASELINE"
   else
-    if ! fetched=$(fetch_baseline) || [ -z "$fetched" ]; then
+    set +e
+    fetched=$(fetch_baseline)
+    rc=$?
+    set -e
+    if [ "$rc" = "$FETCH_BASELINE_PERMANENT_RC" ]; then
+      exit 4
+    fi
+    if [ "$rc" != "0" ] || [ -z "$fetched" ]; then
       echo "WARN: could not fetch baseline; retrying next poll" >&2
       sleep "$interval"; continue
     fi
