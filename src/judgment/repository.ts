@@ -2384,9 +2384,53 @@ function batchLoadEvidenceBundles(
       }
     }
 
+    // Apply denormalized evidence_ids ordering — mirrors loadEvidenceBundle hint
+    // ordering so queryJudgments(include_evidence=true) and explainJudgment
+    // return links/sources in the same order for the same judgment.
+    const orderedLinks: JudgmentEvidenceLinkRow[] = [];
+    const seenOrderedLinkIds = new Set<string>();
+    // 1. Honor evidence_ids_json order first.
+    for (const evidenceId of item.evidence_ids) {
+      const link = linkById.get(evidenceId);
+      // Existence already validated above; skip duplicates in the denormalized array.
+      if (link && !seenOrderedLinkIds.has(evidenceId)) {
+        orderedLinks.push(link);
+        seenOrderedLinkIds.add(evidenceId);
+      }
+    }
+    // 2. Append any links not yet referenced by evidence_ids_json (DB-ordered fallback).
+    for (const link of links) {
+      if (!seenOrderedLinkIds.has(link.id)) {
+        orderedLinks.push(link);
+        seenOrderedLinkIds.add(link.id);
+      }
+    }
+
+    // Apply denormalized source_ids ordering — same strategy.
     const seenSourceIds = new Set<string>();
     const sources: JudgmentQuerySourceSummary[] = [];
-    for (const link of links) {
+    // 1. source_ids_json order first.
+    for (const sourceId of item.source_ids) {
+      if (seenSourceIds.has(sourceId)) continue;
+      seenSourceIds.add(sourceId);
+      const src = sourceMap.get(sourceId);
+      if (!src) {
+        throw new JudgmentValidationError(
+          `judgment ${item.id} references missing source ${sourceId}`,
+          "source_id",
+        );
+      }
+      assertValid(validateTrustLevel(src.trust_level), "trust_level");
+      sources.push({
+        id: src.id,
+        kind: src.kind,
+        locator: src.locator,
+        trust_level: src.trust_level as TrustLevel,
+        redacted: src.redacted === 1,
+      });
+    }
+    // 2. Append any sources from links not yet in source_ids_json.
+    for (const link of orderedLinks) {
       if (seenSourceIds.has(link.source_id)) continue;
       seenSourceIds.add(link.source_id);
       const src = sourceMap.get(link.source_id);
@@ -2405,7 +2449,7 @@ function batchLoadEvidenceBundles(
         redacted: src.redacted === 1,
       });
     }
-    const evidenceLinks: JudgmentQueryEvidenceLinkSummary[] = links.map((l) => ({
+    const evidenceLinks: JudgmentQueryEvidenceLinkSummary[] = orderedLinks.map((l) => ({
       id: l.id,
       source_id: l.source_id,
       relation: l.relation,
@@ -2414,7 +2458,7 @@ function batchLoadEvidenceBundles(
     }));
     return {
       ...item,
-      evidence_count: links.length,
+      evidence_count: orderedLinks.length,
       source_count: sources.length,
       sources,
       evidence_links: evidenceLinks,
