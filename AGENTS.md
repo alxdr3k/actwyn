@@ -25,9 +25,8 @@ Do not read the long P0 design docs (`docs/PRD.md`, `docs/02_HLD.md`,
 
 Do not read `docs/JUDGMENT_SYSTEM.md` or `docs/adr/0009-…` …
 `docs/adr/0013-…` by default. Those are the Phase 0 / 0.5
-architectural design record for the planned DB-native AI-first
-Judgment System (per DEC-037, a historical record — none of it is
-implemented yet). Open them only when:
+architectural design record for the DB-native AI-first Judgment
+System (per DEC-037, a historical record). Open them only when:
 
 - the task explicitly asks for Judgment System Phase 1A scoping
   or schema work, or
@@ -56,13 +55,23 @@ Do not read `docs/design/archive/` by default. Those are history.
   contract for the P0 vertical. They are not authority for current
   runtime behavior.
 - The DB-native AI-first Judgment System direction is **committed
-  but not implemented**. ADR-0009 … ADR-0013 and
-  `docs/JUDGMENT_SYSTEM.md` are the architectural authority for
-  *why*; nothing in `src/` or `migrations/` implements it yet
-  (per DEC-037). Do not implement Phase 1A schemas, Control Gate,
-  Tension, ReflectionTriageEvent, `current_operating_view`,
-  vector / graph projections, Critique Lens, or typed-tool surfaces
-  unless the task explicitly asks for them.
+  and partially implemented** (Phase 1A). ADR-0009 … ADR-0013 and
+  `docs/JUDGMENT_SYSTEM.md` are the architectural authority for *why*.
+  Current state (per DEC-037):
+  - **Phase 1A.1 (landed)**: `migrations/004_judgment_skeleton.sql`
+    (5 tables + FTS5), `src/judgment/types.ts`,
+    `src/judgment/validators.ts`.
+  - **Phase 1A.2 (landed)**: `src/judgment/repository.ts`
+    (proposal-only writer), `src/judgment/tool.ts` (unregistered
+    `judgment.propose` typed-tool contract).
+  - The tool is **not registered** anywhere in `src/`. It must not be
+    imported from `src/main.ts`, `src/providers/*`, `src/context/*`,
+    `src/queue/worker.ts`, `src/memory/*`, `src/telegram/*`, or
+    `src/commands/*`.
+  - Do **not** implement Control Gate, Tension, ReflectionTriageEvent,
+    `current_operating_view`, vector / graph projections, Critique Lens,
+    approval workflow, activation workflow, or any further runtime
+    Judgment surface unless the task explicitly authorizes them.
 
 ## When changing code
 
@@ -112,8 +121,9 @@ the PR description rather than claiming green.
 
 ## What to avoid
 
-- Implementing Phase 1A Judgment System schema or runtime in this
-  branch. That is a separate, larger track.
+- Implementing Phase 1A Judgment System runtime surfaces beyond what
+  is already landed (see "Source of truth" note above). That is a
+  separate, larger track.
 - Editing accepted ADRs to chase code changes — supersede instead.
 - Rewriting long design docs to "match" implementation drift —
   patch the thin current-state docs.
