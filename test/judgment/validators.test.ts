@@ -286,6 +286,13 @@ describe("validateStringArraySerialization", () => {
     const arr = Object.assign(["s1"], { toJSON() { return { hijacked: true }; } });
     expect(validateStringArraySerialization(arr, "ids").ok).toBe(false);
   });
+
+  test("rejects array whose toJSON() returns a non-string-element array", () => {
+    // toJSON returning [1, 2] passes the Array.isArray check but would store
+    // non-string IDs — re-validate element types on the reparsed array.
+    const arr = Object.assign(["s1"], { toJSON() { return [1, 2]; } });
+    expect(validateStringArraySerialization(arr, "ids").ok).toBe(false);
+  });
 });
 
 describe("validateJsonValue", () => {

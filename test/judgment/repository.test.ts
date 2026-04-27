@@ -344,6 +344,11 @@ describe("proposeJudgment — validation rejections", () => {
     assertRejectedBeforeInsert({ ...validInput, evidence_ids: arr });
   });
 
+  test("source_ids with toJSON() returning non-string-element array is rejected before DB insert", () => {
+    const arr = Object.assign(["s1"], { toJSON() { return [1, 2]; } });
+    assertRejectedBeforeInsert({ ...validInput, source_ids: arr });
+  });
+
   test("would_change_if = Date instance is rejected before DB insert", () => {
     // Date serializes to a string scalar — would corrupt would_change_if_json shape.
     assertRejectedBeforeInsert({ ...validInput, would_change_if: new Date() });

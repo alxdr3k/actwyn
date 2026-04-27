@@ -266,10 +266,13 @@ export function validateStringArraySerialization(
   if (typeof serialized !== "string") {
     return { ok: false, reason: `${fieldName} cannot be serialized to a JSON string` };
   }
-  if (!Array.isArray(JSON.parse(serialized) as unknown)) {
+  const reparsed = JSON.parse(serialized) as unknown;
+  if (!Array.isArray(reparsed)) {
     return { ok: false, reason: `${fieldName} must serialize to a JSON array` };
   }
-  return { ok: true };
+  // Re-validate element types on the reparsed array: toJSON() could return [1, 2]
+  // (valid array, wrong element types) and those non-string IDs would be stored.
+  return validateStringArray(reparsed, fieldName);
 }
 
 /** Every element must be a non-empty string. */
