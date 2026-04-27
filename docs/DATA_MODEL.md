@@ -37,8 +37,9 @@ Forward-only, contiguous from version 1. Gaps are refused at boot
 | 001     | `migrations/001_init.sql`                               |
 | 002     | `migrations/002_artifacts.sql`                          |
 | 003     | `migrations/003_notification_payload_text.sql`          |
+| 004     | `migrations/004_judgment_skeleton.sql`                  |
 
-`/doctor` checks `expected_schema_version = 3` (see
+`/doctor` checks `expected_schema_version = 4` (see
 `src/main.ts`). Bumping the schema requires updating that constant
 in lockstep with a new migration.
 
@@ -169,6 +170,79 @@ Attaches meaning to an artifact.
 - `relation_type ∈ { evidence, attachment, generated_output, reference, source }`.
 - CHECK requires `memory_summary_id` or `turn_id` to be non-null.
 
+### judgment_* (Phase 1A schema skeleton — not wired into runtime)
+
+Migration 004 (`migrations/004_judgment_skeleton.sql`) added the
+following tables and an FTS5 virtual table per ADR-0009 ..
+ADR-0013 and `docs/JUDGMENT_SYSTEM.md`. They are **schema only**:
+no module under `src/` writes to them, no typed tool exists, and
+no Control Gate or Context Compiler reads from them. Future
+runtime writers will live under `src/judgment/*`.
+
+#### `judgment_sources`
+
+One row per ingested source (turn / attachment / external / tool
+output / ...). `kind` is intentionally free-form TEXT; the source
+taxonomy is still emerging in Phase 1A and we do not want every
+new ingestion path to require a migration.
+
+- `trust_level ∈ { low, medium, high }`.
+- `redacted ∈ { 0, 1 }` — boolean carried as INTEGER.
+
+#### `judgment_items`
+
+The core judgment row. Shape follows
+`docs/JUDGMENT_SYSTEM.md` §SQL schema sketch (P0.5) with the
+P0.5 enum subsets enforced as DB-level CHECK constraints:
+
+- `kind ∈ { fact, preference, decision, current_state, procedure, caution }` (DEC-023).
+- `epistemic_origin ∈ { observed, user_stated, user_confirmed, inferred, assistant_generated, tool_output }` (ADR-0012, ADR-0013).
+- `authority_source ∈ { none, user_confirmed }` (DEC-029).
+- `approval_state ∈ { not_required, pending, approved, rejected }`.
+- `lifecycle_status ∈ { proposed, active, rejected, revoked, superseded, expired }` (DEC-033).
+- `activation_state ∈ { eligible, history_only, excluded }` (DEC-033, P0.5 subset).
+- `retention_state ∈ { normal, archived, deleted }` (DEC-033).
+- `confidence ∈ { low, medium, high }`.
+- `importance` is INTEGER 1..5.
+- `decay_policy ∈ { none, supersede_only }` (DEC-027, P0.5 subset).
+- `procedure_subtype ∈ { skill, policy, preference_adaptation, safety_rule, workflow_rule }` or NULL (DEC-034).
+- `ontology_version` and `schema_version` are NOT NULL (DEC-028).
+- `scope_json` and the `*_json` columns are guarded by
+  `json_valid(...)` CHECK constraints.
+
+This is the only judgment_* table that does **not** use
+`WITHOUT ROWID`. The external-content FTS5 virtual table
+(`judgment_items_fts`) requires a usable rowid on the content
+table; see migration 004's header comment for the full
+rationale.
+
+#### `judgment_evidence_links`
+
+Many-to-many link from a `judgment_items` row to the
+`judgment_sources` rows that support it. `relation` is open
+TEXT (vocabulary still emerging).
+
+#### `judgment_edges`
+
+Typed relations between two `judgment_items` rows (supports /
+contradicts / refines / ...). `relation` is open TEXT.
+
+#### `judgment_events`
+
+Append-only event log for judgment lifecycle changes.
+`event_type` is open TEXT; `payload_json` is guarded by
+`json_valid(...)`. `judgment_id` is nullable because some
+events are not tied to a single row.
+
+#### `judgment_items_fts`
+
+External-content FTS5 virtual table over
+`judgment_items.statement` (tokenizer `unicode61`). Three
+triggers (`judgment_items_fts_ai` / `_au` / `_ad`) keep the
+index in sync on every INSERT / UPDATE / DELETE on the content
+table. Tested under `bun:sqlite` in
+`test/db/judgment_schema.test.ts`.
+
 ## Single-writer map
 
 Each table has one writer module. Other modules must route through
@@ -237,30 +311,35 @@ to keep in mind:
 - A schema change is an architecture-level event for the affected
   table. If the table is new or its semantics change, add an ADR.
 
-## Planned Judgment System schema (not implemented)
+## Judgment System schema (Phase 1A.1 schema skeleton landed; runtime not wired)
 
 The DB-native AI-first Judgment System direction defines a separate
-schema family. None of these tables exist in `migrations/` today.
-Names and constraints come from the Phase 0 / 0.5 design records
-that landed on `main` as ADR-0009 … ADR-0013 plus
-`docs/JUDGMENT_SYSTEM.md` (per DEC-037, that spec is a historical
-architectural record, not implementation authority).
+schema family. As of migration 004, **the five judgment_* tables
+and the FTS5 virtual table exist in `migrations/`**; the remaining
+control-plane / tensions / reflection rows below are still
+documentation only. Names and constraints come from the Phase 0 /
+0.5 design records that landed on `main` as ADR-0009 … ADR-0013
+plus `docs/JUDGMENT_SYSTEM.md` (per DEC-037, that spec is a
+historical architectural record, not implementation authority).
 
-| Planned table                                | Purpose                                                              | Source of truth for the planned shape                            |
-| -------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `judgment_sources`                           | Source of a judgment fragment (turn, attachment, external).          | `docs/JUDGMENT_SYSTEM.md` §SQL schema sketch (P0.5); ADR-0009.   |
-| `judgment_items`                             | Atomic judgment rows (the Judgment System analogue of memory_items). | `docs/JUDGMENT_SYSTEM.md` §Core data model + §SQL schema sketch. |
-| `judgment_evidence_links`                    | Links between judgments and supporting evidence rows.                | `docs/JUDGMENT_SYSTEM.md` §SQL schema sketch.                    |
-| `judgment_edges`                             | Typed relations between judgments (supports, contradicts, refines).  | `docs/JUDGMENT_SYSTEM.md` §Core data model + §SQL schema sketch. |
-| `judgment_events`                            | Append-only event log for judgment lifecycle changes.                | `docs/JUDGMENT_SYSTEM.md` §SQL schema sketch.                    |
-| `control_gate_events` / `control_plane_events` | Control Gate decisions per query (table name itself is open per Phase 1A scope). | `docs/JUDGMENT_SYSTEM.md` §Implementation Readiness; ADR-0012. |
-| `tensions`                                   | Telemetry for unresolved tension between judgments / sources.        | `docs/JUDGMENT_SYSTEM.md` §Critique Lens + Tension Generalization; ADR-0013. |
-| `reflection_triage_events`                   | Reflection / triage outcomes feeding back into judgments.            | `docs/JUDGMENT_SYSTEM.md` §Metacognitive Critique Loop; ADR-0012, ADR-0013. |
+| Table                                        | Purpose                                                              | Status (2026-04-27)                                                          |
+| -------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `judgment_sources`                           | Source of a judgment fragment (turn, attachment, external).          | schema implemented in migration 004; no runtime writer.                       |
+| `judgment_items`                             | Atomic judgment rows (the Judgment System analogue of memory_items). | schema implemented in migration 004; no runtime writer / typed tool.         |
+| `judgment_evidence_links`                    | Links between judgments and supporting evidence rows.                | schema implemented in migration 004; no runtime writer.                       |
+| `judgment_edges`                             | Typed relations between judgments (supports, contradicts, refines).  | schema implemented in migration 004; no runtime writer.                       |
+| `judgment_events`                            | Append-only event log for judgment lifecycle changes.                | schema implemented in migration 004; no runtime writer.                       |
+| `judgment_items_fts`                         | FTS5 external-content index over `judgment_items.statement`.          | schema implemented in migration 004; sync triggers tested.                   |
+| `control_gate_events` / `control_plane_events` | Control Gate decisions per query (table name itself is open per Phase 1A scope). | **planned** (`docs/JUDGMENT_SYSTEM.md` §Implementation Readiness; ADR-0012). |
+| `tensions`                                   | Telemetry for unresolved tension between judgments / sources.        | **planned** (`docs/JUDGMENT_SYSTEM.md` §Critique Lens + Tension Generalization; ADR-0013). |
+| `reflection_triage_events`                   | Reflection / triage outcomes feeding back into judgments.            | **planned** (`docs/JUDGMENT_SYSTEM.md` §Metacognitive Critique Loop; ADR-0012, ADR-0013). |
 
-Until these are introduced via real migrations and supporting code,
-treat them as documentation only. Do not seed them in tests, do not
-write code that depends on them, and do not migrate
-`memory_summaries` / `memory_items` data into them.
+For the implemented rows: the schema is in place but no module
+writes to them, no typed tool exists, no Control Gate or Context
+Compiler reads them. Future runtime writers will live under
+`src/judgment/*`. Do not migrate `memory_summaries` / `memory_items`
+data into them — Q-027 stays open and ADR-0009 commits to the
+"분리" starting point.
 
 Q-027 (`memory_items` ↔ `judgment_items` 관계) is open. ADR-0009
 commits to "분리" as the Phase 0 starting point; the implementation

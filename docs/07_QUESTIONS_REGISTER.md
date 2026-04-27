@@ -712,8 +712,13 @@ committed for a later milestone.
 - **Impacted docs**: ADR-0006, ADR-0009; PRD §12.1a Taxonomy;
   `docs/JUDGMENT_SYSTEM.md` §Relationship to memory layer.
 - **Follow-up**: Phase 1 schema PR에서 결정.
-- **History**: 2026-04-26 ADR-0009 채택 시 분리 방향으로 출발점
-  설정 (second-brain Ideation 노트 Open Question Q4 import).
+- **History**:
+  - 2026-04-26 ADR-0009 채택 시 분리 방향으로 출발점 설정
+    (second-brain Ideation 노트 Open Question Q4 import).
+  - 2026-04-27 Phase 1A.1 implementation: schema lands with
+    separate `memory_items` and `judgment_items` per ADR-0009
+    분리 commitment. Long-term unify/migrate/separate question
+    remains open and tracked here.
 
 ### Q-028 — `JudgmentItem.kind` v1 enum 범위는 어디까지인가?
 

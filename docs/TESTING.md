@@ -98,7 +98,7 @@ When you add a migration:
 
 1. Add `migrations/<NNN>_<slug>.sql` (versions contiguous from 001).
 2. Update `expected_schema_version` in `src/main.ts` (currently
-   3) so `/doctor` flags drift.
+   4) so `/doctor` flags drift.
 3. Update `docs/DATA_MODEL.md` and `docs/CODE_MAP.md`.
 4. Re-run `bun run ci`.
 

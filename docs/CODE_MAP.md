@@ -67,6 +67,7 @@ Status legend:
 | `migrations/001_init.sql`         | Base tables: `allowed_users`, `settings`, `telegram_updates`, `sessions`, `jobs`, `provider_runs`, `provider_raw_events`, `turns`, `outbound_notifications`, `outbound_notification_chunks`, `memory_summaries`, `memory_items`. |
 | `migrations/002_artifacts.sql`    | `storage_objects`, `memory_artifact_links`.                                                  |
 | `migrations/003_notification_payload_text.sql` | Adds `payload_text` to `outbound_notifications`.                              |
+| `migrations/004_judgment_skeleton.sql` | Phase 1A.1 schema-only Judgment System skeleton: `judgment_sources`, `judgment_items`, `judgment_evidence_links`, `judgment_edges`, `judgment_events`, plus the `judgment_items_fts` FTS5 virtual table and sync triggers. |
 | `src/storage/local.ts`            | Local FS reads / writes for objects and transcripts.                                         |
 | `src/storage/s3.ts`               | Hetzner Object Storage transport (Bun.S3Client based).                                       |
 | `src/storage/sync.ts`             | `storage_sync` worker; advances `storage_objects.status`.                                    |
@@ -88,8 +89,18 @@ The Judgment System (`JudgmentItem`, Control Gate, Tension,
 ReflectionTriageEvent, `current_operating_view`, vector / graph
 projections) is **planned** under ADR-0009 … ADR-0013 and
 `docs/JUDGMENT_SYSTEM.md` (Phase 0 / 0.5 architectural design
-record per DEC-037). It has no module in `src/` yet. See
+record per DEC-037). The Phase 1A.1 schema skeleton + types /
+validators have landed (see "Judgment (Phase 1A schema/types
+only)" below); no runtime writer, typed tool, Control Gate, or
+Context Compiler integration is implemented yet. See
 `docs/DATA_MODEL.md` and `docs/RUNTIME.md`.
+
+## Judgment (Phase 1A schema/types only)
+
+| Path                                  | Purpose                                                                              | Status                                                                       |
+| ------------------------------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| `src/judgment/types.ts`               | `as const` literal arrays + union types for the P0.5 enum surfaces (`kind`, `epistemic_origin`, `authority_source`, `approval_state`, `lifecycle_status`, `activation_state`, `retention_state`, `confidence`, `decay_policy`, `procedure_subtype`) plus `ONTOLOGY_VERSION` / `SCHEMA_VERSION` defaults (DEC-028). Pure TS, no `Bun` / `bun:*` import (ADR-0014). | implemented (schema/types only — not runtime-integrated)                     |
+| `src/judgment/validators.ts`          | Pure-TS type guards over the literal arrays in `types.ts`, plus `validateStatement` / `validateScopeJson` / `validateImportance` / `validateConfidenceLabel` returning a tagged result. No DB / writer / repository surface in this PR. | implemented (schema/types only — not runtime-integrated)                     |
 
 ## Queue / orchestration
 

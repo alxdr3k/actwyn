@@ -22,7 +22,7 @@
 | Redaction at the persistence boundary             | implemented |
 | Memory summaries with provenance + confidence     | implemented |
 | Telegram attachment two-phase capture             | implemented |
-| DB-native AI-first Judgment System (Phase 1A+)    | planned     |
+| DB-native AI-first Judgment System (Phase 1A+)    | schema skeleton present (not runtime-wired) |
 | Vector / graph derived projections                | planned     |
 | second-brain repo as canonical runtime memory     | not planned (history/seed only) |
 | Obsidian / Markdown active write path             | not planned |
@@ -145,6 +145,13 @@ A short summary; the full file map lives in `docs/CODE_MAP.md`.
   `failed` / `delete_failed` rows only.
 
 ## Planned but not implemented
+
+As of this PR, the Judgment System schema skeleton (5 tables +
+FTS5 virtual table in `migrations/004_judgment_skeleton.sql`) and
+the `src/judgment/types.ts` / `src/judgment/validators.ts`
+types-and-validators module exist in tree, but no runtime writer,
+typed tool, Control Gate, or context-compiler wiring is
+implemented — those remain Phase 1A+ follow-ups.
 
 The DB-native AI-first Judgment System direction (ADR-0009 …
 ADR-0013, `docs/JUDGMENT_SYSTEM.md`) defines the following
