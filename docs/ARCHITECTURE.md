@@ -111,7 +111,9 @@ Detailed module / state-machine diagrams live in `docs/02_HLD.md`.
   `/var/lib/actwyn/actwyn.db` on prod).
 - **Architecture decisions** — `docs/adr/*` (ADR-0001 … ADR-0013
   accepted on `main`; ADR-0009 … ADR-0013 cover the Judgment System
-  direction but are not yet implemented).
+  direction; Phase 1A.1 schema/types/validators and Phase 1A.2
+  proposal repository/tool contract are partially implemented —
+  Phase 1A.3+ runtime wiring is not yet implemented).
 - **Tactical decisions and open questions** —
   `docs/08_DECISION_REGISTER.md`, `docs/07_QUESTIONS_REGISTER.md`
   (DEC-037 records the documentation lifecycle policy this set of
@@ -158,15 +160,20 @@ A short summary; the full file map lives in `docs/CODE_MAP.md`.
   orphan PIDs); offset fast-forward; one-shot `storage_sync` for
   `failed` / `delete_failed` rows only.
 
-## Planned but not implemented
+## Phase 1A current slice and planned architecture
 
-As of this PR (Phase 1A.1), the Judgment System schema skeleton
-(5 tables + FTS5 virtual table in
-`migrations/004_judgment_skeleton.sql`) and the
-`src/judgment/types.ts` / `src/judgment/validators.ts`
-types-and-validators module exist in tree. They are intentionally
-runtime-inert: no runtime writer, typed tool, Control Gate, or
-context-compiler wiring uses them yet.
+Phase 1A.1 landed the **judgment schema skeleton** (5 tables + FTS5
+virtual table in `migrations/004_judgment_skeleton.sql`) plus
+`src/judgment/types.ts` and `src/judgment/validators.ts`.
+
+Phase 1A.2 landed the **proposal-only write surface**:
+`src/judgment/repository.ts` (`proposeJudgment`) and the local
+**unregistered typed-tool contract** `src/judgment/tool.ts`
+(`judgment.propose`). The repository writes only rows with
+`lifecycle_status = proposed` / `approval_state = pending` /
+`activation_state = history_only`. No approval, activation,
+supersede, revoke, or expire write path exists. The tool is not
+registered in any runtime module.
 
 The DB-native AI-first Judgment System direction (ADR-0009 …
 ADR-0013, `docs/JUDGMENT_SYSTEM.md`) defines the following
@@ -174,8 +181,11 @@ components. The pieces below remain **not implemented**:
 
 - The Phase 1A schema skeleton (`judgment_sources`,
   `judgment_items`, `judgment_evidence_links`, `judgment_edges`,
-  `judgment_events`) **is now implemented** as schema-only in
-  migration 004; nothing under `src/` currently writes to it.
+  `judgment_events`) **is implemented** in migration 004.
+  `src/judgment/repository.ts` writes `judgment_items` and
+  `judgment_events` (proposal rows only). `judgment_sources`,
+  `judgment_evidence_links`, and `judgment_edges` have no runtime
+  writer yet.
 - `Control Gate` evaluators and the `control_gate_events` /
   `control_plane_events` ledger (the table name choice between the
   two is itself open per `docs/JUDGMENT_SYSTEM.md` §Implementation
@@ -204,12 +214,15 @@ components. The pieces below remain **not implemented**:
   `src/memory/*`, or `src/telegram/*`. The `judgment.propose` tool
   is not wired into any of these modules.
 
-These are listed here so AI coding agents do not mistake design
-documents for implemented behavior. Beyond Phase 1A.1's schema +
-types + validators landing, **Phase 1A implementation work
-remains future scope** — see `docs/RUNTIME.md` and
-`docs/DATA_MODEL.md` for how the schema sits next to the
-implemented runtime, and `docs/JUDGMENT_SYSTEM.md` §Implementation
+These are listed so AI coding agents do not mistake design
+documents for implemented behavior. Phase 1A.1 (schema + types +
+validators) and Phase 1A.2 (proposal repository + unregistered
+tool contract) have landed. **Phase 1A.3+ runtime wiring** —
+provider integration, context compiler, Control Gate, approval /
+activation workflows, memory promotion, Telegram, and commands —
+**remains future scope**. See `docs/RUNTIME.md` and
+`docs/DATA_MODEL.md` for how the implemented slice sits next to
+the runtime, and `docs/JUDGMENT_SYSTEM.md` §Implementation
 Readiness for the broader Phase 1A scope.
 
 ## Existing implementation re-classification (2026-04 salvage audit)
