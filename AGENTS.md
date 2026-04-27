@@ -71,14 +71,26 @@ Do not read `docs/design/archive/` by default. Those are history.
     `JUDGMENT_REJECT_TOOL` and `executeJudgmentApproveTool` /
     `executeJudgmentRejectTool`. These are **not runtime-wired**.
     Approval does **not** activate a judgment.
+  - **Phase 1A.4 (landed)**: `src/judgment/repository.ts` now also
+    exports `recordJudgmentSource` (writes `judgment_sources` +
+    `judgment_events`) and `linkJudgmentEvidence` (writes
+    `judgment_evidence_links`, updates denormalized arrays on
+    `judgment_items`, appends `judgment.evidence.linked` event).
+    `src/judgment/tool.ts` now also exports
+    `JUDGMENT_RECORD_SOURCE_TOOL` / `JUDGMENT_LINK_EVIDENCE_TOOL` and
+    `executeJudgmentRecordSourceTool` /
+    `executeJudgmentLinkEvidenceTool`. These are **not runtime-wired**.
+    Evidence linking does **not** activate, approve, or make a
+    judgment context-visible.
   - None of the judgment tools are **registered** anywhere in `src/`.
     They must not be imported from `src/main.ts`, `src/providers/*`,
     `src/context/*`, `src/queue/worker.ts`, `src/memory/*`,
     `src/telegram/*`, or `src/commands/*`.
-  - Do **not** implement Control Gate, Tension, ReflectionTriageEvent,
+  - Do **not** implement activation, commit, supersede, revoke, expire,
+    query, explain, Control Gate, Tension, ReflectionTriageEvent,
     `current_operating_view`, vector / graph projections, Critique Lens,
-    activation workflow, or any further runtime Judgment surface unless
-    the task explicitly authorizes them.
+    or any further runtime Judgment surface unless the task explicitly
+    authorizes them.
 
 ## When changing code
 

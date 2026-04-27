@@ -22,15 +22,23 @@ import {
   JudgmentStateError,
   JudgmentValidationError,
   approveProposedJudgment,
+  linkJudgmentEvidence,
   proposeJudgment,
+  recordJudgmentSource,
   rejectProposedJudgment,
   type ApproveInput,
+  type EvidenceLinkDeps,
+  type EvidenceLinkInput,
+  type LinkedEvidence,
   type ProposalDeps,
   type ProposalInput,
   type ProposedJudgment,
+  type RecordedSource,
   type RejectInput,
   type ReviewDeps,
   type ReviewedJudgment,
+  type SourceDeps,
+  type SourceInput,
 } from "~/judgment/repository.ts";
 
 // ---------------------------------------------------------------
@@ -52,6 +60,17 @@ export const JUDGMENT_REJECT_TOOL = {
   name: "judgment.reject" as const,
   description:
     "rejects a proposed judgment and excludes it from activation/context use",
+} as const;
+
+export const JUDGMENT_RECORD_SOURCE_TOOL = {
+  name: "judgment.record_source" as const,
+  description: "records a source row that may support later judgment evidence links",
+} as const;
+
+export const JUDGMENT_LINK_EVIDENCE_TOOL = {
+  name: "judgment.link_evidence" as const,
+  description:
+    "links an existing judgment to an existing judgment source as evidence, without activating the judgment",
 } as const;
 
 // ---------------------------------------------------------------
@@ -97,8 +116,43 @@ export type ReviewToolSuccess = {
 
 export type ReviewToolResult = ReviewToolSuccess | ReviewToolError;
 
+// ---------------------------------------------------------------
+// Source tool result types (Phase 1A.4)
+// ---------------------------------------------------------------
+
+export type SourceToolSuccess = {
+  readonly ok: true;
+  readonly source: RecordedSource;
+};
+
+export type SourceToolResult = SourceToolSuccess | ReviewToolError;
+
+// ---------------------------------------------------------------
+// Evidence-link tool result types (Phase 1A.4)
+// ---------------------------------------------------------------
+
+export type EvidenceLinkToolSuccess = {
+  readonly ok: true;
+  readonly evidence_link: LinkedEvidence;
+};
+
+export type EvidenceLinkToolResult = EvidenceLinkToolSuccess | ReviewToolError;
+
 // Re-export input/deps types so callers import from tool.ts only.
-export type { ProposalInput, ProposalDeps, ApproveInput, RejectInput, ReviewDeps, ReviewedJudgment };
+export type {
+  ProposalInput,
+  ProposalDeps,
+  ApproveInput,
+  RejectInput,
+  ReviewDeps,
+  ReviewedJudgment,
+  SourceInput,
+  SourceDeps,
+  RecordedSource,
+  EvidenceLinkInput,
+  EvidenceLinkDeps,
+  LinkedEvidence,
+};
 
 // ---------------------------------------------------------------
 // Propose executor
@@ -182,6 +236,40 @@ export function executeJudgmentRejectTool(
   try {
     const judgment = rejectProposedJudgment(db, input, deps);
     return { ok: true, judgment };
+  } catch (e) {
+    return mapReviewError(e);
+  }
+}
+
+// ---------------------------------------------------------------
+// Record-source executor (Phase 1A.4)
+// ---------------------------------------------------------------
+
+export function executeJudgmentRecordSourceTool(
+  db: DbHandle,
+  input: SourceInput,
+  deps?: SourceDeps,
+): SourceToolResult {
+  try {
+    const source = recordJudgmentSource(db, input, deps);
+    return { ok: true, source };
+  } catch (e) {
+    return mapReviewError(e);
+  }
+}
+
+// ---------------------------------------------------------------
+// Link-evidence executor (Phase 1A.4)
+// ---------------------------------------------------------------
+
+export function executeJudgmentLinkEvidenceTool(
+  db: DbHandle,
+  input: EvidenceLinkInput,
+  deps?: EvidenceLinkDeps,
+): EvidenceLinkToolResult {
+  try {
+    const evidence_link = linkJudgmentEvidence(db, input, deps);
+    return { ok: true, evidence_link };
   } catch (e) {
     return mapReviewError(e);
   }

@@ -15,11 +15,15 @@ import {
   JudgmentStateError,
   JudgmentValidationError,
   approveProposedJudgment,
+  linkJudgmentEvidence,
   proposeJudgment,
+  recordJudgmentSource,
   rejectProposedJudgment,
   type ApproveInput,
+  type EvidenceLinkInput,
   type ProposalInput,
   type RejectInput,
+  type SourceInput,
 } from "../../src/judgment/repository.ts";
 import { ONTOLOGY_VERSION, SCHEMA_VERSION } from "../../src/judgment/types.ts";
 
@@ -1210,5 +1214,796 @@ describe("rejectProposedJudgment — stateful toJSON payload", () => {
     const row = getFullItem(j.id)!;
     expect(row.approval_state).toBe("pending");
     expect(row.lifecycle_status).toBe("proposed");
+  });
+});
+
+// ---------------------------------------------------------------
+// Phase 1A.4 — recordJudgmentSource
+// ---------------------------------------------------------------
+
+interface SourceRow {
+  id: string;
+  kind: string;
+  locator: string;
+  content_hash: string | null;
+  trust_level: string;
+  redacted: number;
+  captured_at: string;
+}
+
+function getSource(id: string): SourceRow | null {
+  return db
+    .prepare<SourceRow, [string]>(
+      `SELECT id, kind, locator, content_hash, trust_level, redacted, captured_at
+       FROM judgment_sources WHERE id = ?`,
+    )
+    .get(id);
+}
+
+function countSources(): number {
+  return db
+    .prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_sources")
+    .get()!.n;
+}
+
+const validSourceInput: SourceInput = {
+  kind: "turn",
+  locator: "session:abc/turn:5",
+};
+
+describe("recordJudgmentSource — basic insert", () => {
+  test("inserts one row into judgment_sources", () => {
+    recordJudgmentSource(db, validSourceInput);
+    expect(countSources()).toBe(1);
+  });
+
+  test("result id is non-empty string", () => {
+    const s = recordJudgmentSource(db, validSourceInput);
+    expect(typeof s.id).toBe("string");
+    expect(s.id.length).toBeGreaterThan(0);
+  });
+
+  test("result event_type is judgment.source.recorded", () => {
+    const s = recordJudgmentSource(db, validSourceInput);
+    expect(s.event_type).toBe("judgment.source.recorded");
+  });
+
+  test("result event_id is non-empty string", () => {
+    const s = recordJudgmentSource(db, validSourceInput);
+    expect(typeof s.event_id).toBe("string");
+    expect(s.event_id.length).toBeGreaterThan(0);
+  });
+});
+
+describe("recordJudgmentSource — defaults", () => {
+  test("default trust_level is medium", () => {
+    const s = recordJudgmentSource(db, validSourceInput);
+    expect(s.trust_level).toBe("medium");
+    expect(getSource(s.id)!.trust_level).toBe("medium");
+  });
+
+  test("default redacted is true", () => {
+    const s = recordJudgmentSource(db, validSourceInput);
+    expect(s.redacted).toBe(true);
+    expect(getSource(s.id)!.redacted).toBe(1);
+  });
+
+  test("content_hash defaults to null", () => {
+    const s = recordJudgmentSource(db, validSourceInput);
+    expect(s.content_hash).toBeNull();
+  });
+});
+
+describe("recordJudgmentSource — trimming", () => {
+  test("kind is trimmed", () => {
+    const s = recordJudgmentSource(db, { ...validSourceInput, kind: "  turn  " });
+    expect(s.kind).toBe("turn");
+    expect(getSource(s.id)!.kind).toBe("turn");
+  });
+
+  test("locator is trimmed", () => {
+    const s = recordJudgmentSource(db, { ...validSourceInput, locator: "  session:abc  " });
+    expect(s.locator).toBe("session:abc");
+  });
+
+  test("content_hash is trimmed when supplied", () => {
+    const s = recordJudgmentSource(db, {
+      ...validSourceInput,
+      content_hash: "  abc123  ",
+    });
+    expect(s.content_hash).toBe("abc123");
+  });
+});
+
+describe("recordJudgmentSource — optional fields", () => {
+  test("explicit trust_level low is accepted", () => {
+    const s = recordJudgmentSource(db, { ...validSourceInput, trust_level: "low" });
+    expect(s.trust_level).toBe("low");
+  });
+
+  test("explicit trust_level high is accepted", () => {
+    const s = recordJudgmentSource(db, { ...validSourceInput, trust_level: "high" });
+    expect(s.trust_level).toBe("high");
+  });
+
+  test("explicit redacted false is persisted as 0", () => {
+    const s = recordJudgmentSource(db, { ...validSourceInput, redacted: false });
+    expect(s.redacted).toBe(false);
+    expect(getSource(s.id)!.redacted).toBe(0);
+  });
+
+  test("captured_at is returned when supplied", () => {
+    const ts = "2025-01-01T00:00:00.000Z";
+    const s = recordJudgmentSource(db, { ...validSourceInput, captured_at: ts });
+    expect(s.captured_at).toBe(ts);
+  });
+
+  test("payload is accepted and included in event payload_json", () => {
+    const s = recordJudgmentSource(db, {
+      ...validSourceInput,
+      payload: { extra: "data" },
+    });
+    const eventRow = db
+      .prepare<{ payload_json: string }, [string]>(
+        `SELECT payload_json FROM judgment_events WHERE id = ?`,
+      )
+      .get(s.event_id)!;
+    const ep = JSON.parse(eventRow.payload_json) as Record<string, unknown>;
+    expect(ep.payload).toEqual({ extra: "data" });
+  });
+});
+
+describe("recordJudgmentSource — validation rejections", () => {
+  function assertRejectedBeforeSourceInsert(input: SourceInput) {
+    const before = countSources();
+    expect(() => recordJudgmentSource(db, input)).toThrow(JudgmentValidationError);
+    expect(countSources()).toBe(before);
+  }
+
+  test("invalid kind (empty) is rejected before DB insert", () => {
+    assertRejectedBeforeSourceInsert({ ...validSourceInput, kind: "   " });
+  });
+
+  test("invalid locator (empty) is rejected before DB insert", () => {
+    assertRejectedBeforeSourceInsert({ ...validSourceInput, locator: "" });
+  });
+
+  test("invalid trust_level is rejected before DB insert", () => {
+    assertRejectedBeforeSourceInsert({
+      ...validSourceInput,
+      trust_level: "excellent",
+    } as SourceInput);
+  });
+
+  test("non-boolean redacted is rejected before DB insert", () => {
+    assertRejectedBeforeSourceInsert({
+      ...validSourceInput,
+      redacted: "yes" as unknown as boolean,
+    });
+  });
+
+  test("null payload is rejected before DB insert", () => {
+    assertRejectedBeforeSourceInsert({
+      ...validSourceInput,
+      payload: null as unknown as Record<string, unknown>,
+    });
+  });
+
+  test("array payload is rejected before DB insert", () => {
+    assertRejectedBeforeSourceInsert({
+      ...validSourceInput,
+      payload: [] as unknown as Record<string, unknown>,
+    });
+  });
+
+  test("primitive payload is rejected before DB insert", () => {
+    assertRejectedBeforeSourceInsert({
+      ...validSourceInput,
+      payload: 42 as unknown as Record<string, unknown>,
+    });
+  });
+
+  test("class instance payload is rejected before DB insert", () => {
+    assertRejectedBeforeSourceInsert({
+      ...validSourceInput,
+      payload: new Date() as unknown as Record<string, unknown>,
+    });
+  });
+
+  test("unserializable payload is rejected before DB insert", () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    assertRejectedBeforeSourceInsert({ ...validSourceInput, payload: circular });
+  });
+
+  test("null input is rejected as JudgmentValidationError", () => {
+    expect(() => recordJudgmentSource(db, null as never)).toThrow(JudgmentValidationError);
+  });
+});
+
+describe("recordJudgmentSource — event", () => {
+  test("appends one judgment.source.recorded event", () => {
+    const before = countEvents();
+    const s = recordJudgmentSource(db, validSourceInput);
+    expect(countEvents()).toBe(before + 1);
+    const eventRow = db
+      .prepare<{ event_type: string; judgment_id: string | null; payload_json: string }, [string]>(
+        `SELECT event_type, judgment_id, payload_json FROM judgment_events WHERE id = ?`,
+      )
+      .get(s.event_id)!;
+    expect(eventRow.event_type).toBe("judgment.source.recorded");
+    expect(eventRow.judgment_id).toBeNull();
+  });
+
+  test("source event payload_json is valid JSON", () => {
+    const s = recordJudgmentSource(db, validSourceInput);
+    const eventRow = db
+      .prepare<{ payload_json: string }, [string]>(
+        `SELECT payload_json FROM judgment_events WHERE id = ?`,
+      )
+      .get(s.event_id)!;
+    expect(() => JSON.parse(eventRow.payload_json)).not.toThrow();
+  });
+
+  test("source event payload contains source_id, kind, locator, trust_level, redacted", () => {
+    const s = recordJudgmentSource(db, validSourceInput);
+    const eventRow = db
+      .prepare<{ payload_json: string }, [string]>(
+        `SELECT payload_json FROM judgment_events WHERE id = ?`,
+      )
+      .get(s.event_id)!;
+    const ep = JSON.parse(eventRow.payload_json) as Record<string, unknown>;
+    expect(ep.source_id).toBe(s.id);
+    expect(ep.kind).toBe(s.kind);
+    expect(ep.locator).toBe(s.locator);
+    expect(ep.trust_level).toBe(s.trust_level);
+    expect(ep.redacted).toBe(s.redacted);
+  });
+});
+
+describe("recordJudgmentSource — rollback", () => {
+  test("if event insert fails, no source row remains", () => {
+    const before = countSources();
+    const beforeEvents = countEvents();
+    expect(() =>
+      recordJudgmentSource(db, validSourceInput, {
+        _injectEventInsertError: new Error("forced event failure"),
+      }),
+    ).toThrow("forced event failure");
+    expect(countSources()).toBe(before);
+    expect(countEvents()).toBe(beforeEvents);
+  });
+});
+
+// ---------------------------------------------------------------
+// Phase 1A.4 — linkJudgmentEvidence
+// ---------------------------------------------------------------
+
+interface LinkRow {
+  id: string;
+  judgment_id: string;
+  source_id: string;
+  relation: string;
+  span_locator: string | null;
+  quote_excerpt: string | null;
+  rationale: string | null;
+  created_at: string;
+}
+
+function getLink(id: string): LinkRow | null {
+  return db
+    .prepare<LinkRow, [string]>(
+      `SELECT id, judgment_id, source_id, relation, span_locator, quote_excerpt, rationale, created_at
+       FROM judgment_evidence_links WHERE id = ?`,
+    )
+    .get(id);
+}
+
+function countLinks(): number {
+  return db
+    .prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_evidence_links")
+    .get()!.n;
+}
+
+function makeProposedJudgment() {
+  return proposeJudgment(db, validInput);
+}
+
+function makeSource() {
+  return recordJudgmentSource(db, validSourceInput);
+}
+
+const validLinkInput: EvidenceLinkInput = {
+  judgment_id: "placeholder",
+  source_id: "placeholder",
+  relation: "supports",
+};
+
+describe("linkJudgmentEvidence — basic insert", () => {
+  test("inserts one row into judgment_evidence_links", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id });
+    expect(countLinks()).toBe(1);
+  });
+
+  test("result id is non-empty string", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    const lnk = linkJudgmentEvidence(db, {
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+    });
+    expect(typeof lnk.id).toBe("string");
+    expect(lnk.id.length).toBeGreaterThan(0);
+  });
+
+  test("result event_type is judgment.evidence.linked", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    const lnk = linkJudgmentEvidence(db, {
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+    });
+    expect(lnk.event_type).toBe("judgment.evidence.linked");
+  });
+
+  test("link row has correct judgment_id, source_id, relation", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    const lnk = linkJudgmentEvidence(db, {
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+    });
+    const row = getLink(lnk.id)!;
+    expect(row.judgment_id).toBe(j.id);
+    expect(row.source_id).toBe(s.id);
+    expect(row.relation).toBe("supports");
+  });
+});
+
+describe("linkJudgmentEvidence — target existence checks", () => {
+  test("missing judgment returns JudgmentNotFoundError", () => {
+    const s = makeSource();
+    expect(() =>
+      linkJudgmentEvidence(db, {
+        ...validLinkInput,
+        judgment_id: "nonexistent-j",
+        source_id: s.id,
+      }),
+    ).toThrow(JudgmentNotFoundError);
+  });
+
+  test("missing source returns JudgmentNotFoundError", () => {
+    const j = makeProposedJudgment();
+    expect(() =>
+      linkJudgmentEvidence(db, {
+        ...validLinkInput,
+        judgment_id: j.id,
+        source_id: "nonexistent-s",
+      }),
+    ).toThrow(JudgmentNotFoundError);
+  });
+});
+
+describe("linkJudgmentEvidence — state guards", () => {
+  test("proposed/pending/history_only judgment succeeds", () => {
+    const j = proposeJudgment(db, validInput);
+    const s = makeSource();
+    expect(() =>
+      linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id }),
+    ).not.toThrow();
+  });
+
+  test("proposed/approved/history_only judgment succeeds", () => {
+    const j = proposeJudgment(db, validInput);
+    approveProposedJudgment(db, { judgment_id: j.id, reviewer: "tester" });
+    const s = makeSource();
+    expect(() =>
+      linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id }),
+    ).not.toThrow();
+  });
+
+  test("rejected/excluded judgment fails with JudgmentStateError", () => {
+    const j = proposeJudgment(db, validInput);
+    rejectProposedJudgment(db, {
+      judgment_id: j.id,
+      reviewer: "tester",
+      reason: "not accurate",
+    });
+    const s = makeSource();
+    expect(() =>
+      linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("revoked judgment fails with JudgmentStateError", () => {
+    const j = proposeJudgment(db, validInput);
+    forceState(j.id, { lifecycle_status: "revoked", approval_state: "not_required" });
+    const s = makeSource();
+    expect(() =>
+      linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("superseded judgment fails with JudgmentStateError", () => {
+    const j = proposeJudgment(db, validInput);
+    forceState(j.id, { lifecycle_status: "superseded", approval_state: "not_required" });
+    const s = makeSource();
+    expect(() =>
+      linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("expired judgment fails with JudgmentStateError", () => {
+    const j = proposeJudgment(db, validInput);
+    forceState(j.id, { lifecycle_status: "expired", approval_state: "not_required" });
+    const s = makeSource();
+    expect(() =>
+      linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id }),
+    ).toThrow(JudgmentStateError);
+  });
+});
+
+describe("linkJudgmentEvidence — trimming", () => {
+  test("relation is trimmed", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    const lnk = linkJudgmentEvidence(db, {
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+      relation: "  supports  ",
+    });
+    expect(lnk.relation).toBe("supports");
+    expect(getLink(lnk.id)!.relation).toBe("supports");
+  });
+
+  test("span_locator is trimmed", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    const lnk = linkJudgmentEvidence(db, {
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+      span_locator: "  p.5  ",
+    });
+    expect(lnk.span_locator).toBe("p.5");
+  });
+
+  test("quote_excerpt is trimmed", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    const lnk = linkJudgmentEvidence(db, {
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+      quote_excerpt: "  some text  ",
+    });
+    expect(lnk.quote_excerpt).toBe("some text");
+  });
+
+  test("rationale is trimmed", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    const lnk = linkJudgmentEvidence(db, {
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+      rationale: "  because of x  ",
+    });
+    expect(lnk.rationale).toBe("because of x");
+  });
+});
+
+describe("linkJudgmentEvidence — validation rejections", () => {
+  function assertRejectedBeforeLinkInsert(input: EvidenceLinkInput) {
+    const before = countLinks();
+    expect(() => linkJudgmentEvidence(db, input)).toThrow(JudgmentValidationError);
+    expect(countLinks()).toBe(before);
+  }
+
+  test("invalid judgment_id (empty) is rejected before DB write", () => {
+    assertRejectedBeforeLinkInsert({ ...validLinkInput, judgment_id: "  " });
+  });
+
+  test("invalid source_id (empty) is rejected before DB write", () => {
+    assertRejectedBeforeLinkInsert({ ...validLinkInput, source_id: "" });
+  });
+
+  test("invalid relation (empty) is rejected before DB write", () => {
+    assertRejectedBeforeLinkInsert({ ...validLinkInput, relation: "" });
+  });
+
+  test("invalid span_locator (empty string) is rejected before DB write", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    assertRejectedBeforeLinkInsert({
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+      span_locator: "",
+    });
+  });
+
+  test("invalid quote_excerpt (empty string) is rejected before DB write", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    assertRejectedBeforeLinkInsert({
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+      quote_excerpt: "  ",
+    });
+  });
+
+  test("invalid rationale (empty string) is rejected before DB write", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    assertRejectedBeforeLinkInsert({
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+      rationale: "",
+    });
+  });
+
+  test("null payload is rejected before DB write", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    assertRejectedBeforeLinkInsert({
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+      payload: null as unknown as Record<string, unknown>,
+    });
+  });
+
+  test("array payload is rejected before DB write", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    assertRejectedBeforeLinkInsert({
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+      payload: [] as unknown as Record<string, unknown>,
+    });
+  });
+
+  test("primitive payload is rejected before DB write", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    assertRejectedBeforeLinkInsert({
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+      payload: "string" as unknown as Record<string, unknown>,
+    });
+  });
+
+  test("class instance payload is rejected before DB write", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    assertRejectedBeforeLinkInsert({
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+      payload: new Date() as unknown as Record<string, unknown>,
+    });
+  });
+
+  test("unserializable payload is rejected before DB write", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    assertRejectedBeforeLinkInsert({
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+      payload: circular,
+    });
+  });
+});
+
+describe("linkJudgmentEvidence — event", () => {
+  test("appends one judgment.evidence.linked event", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    const before = countEvents(j.id);
+    const lnk = linkJudgmentEvidence(db, {
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+    });
+    expect(countEvents(j.id)).toBe(before + 1);
+    const eventRow = db
+      .prepare<{ event_type: string; judgment_id: string | null }, [string]>(
+        `SELECT event_type, judgment_id FROM judgment_events WHERE id = ?`,
+      )
+      .get(lnk.event_id)!;
+    expect(eventRow.event_type).toBe("judgment.evidence.linked");
+    expect(eventRow.judgment_id).toBe(j.id);
+  });
+
+  test("event payload_json is valid JSON", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    const lnk = linkJudgmentEvidence(db, {
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+    });
+    const eventRow = db
+      .prepare<{ payload_json: string }, [string]>(
+        `SELECT payload_json FROM judgment_events WHERE id = ?`,
+      )
+      .get(lnk.event_id)!;
+    expect(() => JSON.parse(eventRow.payload_json)).not.toThrow();
+  });
+
+  test("event payload contains evidence_link_id, judgment_id, source_id, relation", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    const lnk = linkJudgmentEvidence(db, {
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+    });
+    const eventRow = db
+      .prepare<{ payload_json: string }, [string]>(
+        `SELECT payload_json FROM judgment_events WHERE id = ?`,
+      )
+      .get(lnk.event_id)!;
+    const ep = JSON.parse(eventRow.payload_json) as Record<string, unknown>;
+    expect(ep.evidence_link_id).toBe(lnk.id);
+    expect(ep.judgment_id).toBe(j.id);
+    expect(ep.source_id).toBe(s.id);
+    expect(ep.relation).toBe("supports");
+  });
+});
+
+describe("linkJudgmentEvidence — denormalized JSON arrays", () => {
+  test("source_ids_json is updated to include source_id exactly once", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id });
+    const row = db
+      .prepare<{ source_ids_json: string }, [string]>(
+        `SELECT source_ids_json FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!;
+    const arr = JSON.parse(row.source_ids_json) as string[];
+    expect(arr).toContain(s.id);
+    expect(arr.filter((x) => x === s.id).length).toBe(1);
+  });
+
+  test("evidence_ids_json is updated to include evidence link id exactly once", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    const lnk = linkJudgmentEvidence(db, {
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+    });
+    const row = db
+      .prepare<{ evidence_ids_json: string }, [string]>(
+        `SELECT evidence_ids_json FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!;
+    const arr = JSON.parse(row.evidence_ids_json) as string[];
+    expect(arr).toContain(lnk.id);
+    expect(arr.filter((x) => x === lnk.id).length).toBe(1);
+  });
+
+  test("second link from different source does not duplicate first source_id in source_ids_json", () => {
+    const j = makeProposedJudgment();
+    const s1 = makeSource();
+    const s2 = recordJudgmentSource(db, { kind: "external_url", locator: "https://example.com" });
+    linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s1.id });
+    linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s2.id });
+    const row = db
+      .prepare<{ source_ids_json: string }, [string]>(
+        `SELECT source_ids_json FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!;
+    const arr = JSON.parse(row.source_ids_json) as string[];
+    expect(arr.filter((x) => x === s1.id).length).toBe(1);
+    expect(arr.filter((x) => x === s2.id).length).toBe(1);
+  });
+
+  test("linking same source twice does not duplicate source in source_ids_json", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id });
+    linkJudgmentEvidence(db, {
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+      relation: "contextualizes",
+    });
+    const row = db
+      .prepare<{ source_ids_json: string }, [string]>(
+        `SELECT source_ids_json FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!;
+    const arr = JSON.parse(row.source_ids_json) as string[];
+    expect(arr.filter((x) => x === s.id).length).toBe(1);
+  });
+});
+
+describe("linkJudgmentEvidence — judgment state invariants", () => {
+  test("evidence linking does not activate the judgment", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id });
+    const row = getFullItem(j.id)!;
+    expect(row.lifecycle_status).toBe("proposed");
+    expect(row.activation_state).toBe("history_only");
+    expect(row.authority_source).toBe("none");
+  });
+
+  test("evidence linking does not approve or reject the judgment", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id });
+    const row = getFullItem(j.id)!;
+    expect(row.approval_state).toBe("pending");
+  });
+
+  test("evidence linking bumps updated_at on judgment_items", () => {
+    const j = makeProposedJudgment();
+    const before = getFullItem(j.id)!.updated_at;
+    const s = makeSource();
+    linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id });
+    const after = getFullItem(j.id)!.updated_at;
+    expect(after >= before).toBe(true);
+  });
+});
+
+describe("linkJudgmentEvidence — rollback", () => {
+  test("if event insert fails, no link row remains", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    const before = countLinks();
+    const beforeEvents = countEvents(j.id);
+    expect(() =>
+      linkJudgmentEvidence(
+        db,
+        { ...validLinkInput, judgment_id: j.id, source_id: s.id },
+        { _injectEventInsertError: new Error("forced event failure") },
+      ),
+    ).toThrow("forced event failure");
+    expect(countLinks()).toBe(before);
+    expect(countEvents(j.id)).toBe(beforeEvents);
+  });
+
+  test("rollback also reverts source_ids_json and evidence_ids_json updates", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    const beforeRow = db
+      .prepare<{ source_ids_json: string | null; evidence_ids_json: string | null }, [string]>(
+        `SELECT source_ids_json, evidence_ids_json FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!;
+
+    expect(() =>
+      linkJudgmentEvidence(
+        db,
+        { ...validLinkInput, judgment_id: j.id, source_id: s.id },
+        { _injectEventInsertError: new Error("forced") },
+      ),
+    ).toThrow("forced");
+
+    const afterRow = db
+      .prepare<{ source_ids_json: string | null; evidence_ids_json: string | null }, [string]>(
+        `SELECT source_ids_json, evidence_ids_json FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!;
+    expect(afterRow.source_ids_json).toEqual(beforeRow.source_ids_json);
+    expect(afterRow.evidence_ids_json).toEqual(beforeRow.evidence_ids_json);
   });
 });

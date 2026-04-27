@@ -93,6 +93,14 @@ export const CONFIDENCES = ["low", "medium", "high"] as const;
 export type Confidence = (typeof CONFIDENCES)[number];
 
 // ---------------------------------------------------------------
+// trust_level (judgment_sources column — same value set as
+// confidence but semantically distinct: describes how much the
+// agent trusts the ingestion source, not the judgment itself).
+// ---------------------------------------------------------------
+export const TRUST_LEVELS = ["low", "medium", "high"] as const;
+export type TrustLevel = (typeof TRUST_LEVELS)[number];
+
+// ---------------------------------------------------------------
 // decay_policy (ADR-0011, DEC-027, P0.5 — 2 values)
 // `time_decay` / `verification_decay` / `event_driven` are P1+.
 // ---------------------------------------------------------------

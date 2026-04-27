@@ -15,16 +15,22 @@ import { openDatabase, type DbHandle } from "../../src/db.ts";
 import { migrate } from "../../src/db/migrator.ts";
 import {
   JUDGMENT_APPROVE_TOOL,
+  JUDGMENT_LINK_EVIDENCE_TOOL,
   JUDGMENT_PROPOSE_TOOL,
+  JUDGMENT_RECORD_SOURCE_TOOL,
   JUDGMENT_REJECT_TOOL,
   executeJudgmentApproveTool,
+  executeJudgmentLinkEvidenceTool,
   executeJudgmentProposeTool,
+  executeJudgmentRecordSourceTool,
   executeJudgmentRejectTool,
   type ApproveInput,
+  type EvidenceLinkInput,
   type ProposalInput,
   type RejectInput,
+  type SourceInput,
 } from "../../src/judgment/tool.ts";
-import { proposeJudgment } from "../../src/judgment/repository.ts";
+import { proposeJudgment, recordJudgmentSource } from "../../src/judgment/repository.ts";
 
 const MIGRATIONS_DIR = join(import.meta.dir, "..", "..", "migrations");
 const SRC_DIR = join(import.meta.dir, "..", "..", "src");
@@ -396,6 +402,243 @@ describe("executeJudgmentRejectTool — error path", () => {
 });
 
 // ---------------------------------------------------------------
+// Phase 1A.4 — record_source tool constants
+// ---------------------------------------------------------------
+
+describe("JUDGMENT_RECORD_SOURCE_TOOL", () => {
+  test("tool contract name is judgment.record_source", () => {
+    expect(JUDGMENT_RECORD_SOURCE_TOOL.name).toBe("judgment.record_source");
+  });
+
+  test("tool has a description string", () => {
+    expect(typeof JUDGMENT_RECORD_SOURCE_TOOL.description).toBe("string");
+    expect(JUDGMENT_RECORD_SOURCE_TOOL.description.length).toBeGreaterThan(0);
+  });
+});
+
+describe("JUDGMENT_LINK_EVIDENCE_TOOL", () => {
+  test("tool contract name is judgment.link_evidence", () => {
+    expect(JUDGMENT_LINK_EVIDENCE_TOOL.name).toBe("judgment.link_evidence");
+  });
+
+  test("tool has a description string", () => {
+    expect(typeof JUDGMENT_LINK_EVIDENCE_TOOL.description).toBe("string");
+    expect(JUDGMENT_LINK_EVIDENCE_TOOL.description.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------
+// Phase 1A.4 — record_source executor
+// ---------------------------------------------------------------
+
+const validSourceInput: SourceInput = {
+  kind: "turn",
+  locator: "session:abc/turn:5",
+};
+
+describe("executeJudgmentRecordSourceTool — happy path", () => {
+  test("valid source input returns ok: true with source result", () => {
+    const result = executeJudgmentRecordSourceTool(db, validSourceInput);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.source.id).toBeTruthy();
+      expect(result.source.event_type).toBe("judgment.source.recorded");
+      expect(result.source.trust_level).toBe("medium");
+      expect(result.source.redacted).toBe(true);
+    }
+  });
+
+  test("successful tool does not activate any judgment rows", () => {
+    executeJudgmentRecordSourceTool(db, validSourceInput);
+    const rows = db
+      .prepare<{ n: number }, never[]>(
+        `SELECT COUNT(*) as n FROM judgment_items WHERE activation_state = 'eligible'`,
+      )
+      .get()!.n;
+    expect(rows).toBe(0);
+  });
+});
+
+describe("executeJudgmentRecordSourceTool — error path", () => {
+  test("invalid source input (empty kind) returns ok: false with validation_error", () => {
+    const result = executeJudgmentRecordSourceTool(db, { ...validSourceInput, kind: "" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("validation_error");
+    }
+  });
+
+  test("null input returns ok: false (not uncaught TypeError)", () => {
+    const result = executeJudgmentRecordSourceTool(db, null as never);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("validation_error");
+    }
+  });
+
+  test("invalid tool call does not write judgment_sources", () => {
+    const before = db
+      .prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_sources")
+      .get()!.n;
+    executeJudgmentRecordSourceTool(db, { ...validSourceInput, locator: "" });
+    const after = db
+      .prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_sources")
+      .get()!.n;
+    expect(after).toBe(before);
+  });
+
+  test("invalid tool call does not write judgment_events", () => {
+    const before = db
+      .prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_events")
+      .get()!.n;
+    executeJudgmentRecordSourceTool(db, { ...validSourceInput, trust_level: "excellent" } as never);
+    const after = db
+      .prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_events")
+      .get()!.n;
+    expect(after).toBe(before);
+  });
+});
+
+// ---------------------------------------------------------------
+// Phase 1A.4 — link_evidence executor
+// ---------------------------------------------------------------
+
+const validLinkInput: EvidenceLinkInput = {
+  judgment_id: "placeholder",
+  source_id: "placeholder",
+  relation: "supports",
+};
+
+describe("executeJudgmentLinkEvidenceTool — happy path", () => {
+  test("valid evidence link input returns ok: true with evidence_link result", () => {
+    const j = proposeJudgment(db, validInput);
+    const s = recordJudgmentSource(db, validSourceInput);
+    const result = executeJudgmentLinkEvidenceTool(db, {
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.evidence_link.id).toBeTruthy();
+      expect(result.evidence_link.event_type).toBe("judgment.evidence.linked");
+      expect(result.evidence_link.judgment_id).toBe(j.id);
+      expect(result.evidence_link.source_id).toBe(s.id);
+    }
+  });
+
+  test("successful tool does not activate the judgment", () => {
+    const j = proposeJudgment(db, validInput);
+    const s = recordJudgmentSource(db, validSourceInput);
+    executeJudgmentLinkEvidenceTool(db, {
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+    });
+    const row = db
+      .prepare<{ lifecycle_status: string; activation_state: string }, [string]>(
+        `SELECT lifecycle_status, activation_state FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!;
+    expect(row.lifecycle_status).toBe("proposed");
+    expect(row.activation_state).toBe("history_only");
+  });
+});
+
+describe("executeJudgmentLinkEvidenceTool — error path", () => {
+  test("invalid evidence link input (empty relation) returns ok: false with validation_error", () => {
+    const j = proposeJudgment(db, validInput);
+    const s = recordJudgmentSource(db, validSourceInput);
+    const result = executeJudgmentLinkEvidenceTool(db, {
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+      relation: "",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("validation_error");
+    }
+  });
+
+  test("missing judgment returns ok: false with not_found", () => {
+    const s = recordJudgmentSource(db, validSourceInput);
+    const result = executeJudgmentLinkEvidenceTool(db, {
+      ...validLinkInput,
+      judgment_id: "nonexistent",
+      source_id: s.id,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("not_found");
+    }
+  });
+
+  test("missing source returns ok: false with not_found", () => {
+    const j = proposeJudgment(db, validInput);
+    const result = executeJudgmentLinkEvidenceTool(db, {
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: "nonexistent-source",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("not_found");
+    }
+  });
+
+  test("invalid judgment state (rejected) returns ok: false with invalid_state", () => {
+    const j = proposeJudgment(db, validInput);
+    // reject it
+    executeJudgmentRejectTool(db, {
+      judgment_id: j.id,
+      reviewer: "tester",
+      reason: "wrong",
+    });
+    const s = recordJudgmentSource(db, validSourceInput);
+    const result = executeJudgmentLinkEvidenceTool(db, {
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("invalid_state");
+    }
+  });
+
+  test("failed link tool call does not write judgment_evidence_links", () => {
+    const before = db
+      .prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_evidence_links")
+      .get()!.n;
+    executeJudgmentLinkEvidenceTool(db, {
+      ...validLinkInput,
+      judgment_id: "nonexistent",
+      source_id: "nonexistent",
+    });
+    const after = db
+      .prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_evidence_links")
+      .get()!.n;
+    expect(after).toBe(before);
+  });
+
+  test("failed link tool call does not append events", () => {
+    const before = db
+      .prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_events")
+      .get()!.n;
+    executeJudgmentLinkEvidenceTool(db, {
+      ...validLinkInput,
+      judgment_id: "nonexistent",
+      source_id: "nonexistent",
+    });
+    const after = db
+      .prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_events")
+      .get()!.n;
+    expect(after).toBe(before);
+  });
+});
+
+// ---------------------------------------------------------------
 // Static boundary tests
 // ---------------------------------------------------------------
 
@@ -420,6 +663,8 @@ describe("static boundary — judgment tools not registered", () => {
     /['"]judgment\.propose['"]/,
     /['"]judgment\.approve['"]/,
     /['"]judgment\.reject['"]/,
+    /['"]judgment\.record_source['"]/,
+    /['"]judgment\.link_evidence['"]/,
   ];
 
   function checkDir(dirName: string): void {
