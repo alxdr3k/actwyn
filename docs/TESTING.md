@@ -1,7 +1,7 @@
 # Testing
 
 > Status: thin current-state map · Owner: project lead ·
-> Last updated: 2026-04-26
+> Last updated: 2026-04-27
 >
 > Commands listed here are the ones present in `package.json` and
 > `scripts/`. Do not invent commands; if you need a new one, add it
@@ -115,7 +115,9 @@ and commit surface tests (Phase 1A.2/1A.3/1A.4/1A.5) live under:
   event, denormalized JSON array updates, rollback;
   `commitApprovedJudgment` success (state transition, event payload,
   evidence requirement, denormalized array sync), invalid state guards,
-  validation rejections, transaction rollback (Phase 1A.3/1A.4/1A.5).
+  malformed denormalized array element guards (invalid element types
+  [123]/[null]/[{}]/[""] fail before update), validation rejections,
+  transaction rollback (Phase 1A.3/1A.4/1A.5).
 - `test/judgment/tool.test.ts` — `executeJudgmentProposeTool` /
   `executeJudgmentApproveTool` / `executeJudgmentRejectTool` /
   `executeJudgmentRecordSourceTool` /

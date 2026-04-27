@@ -2516,6 +2516,257 @@ describe("commitApprovedJudgment — invalid state", () => {
   });
 });
 
+describe("commitApprovedJudgment — malformed denormalized array elements", () => {
+  function getRow(id: string) {
+    return db
+      .prepare<
+        {
+          lifecycle_status: string;
+          activation_state: string;
+          authority_source: string;
+          source_ids_json: string | null;
+          evidence_ids_json: string | null;
+        },
+        [string]
+      >(
+        `SELECT lifecycle_status, activation_state, authority_source,
+                source_ids_json, evidence_ids_json
+         FROM judgment_items WHERE id = ?`,
+      )
+      .get(id)!;
+  }
+
+  // source_ids_json invalid element types
+
+  test("source_ids_json = [123] throws JudgmentValidationError", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET source_ids_json = '[123]' WHERE id = ?`).run(j.id);
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }),
+    ).toThrow(JudgmentValidationError);
+  });
+
+  test("source_ids_json = [123] leaves lifecycle_status = proposed", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET source_ids_json = '[123]' WHERE id = ?`).run(j.id);
+    try { commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }); } catch {}
+    expect(getRow(j.id).lifecycle_status).toBe("proposed");
+  });
+
+  test("source_ids_json = [123] leaves activation_state = history_only", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET source_ids_json = '[123]' WHERE id = ?`).run(j.id);
+    try { commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }); } catch {}
+    expect(getRow(j.id).activation_state).toBe("history_only");
+  });
+
+  test("source_ids_json = [123] leaves authority_source = none", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET source_ids_json = '[123]' WHERE id = ?`).run(j.id);
+    try { commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }); } catch {}
+    expect(getRow(j.id).authority_source).toBe("none");
+  });
+
+  test("source_ids_json = [123] does not append judgment.committed event", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET source_ids_json = '[123]' WHERE id = ?`).run(j.id);
+    const before = countEvents(j.id);
+    try { commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }); } catch {}
+    expect(countEvents(j.id)).toBe(before);
+  });
+
+  test("source_ids_json = [123] does not mutate source_ids_json", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET source_ids_json = '[123]' WHERE id = ?`).run(j.id);
+    try { commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }); } catch {}
+    expect(getRow(j.id).source_ids_json).toBe("[123]");
+  });
+
+  test("source_ids_json = [null] throws JudgmentValidationError", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET source_ids_json = '[null]' WHERE id = ?`).run(j.id);
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }),
+    ).toThrow(JudgmentValidationError);
+  });
+
+  test("source_ids_json = [null] leaves lifecycle_status = proposed", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET source_ids_json = '[null]' WHERE id = ?`).run(j.id);
+    try { commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }); } catch {}
+    expect(getRow(j.id).lifecycle_status).toBe("proposed");
+  });
+
+  test("source_ids_json = [null] does not append judgment.committed event", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET source_ids_json = '[null]' WHERE id = ?`).run(j.id);
+    const before = countEvents(j.id);
+    try { commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }); } catch {}
+    expect(countEvents(j.id)).toBe(before);
+  });
+
+  test("source_ids_json = [{}] throws JudgmentValidationError", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET source_ids_json = '[{}]' WHERE id = ?`).run(j.id);
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }),
+    ).toThrow(JudgmentValidationError);
+  });
+
+  test("source_ids_json = [{}] leaves lifecycle_status = proposed", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET source_ids_json = '[{}]' WHERE id = ?`).run(j.id);
+    try { commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }); } catch {}
+    expect(getRow(j.id).lifecycle_status).toBe("proposed");
+  });
+
+  test("source_ids_json = [{}] does not append judgment.committed event", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET source_ids_json = '[{}]' WHERE id = ?`).run(j.id);
+    const before = countEvents(j.id);
+    try { commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }); } catch {}
+    expect(countEvents(j.id)).toBe(before);
+  });
+
+  test('source_ids_json = [""] throws JudgmentValidationError', () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET source_ids_json = '[""]' WHERE id = ?`).run(j.id);
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }),
+    ).toThrow(JudgmentValidationError);
+  });
+
+  test('source_ids_json = [""] leaves lifecycle_status = proposed', () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET source_ids_json = '[""]' WHERE id = ?`).run(j.id);
+    try { commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }); } catch {}
+    expect(getRow(j.id).lifecycle_status).toBe("proposed");
+  });
+
+  test('source_ids_json = [""] does not append judgment.committed event', () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET source_ids_json = '[""]' WHERE id = ?`).run(j.id);
+    const before = countEvents(j.id);
+    try { commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }); } catch {}
+    expect(countEvents(j.id)).toBe(before);
+  });
+
+  // evidence_ids_json invalid element types
+
+  test("evidence_ids_json = [123] throws JudgmentValidationError", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET evidence_ids_json = '[123]' WHERE id = ?`).run(j.id);
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }),
+    ).toThrow(JudgmentValidationError);
+  });
+
+  test("evidence_ids_json = [123] leaves lifecycle_status = proposed", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET evidence_ids_json = '[123]' WHERE id = ?`).run(j.id);
+    try { commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }); } catch {}
+    expect(getRow(j.id).lifecycle_status).toBe("proposed");
+  });
+
+  test("evidence_ids_json = [123] leaves activation_state = history_only", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET evidence_ids_json = '[123]' WHERE id = ?`).run(j.id);
+    try { commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }); } catch {}
+    expect(getRow(j.id).activation_state).toBe("history_only");
+  });
+
+  test("evidence_ids_json = [123] leaves authority_source = none", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET evidence_ids_json = '[123]' WHERE id = ?`).run(j.id);
+    try { commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }); } catch {}
+    expect(getRow(j.id).authority_source).toBe("none");
+  });
+
+  test("evidence_ids_json = [123] does not append judgment.committed event", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET evidence_ids_json = '[123]' WHERE id = ?`).run(j.id);
+    const before = countEvents(j.id);
+    try { commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }); } catch {}
+    expect(countEvents(j.id)).toBe(before);
+  });
+
+  test("evidence_ids_json = [123] does not mutate evidence_ids_json", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET evidence_ids_json = '[123]' WHERE id = ?`).run(j.id);
+    try { commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }); } catch {}
+    expect(getRow(j.id).evidence_ids_json).toBe("[123]");
+  });
+
+  test("evidence_ids_json = [null] throws JudgmentValidationError", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET evidence_ids_json = '[null]' WHERE id = ?`).run(j.id);
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }),
+    ).toThrow(JudgmentValidationError);
+  });
+
+  test("evidence_ids_json = [null] leaves lifecycle_status = proposed", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET evidence_ids_json = '[null]' WHERE id = ?`).run(j.id);
+    try { commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }); } catch {}
+    expect(getRow(j.id).lifecycle_status).toBe("proposed");
+  });
+
+  test("evidence_ids_json = [null] does not append judgment.committed event", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET evidence_ids_json = '[null]' WHERE id = ?`).run(j.id);
+    const before = countEvents(j.id);
+    try { commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }); } catch {}
+    expect(countEvents(j.id)).toBe(before);
+  });
+
+  test("evidence_ids_json = [{}] throws JudgmentValidationError", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET evidence_ids_json = '[{}]' WHERE id = ?`).run(j.id);
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }),
+    ).toThrow(JudgmentValidationError);
+  });
+
+  test("evidence_ids_json = [{}] leaves lifecycle_status = proposed", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET evidence_ids_json = '[{}]' WHERE id = ?`).run(j.id);
+    try { commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }); } catch {}
+    expect(getRow(j.id).lifecycle_status).toBe("proposed");
+  });
+
+  test("evidence_ids_json = [{}] does not append judgment.committed event", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET evidence_ids_json = '[{}]' WHERE id = ?`).run(j.id);
+    const before = countEvents(j.id);
+    try { commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }); } catch {}
+    expect(countEvents(j.id)).toBe(before);
+  });
+
+  test('evidence_ids_json = [""] throws JudgmentValidationError', () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET evidence_ids_json = '[""]' WHERE id = ?`).run(j.id);
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }),
+    ).toThrow(JudgmentValidationError);
+  });
+
+  test('evidence_ids_json = [""] leaves lifecycle_status = proposed', () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET evidence_ids_json = '[""]' WHERE id = ?`).run(j.id);
+    try { commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }); } catch {}
+    expect(getRow(j.id).lifecycle_status).toBe("proposed");
+  });
+
+  test('evidence_ids_json = [""] does not append judgment.committed event', () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET evidence_ids_json = '[""]' WHERE id = ?`).run(j.id);
+    const before = countEvents(j.id);
+    try { commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }); } catch {}
+    expect(countEvents(j.id)).toBe(before);
+  });
+});
+
 describe("commitApprovedJudgment — transaction rollback", () => {
   test("if event insert fails, lifecycle_status rolls back", () => {
     const { j } = makeApprovedJudgmentWithEvidence();

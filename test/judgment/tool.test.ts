@@ -888,6 +888,84 @@ describe("executeJudgmentCommitTool — error paths", () => {
       .get()!.n;
     expect(after).toBe(before);
   });
+
+  test("source_ids_json = [123] returns ok false with validation_error", () => {
+    const { j } = makeApprovedJudgmentWithEvidence(db);
+    db.prepare(`UPDATE judgment_items SET source_ids_json = '[123]' WHERE id = ?`).run(j.id);
+    const result = executeJudgmentCommitTool(db, { ...validCommitInput, judgment_id: j.id });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("validation_error");
+    }
+  });
+
+  test("source_ids_json = [123] does not update lifecycle_status", () => {
+    const { j } = makeApprovedJudgmentWithEvidence(db);
+    db.prepare(`UPDATE judgment_items SET source_ids_json = '[123]' WHERE id = ?`).run(j.id);
+    executeJudgmentCommitTool(db, { ...validCommitInput, judgment_id: j.id });
+    const row = db
+      .prepare<{ lifecycle_status: string }, [string]>(
+        `SELECT lifecycle_status FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!;
+    expect(row.lifecycle_status).toBe("proposed");
+  });
+
+  test("source_ids_json = [123] does not append judgment.committed event", () => {
+    const { j } = makeApprovedJudgmentWithEvidence(db);
+    db.prepare(`UPDATE judgment_items SET source_ids_json = '[123]' WHERE id = ?`).run(j.id);
+    const before = db
+      .prepare<{ n: number }, [string]>(
+        `SELECT COUNT(*) as n FROM judgment_events WHERE judgment_id = ?`,
+      )
+      .get(j.id)!.n;
+    executeJudgmentCommitTool(db, { ...validCommitInput, judgment_id: j.id });
+    const after = db
+      .prepare<{ n: number }, [string]>(
+        `SELECT COUNT(*) as n FROM judgment_events WHERE judgment_id = ?`,
+      )
+      .get(j.id)!.n;
+    expect(after).toBe(before);
+  });
+
+  test("evidence_ids_json = [123] returns ok false with validation_error", () => {
+    const { j } = makeApprovedJudgmentWithEvidence(db);
+    db.prepare(`UPDATE judgment_items SET evidence_ids_json = '[123]' WHERE id = ?`).run(j.id);
+    const result = executeJudgmentCommitTool(db, { ...validCommitInput, judgment_id: j.id });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("validation_error");
+    }
+  });
+
+  test("evidence_ids_json = [123] does not update lifecycle_status", () => {
+    const { j } = makeApprovedJudgmentWithEvidence(db);
+    db.prepare(`UPDATE judgment_items SET evidence_ids_json = '[123]' WHERE id = ?`).run(j.id);
+    executeJudgmentCommitTool(db, { ...validCommitInput, judgment_id: j.id });
+    const row = db
+      .prepare<{ lifecycle_status: string }, [string]>(
+        `SELECT lifecycle_status FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!;
+    expect(row.lifecycle_status).toBe("proposed");
+  });
+
+  test("evidence_ids_json = [123] does not append judgment.committed event", () => {
+    const { j } = makeApprovedJudgmentWithEvidence(db);
+    db.prepare(`UPDATE judgment_items SET evidence_ids_json = '[123]' WHERE id = ?`).run(j.id);
+    const before = db
+      .prepare<{ n: number }, [string]>(
+        `SELECT COUNT(*) as n FROM judgment_events WHERE judgment_id = ?`,
+      )
+      .get(j.id)!.n;
+    executeJudgmentCommitTool(db, { ...validCommitInput, judgment_id: j.id });
+    const after = db
+      .prepare<{ n: number }, [string]>(
+        `SELECT COUNT(*) as n FROM judgment_events WHERE judgment_id = ?`,
+      )
+      .get(j.id)!.n;
+    expect(after).toBe(before);
+  });
 });
 
 // ---------------------------------------------------------------

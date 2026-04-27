@@ -98,9 +98,13 @@ landed (see table below):
 - **Phase 1A.4**: source recording + evidence-link repository + unregistered
   `judgment.record_source` / `judgment.link_evidence` tool contracts. Evidence linking
   does **not** activate or approve.
+- **Phase 1A.5**: commit/activation repository + unregistered `judgment.commit` tool
+  contract. Commit requires approved+evidence; sets `lifecycle_status=active` /
+  `activation_state=eligible` / `authority_source=user_confirmed`. Active/eligible rows
+  can now exist in DB. Runtime context does not read them.
 
-No activation workflow, commit/supersede/revoke/expire/query/explain workflow, Control
-Gate, Context Compiler integration, or provider runtime wiring is implemented.
+No supersede/revoke/expire/query/explain workflow, Control Gate, Context Compiler
+integration, or provider runtime wiring is implemented.
 See `docs/DATA_MODEL.md` and `docs/RUNTIME.md`.
 
 ## Judgment (Phase 1A.5 — schema + proposal + review + source/evidence-link + commit/activation repository + typed-tool contracts)
@@ -168,8 +172,8 @@ See `docs/DATA_MODEL.md` and `docs/RUNTIME.md`.
 | `test/db/judgment_schema.test.ts`                 | Judgment schema CHECK / NOT NULL / JSON / FTS5 trigger coverage (Phase 1A.1).    |
 | `test/events.test.ts`                             | Event emitter contract.                                                          |
 | `test/judgment/validators.test.ts`                | Pure-TS validator type guards + field validator behavior including `validateNonEmptyString` / `validatePlainJsonObject` / `validateTrustLevel` / `validateOptionalNonEmptyString` (Phase 1A.1/1A.2/1A.3/1A.4). |
-| `test/judgment/repository.test.ts`                | Proposal repository insert, defaults, validation rejections, FTS trigger, transaction rollback; approve/reject review transitions, event payloads, state guards, rollback; source recording insert, defaults, trimming, event, rollback; evidence linking insert, state guards, trimming, event, denormalized JSON arrays, rollback; commit success (state transition, event, evidence requirement, denormalized array sync), invalid state guards, transaction rollback (Phase 1A.2/1A.3/1A.4/1A.5). |
-| `test/judgment/tool.test.ts`                      | Typed-tool contract constants, executor happy/error paths, static boundary assertions for `judgment.propose`, `judgment.approve`, `judgment.reject`, `judgment.record_source`, `judgment.link_evidence`, `judgment.commit` (Phase 1A.2/1A.3/1A.4/1A.5). |
+| `test/judgment/repository.test.ts`                | Proposal repository insert, defaults, validation rejections, FTS trigger, transaction rollback; approve/reject review transitions, event payloads, state guards, rollback; source recording insert, defaults, trimming, event, rollback; evidence linking insert, state guards, trimming, event, denormalized JSON arrays, rollback; commit success (state transition, event, evidence requirement, denormalized array sync), invalid state guards, malformed denormalized array element guards ([123]/[null]/[{}]/[""] fail before update), validation rejections, transaction rollback (Phase 1A.2/1A.3/1A.4/1A.5). |
+| `test/judgment/tool.test.ts`                      | Typed-tool contract constants, executor happy/error paths (including malformed array element errors returning `validation_error`), static boundary assertions for `judgment.propose`, `judgment.approve`, `judgment.reject`, `judgment.record_source`, `judgment.link_evidence`, `judgment.commit` (Phase 1A.2/1A.3/1A.4/1A.5). |
 | `test/memory/correction.test.ts`                  | Memory correction supersede semantics (AC-MEM-004).                              |
 | `test/memory/summary.test.ts`                     | Summary generation + provenance (AC-MEM-002).                                    |
 | `test/notifications/*.test.ts`                    | Notification chunking, ledger, retry state machine, worker wiring (AC-NOTIF-*). |

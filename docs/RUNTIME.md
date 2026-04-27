@@ -291,8 +291,8 @@ The 6-stage pipeline in `docs/JUDGMENT_SYSTEM.md` remains the
 architectural authority for the Judgment System direction
 (ADR-0009 … ADR-0013, DEC-037). Until a task explicitly
 authorizes a further Judgment runtime slice, do not wire the
-existing proposal, review, source-recording, or evidence-linking
-surfaces into any runtime path.
+existing proposal, review, source-recording, evidence-linking,
+or commit surfaces into any runtime path.
 
 ## Failure / debug path (current)
 
