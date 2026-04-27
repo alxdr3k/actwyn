@@ -57,8 +57,8 @@ if [ -z "$repo" ]; then
 fi
 if [ -z "$repo" ]; then
   remote=$(git remote get-url origin 2>/dev/null || true)
-  if [[ "$remote" =~ github\.com[:/]([^/]+/[^/.]+) ]]; then
-    repo="${BASH_REMATCH[1]}"
+  if [[ "$remote" =~ github\.com[:/]([^/]+/[^/]+)$ ]]; then
+    repo="${BASH_REMATCH[1]%.git}"
   fi
 fi
 if [ -z "$repo" ]; then
@@ -75,11 +75,23 @@ pass_reaction="${CODEX_PASS_REACTION:-+1}"
 # fetch_list_or_empty <label> <gh-api-args...>: return JSON array on stdout,
 # even on transient failures (so partial success can still drive the loop).
 # Permanent failures (HTTP 401/403/404) exit 4.
+classify_api_error() {
+  # Echo "permanent" or "transient" for the given gh-api error output.
+  local out="$1"
+  if printf '%s' "$out" | grep -qiE 'rate limit|secondary rate|abuse detection'; then
+    echo transient; return
+  fi
+  if printf '%s' "$out" | grep -qE 'HTTP 40[134]|status code: 40[134]|Bad credentials|Not Found'; then
+    echo permanent; return
+  fi
+  echo transient
+}
+
 fetch_list_or_empty() {
   local label="$1"; shift
   local out
   if ! out=$(gh api --paginate "$@" 2>&1); then
-    if printf '%s' "$out" | grep -qE 'HTTP 40[134]|status code: 40[134]'; then
+    if [ "$(classify_api_error "$out")" = "permanent" ]; then
       echo "ERROR: $label permanent API failure: $out" >&2
       exit 4
     fi
@@ -91,12 +103,18 @@ fetch_list_or_empty() {
 }
 
 fetch_baseline() {
-  local raw push_ts head_sha head_repo branch
-  branch=$(gh api "repos/$repo/pulls/$pr" -q .head.ref 2>/dev/null || true)
-  # Only trust head.repo if it is explicitly set; otherwise the fork has been
-  # deleted and we must NOT silently fall back to base repo (the same branch
-  # name on base could match unrelated pushes).
-  head_repo=$(gh api "repos/$repo/pulls/$pr" -q '.head.repo.full_name // empty' 2>/dev/null || true)
+  local raw push_ts head_sha head_repo branch pr_info pr_err
+  # PR lookup: distinguish permanent from transient failures.
+  if ! pr_info=$(gh api "repos/$repo/pulls/$pr" 2>&1); then
+    if [ "$(classify_api_error "$pr_info")" = "permanent" ]; then
+      echo "ERROR: PR lookup permanent failure for $repo#$pr: $pr_info" >&2
+      exit 4
+    fi
+    return 1
+  fi
+  branch=$(printf '%s' "$pr_info" | jq -r .head.ref 2>/dev/null || true)
+  head_repo=$(printf '%s' "$pr_info" | jq -r '.head.repo.full_name // empty' 2>/dev/null || true)
+  head_sha=$(printf '%s' "$pr_info" | jq -r '.head.sha // empty' 2>/dev/null || true)
 
   # 1) Events API PushEvent
   if [ -n "$branch" ] && [ -n "$head_repo" ]; then
@@ -119,8 +137,7 @@ fetch_baseline() {
       | max // empty')
     if [ -n "$push_ts" ]; then echo "$push_ts"; return 0; fi
   fi
-  # 3) HEAD commit committer.date
-  head_sha=$(gh api "repos/$repo/pulls/$pr" -q .head.sha 2>/dev/null || true)
+  # 3) HEAD commit committer.date (head_sha already extracted above)
   [ -z "$head_sha" ] && return 1
   gh api "repos/$repo/commits/$head_sha" -q .commit.committer.date 2>/dev/null
 }
@@ -156,7 +173,13 @@ while :; do
     fi
     if [ "$fetched" != "$last_fetched_baseline" ]; then
       last_fetched_baseline="$fetched"
-      last_clamped_baseline=$(clamp_to_now "$fetched")
+      new_clamped=$(clamp_to_now "$fetched")
+      # Monotonic: never let baseline regress (e.g., if baseline source
+      # changes from Events API to commit timestamp, keep the older later).
+      if [ -n "$last_clamped_baseline" ] && [[ "$new_clamped" < "$last_clamped_baseline" ]]; then
+        new_clamped="$last_clamped_baseline"
+      fi
+      last_clamped_baseline="$new_clamped"
     fi
     baseline="$last_clamped_baseline"
   fi
