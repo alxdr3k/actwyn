@@ -636,6 +636,81 @@ describe("executeJudgmentLinkEvidenceTool — error path", () => {
       .get()!.n;
     expect(after).toBe(before);
   });
+
+  test("archived proposed/history_only judgment returns ok: false with invalid_state", () => {
+    const j = proposeJudgment(db, validInput);
+    db.prepare(`UPDATE judgment_items SET retention_state = 'archived' WHERE id = ?`).run(j.id);
+    const s = recordJudgmentSource(db, validSourceInput);
+    const result = executeJudgmentLinkEvidenceTool(db, {
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("invalid_state");
+    }
+  });
+
+  test("archived judgment: no link row inserted", () => {
+    const j = proposeJudgment(db, validInput);
+    db.prepare(`UPDATE judgment_items SET retention_state = 'archived' WHERE id = ?`).run(j.id);
+    const s = recordJudgmentSource(db, validSourceInput);
+    const before = db
+      .prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_evidence_links")
+      .get()!.n;
+    executeJudgmentLinkEvidenceTool(db, {
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+    });
+    expect(db.prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_evidence_links").get()!.n).toBe(before);
+  });
+
+  test("archived judgment: no event appended", () => {
+    const j = proposeJudgment(db, validInput);
+    db.prepare(`UPDATE judgment_items SET retention_state = 'archived' WHERE id = ?`).run(j.id);
+    const s = recordJudgmentSource(db, validSourceInput);
+    const before = db
+      .prepare<{ n: number }, [string]>("SELECT COUNT(*) as n FROM judgment_events WHERE judgment_id = ?")
+      .get(j.id)!.n;
+    executeJudgmentLinkEvidenceTool(db, {
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+    });
+    expect(db.prepare<{ n: number }, [string]>("SELECT COUNT(*) as n FROM judgment_events WHERE judgment_id = ?").get(j.id)!.n).toBe(before);
+  });
+
+  test("archived judgment: source_ids_json not mutated", () => {
+    const j = proposeJudgment(db, validInput);
+    db.prepare(`UPDATE judgment_items SET retention_state = 'archived' WHERE id = ?`).run(j.id);
+    const s = recordJudgmentSource(db, validSourceInput);
+    const before = db
+      .prepare<{ source_ids_json: string | null }, [string]>("SELECT source_ids_json FROM judgment_items WHERE id = ?")
+      .get(j.id)!.source_ids_json;
+    executeJudgmentLinkEvidenceTool(db, {
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+    });
+    expect(db.prepare<{ source_ids_json: string | null }, [string]>("SELECT source_ids_json FROM judgment_items WHERE id = ?").get(j.id)!.source_ids_json).toEqual(before);
+  });
+
+  test("archived judgment: evidence_ids_json not mutated", () => {
+    const j = proposeJudgment(db, validInput);
+    db.prepare(`UPDATE judgment_items SET retention_state = 'archived' WHERE id = ?`).run(j.id);
+    const s = recordJudgmentSource(db, validSourceInput);
+    const before = db
+      .prepare<{ evidence_ids_json: string | null }, [string]>("SELECT evidence_ids_json FROM judgment_items WHERE id = ?")
+      .get(j.id)!.evidence_ids_json;
+    executeJudgmentLinkEvidenceTool(db, {
+      ...validLinkInput,
+      judgment_id: j.id,
+      source_id: s.id,
+    });
+    expect(db.prepare<{ evidence_ids_json: string | null }, [string]>("SELECT evidence_ids_json FROM judgment_items WHERE id = ?").get(j.id)!.evidence_ids_json).toEqual(before);
+  });
 });
 
 // ---------------------------------------------------------------

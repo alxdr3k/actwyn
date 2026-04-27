@@ -109,14 +109,18 @@ evidence-linking surface tests (Phase 1A.2/1A.3/1A.4) live under:
   transaction rollback; `approveProposedJudgment` /
   `rejectProposedJudgment` transitions, event payloads, state guards,
   rollback; `recordJudgmentSource` insert, defaults, trimming, event,
-  rollback; `linkJudgmentEvidence` insert, state guards, trimming,
+  rollback; `linkJudgmentEvidence` insert, state guards (including
+  non-normal `retention_state` — archived/deleted target judgments
+  fail with `JudgmentStateError` and no side effects), trimming,
   event, denormalized JSON array updates, rollback (Phase 1A.3/1A.4).
 - `test/judgment/tool.test.ts` — `executeJudgmentProposeTool` /
   `executeJudgmentApproveTool` / `executeJudgmentRejectTool` /
   `executeJudgmentRecordSourceTool` /
   `executeJudgmentLinkEvidenceTool` contracts + static boundary
   assertions (no bun:* import in `src/judgment/*`; tools not
-  imported by runtime modules) (Phase 1A.3/1A.4).
+  imported by runtime modules); `invalid_state` coverage for
+  archived/deleted target judgments in `executeJudgmentLinkEvidenceTool`
+  (Phase 1A.3/1A.4).
 
 When you add a migration:
 

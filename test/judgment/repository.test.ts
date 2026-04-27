@@ -589,12 +589,14 @@ function forceState(
     lifecycle_status: string;
     approval_state: string;
     activation_state: string;
+    retention_state: string;
   }>,
 ) {
   const sets: string[] = [];
   if (patch.lifecycle_status !== undefined) sets.push(`lifecycle_status = '${patch.lifecycle_status}'`);
   if (patch.approval_state !== undefined) sets.push(`approval_state = '${patch.approval_state}'`);
   if (patch.activation_state !== undefined) sets.push(`activation_state = '${patch.activation_state}'`);
+  if (patch.retention_state !== undefined) sets.push(`retention_state = '${patch.retention_state}'`);
   if (sets.length === 0) return;
   db.prepare(`UPDATE judgment_items SET ${sets.join(", ")} WHERE id = ?`).run(id);
 }
@@ -1645,6 +1647,134 @@ describe("linkJudgmentEvidence — state guards", () => {
     expect(() =>
       linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id }),
     ).toThrow(JudgmentStateError);
+  });
+
+  test("archived proposed/history_only judgment fails with JudgmentStateError", () => {
+    const j = proposeJudgment(db, validInput);
+    forceState(j.id, { retention_state: "archived" });
+    const s = makeSource();
+    expect(() =>
+      linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("deleted proposed/history_only judgment fails with JudgmentStateError", () => {
+    const j = proposeJudgment(db, validInput);
+    forceState(j.id, { retention_state: "deleted" });
+    const s = makeSource();
+    expect(() =>
+      linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id }),
+    ).toThrow(JudgmentStateError);
+  });
+});
+
+describe("linkJudgmentEvidence — non-normal retention isolation", () => {
+  test("archived failure does not insert a judgment_evidence_links row", () => {
+    const j = proposeJudgment(db, validInput);
+    forceState(j.id, { retention_state: "archived" });
+    const s = makeSource();
+    const before = countLinks();
+    try { linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id }); } catch {}
+    expect(countLinks()).toBe(before);
+  });
+
+  test("archived failure does not append judgment.evidence.linked event", () => {
+    const j = proposeJudgment(db, validInput);
+    forceState(j.id, { retention_state: "archived" });
+    const s = makeSource();
+    const before = countEvents(j.id);
+    try { linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id }); } catch {}
+    expect(countEvents(j.id)).toBe(before);
+  });
+
+  test("archived failure does not mutate source_ids_json", () => {
+    const j = proposeJudgment(db, validInput);
+    forceState(j.id, { retention_state: "archived" });
+    const s = makeSource();
+    const before = db
+      .prepare<{ source_ids_json: string | null }, [string]>(
+        `SELECT source_ids_json FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!.source_ids_json;
+    try { linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id }); } catch {}
+    const after = db
+      .prepare<{ source_ids_json: string | null }, [string]>(
+        `SELECT source_ids_json FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!.source_ids_json;
+    expect(after).toEqual(before);
+  });
+
+  test("archived failure does not mutate evidence_ids_json", () => {
+    const j = proposeJudgment(db, validInput);
+    forceState(j.id, { retention_state: "archived" });
+    const s = makeSource();
+    const before = db
+      .prepare<{ evidence_ids_json: string | null }, [string]>(
+        `SELECT evidence_ids_json FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!.evidence_ids_json;
+    try { linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id }); } catch {}
+    const after = db
+      .prepare<{ evidence_ids_json: string | null }, [string]>(
+        `SELECT evidence_ids_json FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!.evidence_ids_json;
+    expect(after).toEqual(before);
+  });
+
+  test("deleted failure does not insert a judgment_evidence_links row", () => {
+    const j = proposeJudgment(db, validInput);
+    forceState(j.id, { retention_state: "deleted" });
+    const s = makeSource();
+    const before = countLinks();
+    try { linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id }); } catch {}
+    expect(countLinks()).toBe(before);
+  });
+
+  test("deleted failure does not append judgment.evidence.linked event", () => {
+    const j = proposeJudgment(db, validInput);
+    forceState(j.id, { retention_state: "deleted" });
+    const s = makeSource();
+    const before = countEvents(j.id);
+    try { linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id }); } catch {}
+    expect(countEvents(j.id)).toBe(before);
+  });
+
+  test("deleted failure does not mutate source_ids_json", () => {
+    const j = proposeJudgment(db, validInput);
+    forceState(j.id, { retention_state: "deleted" });
+    const s = makeSource();
+    const before = db
+      .prepare<{ source_ids_json: string | null }, [string]>(
+        `SELECT source_ids_json FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!.source_ids_json;
+    try { linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id }); } catch {}
+    const after = db
+      .prepare<{ source_ids_json: string | null }, [string]>(
+        `SELECT source_ids_json FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!.source_ids_json;
+    expect(after).toEqual(before);
+  });
+
+  test("deleted failure does not mutate evidence_ids_json", () => {
+    const j = proposeJudgment(db, validInput);
+    forceState(j.id, { retention_state: "deleted" });
+    const s = makeSource();
+    const before = db
+      .prepare<{ evidence_ids_json: string | null }, [string]>(
+        `SELECT evidence_ids_json FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!.evidence_ids_json;
+    try { linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id }); } catch {}
+    const after = db
+      .prepare<{ evidence_ids_json: string | null }, [string]>(
+        `SELECT evidence_ids_json FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!.evidence_ids_json;
+    expect(after).toEqual(before);
   });
 });
 

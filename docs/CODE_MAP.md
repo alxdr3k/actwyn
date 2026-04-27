@@ -88,11 +88,20 @@ Status legend:
 The Judgment System (`JudgmentItem`, Control Gate, Tension,
 ReflectionTriageEvent, `current_operating_view`, vector / graph
 projections) is architecturally committed under ADR-0009 … ADR-0013
-and `docs/JUDGMENT_SYSTEM.md`. Phase 1A.1 and Phase 1A.2 have landed
-partial implementation (see table below). No Control Gate, Context
-Compiler integration, approval workflow, activation workflow, or
-runtime provider wiring is implemented yet. See `docs/DATA_MODEL.md`
-and `docs/RUNTIME.md`.
+and `docs/JUDGMENT_SYSTEM.md`. The following Phase 1A slices have
+landed (see table below):
+
+- **Phase 1A.1**: schema skeleton + types + validators.
+- **Phase 1A.2**: proposal repository + unregistered `judgment.propose` tool contract.
+- **Phase 1A.3**: approval/rejection review repository + unregistered `judgment.approve` /
+  `judgment.reject` tool contracts. Approval review exists, but approval does **not** activate.
+- **Phase 1A.4**: source recording + evidence-link repository + unregistered
+  `judgment.record_source` / `judgment.link_evidence` tool contracts. Evidence linking
+  does **not** activate or approve.
+
+No activation workflow, commit/supersede/revoke/expire/query/explain workflow, Control
+Gate, Context Compiler integration, or provider runtime wiring is implemented.
+See `docs/DATA_MODEL.md` and `docs/RUNTIME.md`.
 
 ## Judgment (Phase 1A.4 — schema + proposal + review + source/evidence-link repository + typed-tool contracts)
 
