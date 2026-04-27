@@ -295,6 +295,58 @@ export function validateStringArray(
 }
 
 /**
+ * A value must be a non-empty string after trimming. Parametrized by field name.
+ */
+export function validateNonEmptyString(value: unknown, fieldName: string): ValidationResult {
+  if (typeof value !== "string") {
+    return { ok: false, reason: `${fieldName} must be a string` };
+  }
+  if (value.trim().length === 0) {
+    return { ok: false, reason: `${fieldName} must be non-empty after trim` };
+  }
+  return { ok: true };
+}
+
+/**
+ * A payload must be a plain JSON object: not null, not array, not class
+ * instance, and must serialize back to a JSON object (not a scalar). This
+ * rejects raw JSON strings, Date instances, Map instances, and objects with
+ * a toJSON() that returns a non-object.
+ */
+export function validatePlainJsonObject(value: unknown, fieldName: string): ValidationResult {
+  if (value === null) {
+    return { ok: false, reason: `${fieldName} must not be null` };
+  }
+  if (Array.isArray(value)) {
+    return { ok: false, reason: `${fieldName} must not be an array` };
+  }
+  if (typeof value !== "object") {
+    return { ok: false, reason: `${fieldName} must be a plain object, got ${typeof value}` };
+  }
+  const proto = Object.getPrototypeOf(value) as unknown;
+  if (proto !== Object.prototype && proto !== null) {
+    return { ok: false, reason: `${fieldName} must be a plain object, not a class instance` };
+  }
+  let serialized: string | undefined;
+  try {
+    serialized = JSON.stringify(value);
+  } catch (e) {
+    return {
+      ok: false,
+      reason: `${fieldName} cannot be serialized to JSON: ${(e as Error).message}`,
+    };
+  }
+  if (typeof serialized !== "string") {
+    return { ok: false, reason: `${fieldName} cannot be serialized to a JSON string` };
+  }
+  const reparsed = JSON.parse(serialized) as unknown;
+  if (reparsed === null || Array.isArray(reparsed) || typeof reparsed !== "object") {
+    return { ok: false, reason: `${fieldName} must serialize to a JSON object` };
+  }
+  return { ok: true };
+}
+
+/**
  * `v` must be a JSON-serializable object or array, and must still be an
  * object or array **after** serialization. This catches class instances such
  * as `new Date()` (which serializes to a string scalar) and objects that

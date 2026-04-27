@@ -152,14 +152,15 @@ promotes a `session` attachment to `long_term`.
 
 ## Judgment System: current state and runtime boundary
 
-Phase 1A.1 (schema skeleton + types + validators) and Phase 1A.2
-(proposal-only write surface) have landed on `main`. **Runtime
-request handling is unchanged.** The implemented runtime stages
-above — Telegram inbound, `provider_run`, `summary_generation`,
-`storage_sync`, `notification_retry`, and outbound delivery — do
-not call `judgment.propose`. Provider context still uses the
-existing `src/context/builder.ts` + `src/context/packer.ts`
-memory implementation.
+Phase 1A.1 (schema skeleton + types + validators), Phase 1A.2
+(proposal-only write surface), and Phase 1A.3 (proposal review
+local surface) have landed on `main`. **Runtime request handling
+is unchanged.** The implemented runtime stages above — Telegram
+inbound, `provider_run`, `summary_generation`, `storage_sync`,
+`notification_retry`, and outbound delivery — do not call any
+judgment tool. Provider context still uses the existing
+`src/context/builder.ts` + `src/context/packer.ts` memory
+implementation.
 
 ### What is implemented
 
@@ -183,12 +184,26 @@ memory implementation.
   `executeJudgmentProposeTool`) — local unregistered typed-tool
   contract.
 
-The proposal surface can be exercised by tests or direct local
-code. It is **not** exposed to providers, Telegram, commands,
-worker dispatch, or context building:
+**Phase 1A.3** — proposal review local surface:
 
-- `judgment.propose` is not registered in `src/main.ts` or any
-  runtime module.
+- `src/judgment/repository.ts` (`approveProposedJudgment`,
+  `rejectProposedJudgment`) — approve sets `approval_state=approved`
+  but does **not** activate (`lifecycle_status` stays `proposed`,
+  `activation_state` stays `history_only`). Reject sets
+  `approval_state=rejected` / `lifecycle_status=rejected` /
+  `activation_state=excluded`. Both write one `judgment_events`
+  row in the same transaction.
+- `src/judgment/tool.ts` (`JUDGMENT_APPROVE_TOOL`,
+  `executeJudgmentApproveTool`, `JUDGMENT_REJECT_TOOL`,
+  `executeJudgmentRejectTool`) — local unregistered typed-tool
+  contracts.
+
+The proposal and review surfaces can be exercised by tests or
+direct local code. They are **not** exposed to providers, Telegram,
+commands, worker dispatch, or context building:
+
+- `judgment.propose`, `judgment.approve`, `judgment.reject` are
+  not registered in `src/main.ts` or any runtime module.
 - `src/providers/*`, `src/context/*`, `src/queue/worker.ts`,
   `src/memory/*`, `src/telegram/*`, and `src/commands/*` do not
   import from `src/judgment/`.
@@ -206,12 +221,12 @@ rows from provider output: **not implemented**.
 **Stage 3** — Judgment Store lifecycle:
 
 - A partial persistence substrate exists: schema, FTS5 index,
-  proposal-only writer, and `judgment.proposed` events.
-- Not implemented: approval workflow, activation workflow,
-  rejection, `commit`, `supersede`, `revoke`, `expire`, `query`,
-  `explain`, and evidence-linking workflow. `judgment_sources`,
-  `judgment_evidence_links`, and `judgment_edges` have no runtime
-  writer.
+  proposal + review writers, and `judgment.proposed` /
+  `judgment.approved` / `judgment.rejected` events.
+- Not implemented: activation workflow, `commit`, `supersede`,
+  `revoke`, `expire`, `query`, `explain`, and evidence-linking
+  workflow. `judgment_sources`, `judgment_evidence_links`, and
+  `judgment_edges` have no runtime writer.
 
 **Stage 4** — Context Compiler: `current_operating_view`
 projection (DEC-036) and the Stage 4 Context Compiler that would
@@ -236,7 +251,7 @@ The 6-stage pipeline in `docs/JUDGMENT_SYSTEM.md` remains the
 architectural authority for the Judgment System direction
 (ADR-0009 … ADR-0013, DEC-037). Until a task explicitly
 authorizes a further Judgment runtime slice, do not wire the
-existing proposal surface into any runtime path.
+existing proposal or review surfaces into any runtime path.
 
 ## Failure / debug path (current)
 
