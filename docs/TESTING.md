@@ -98,8 +98,8 @@ Migration shape is asserted by:
   records applied versions in `settings`.
 
 Judgment System proposal, review, source-recording, evidence-linking,
-commit, query, and explain surface tests (Phase 1A.2/1A.3/1A.4/1A.5/1A.6)
-live under:
+commit, query, explain, and retirement lifecycle surface tests
+(Phase 1A.2/1A.3/1A.4/1A.5/1A.6/1A.7) live under:
 
 - `test/judgment/validators.test.ts` — pure-TS validator behavior
   including `validateNonEmptyString` / `validatePlainJsonObject` /
@@ -123,17 +123,31 @@ live under:
   `scope_contains`, ordering, pagination, evidence metadata, and
   read-only behavior; `explainJudgment` evidence/source/event output,
   parsed JSON metadata, malformed persisted JSON handling, and
-  no-mutation/no-event-append assertions (Phase 1A.3/1A.4/1A.5/1A.6).
+  no-mutation/no-event-append assertions; `supersedeJudgment` state
+  transitions, `judgment_edges` insertion, `supersedes_json` /
+  `superseded_by_json` JSON array updates, event payloads, invalid
+  state guards (proposed/rejected/superseded/revoked/expired/archived),
+  duplicate supersede guard, rollback on event/edge failure;
+  `revokeJudgment` state transition, event payload, invalid state guards,
+  rollback; `expireJudgment` state transition, `valid_until` logic,
+  event payload, invalid state guards, rollback; and
+  query/explain integration after retirement (superseded/revoked/expired
+  rows hidden by default, visible with `include_history=true`, explain
+  includes retirement events) (Phase 1A.3/1A.4/1A.5/1A.6/1A.7).
 - `test/judgment/tool.test.ts` — `executeJudgmentProposeTool` /
   `executeJudgmentApproveTool` / `executeJudgmentRejectTool` /
   `executeJudgmentRecordSourceTool` /
   `executeJudgmentLinkEvidenceTool` / `executeJudgmentCommitTool` /
-  `executeJudgmentQueryTool` / `executeJudgmentExplainTool`
+  `executeJudgmentQueryTool` / `executeJudgmentExplainTool` /
+  `executeJudgmentSupersedeTool` / `executeJudgmentRevokeTool` /
+  `executeJudgmentExpireTool`
   contracts + static boundary assertions (no bun:* import or `Bun`
-  global use in `src/judgment/*`; tools not imported by runtime modules);
-  `invalid_state` coverage for archived/deleted target judgments in
-  `executeJudgmentLinkEvidenceTool`, missing/deleted explain targets,
-  and read-only query/explain behavior (Phase 1A.3/1A.4/1A.5/1A.6).
+  global use in `src/judgment/*`; all eleven tools not imported by
+  runtime modules); `invalid_state` and `not_found` error paths for
+  all lifecycle executors; no-mutation/no-event-append checks for
+  failed supersede/revoke/expire calls; and `not_found` / `invalid_state`
+  coverage for `executeJudgmentSupersedeTool` no-edge-insert check
+  (Phase 1A.3/1A.4/1A.5/1A.6/1A.7).
 
 When you add a migration:
 

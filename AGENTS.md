@@ -100,17 +100,26 @@ Do not read `docs/design/archive/` by default. Those are history.
     `executeJudgmentExplainTool`. These are **local, unregistered,
     read-only** surfaces. They do **not** mutate judgment rows,
     append `judgment_events`, or make judgments context-visible.
+  - **Phase 1A.7 (landed)**: `src/judgment/repository.ts` now also
+    exports `supersedeJudgment`, `revokeJudgment`, and
+    `expireJudgment`, and `src/judgment/tool.ts` now also exports
+    `JUDGMENT_SUPERSEDE_TOOL` / `JUDGMENT_REVOKE_TOOL` /
+    `JUDGMENT_EXPIRE_TOOL` and the corresponding `execute*` functions.
+    These are **local, unregistered** write surfaces that retire
+    `active/eligible` judgments. `supersedeJudgment` can write
+    `judgment_edges`. None of these surfaces make judgments
+    context-visible or register tools. They are **not runtime-wired**.
+    Future agents must not implement context/compiler/provider
+    integration unless explicitly tasked.
   - None of the judgment tools are **registered** anywhere in `src/`.
     They must not be imported from `src/main.ts`, `src/providers/*`,
     `src/context/*`, `src/queue/worker.ts`, `src/memory/*`,
     `src/telegram/*`, or `src/commands/*`.
-  - Do **not** implement supersede, revoke, expire, runtime-wired
-    judgment integration, Control Gate, Tension,
-    ReflectionTriageEvent,
-    `current_operating_view`, Context Compiler, provider/context
-    integration, vector / graph projections, Critique Lens,
-    or any further runtime Judgment surface unless the task explicitly
-    authorizes them.
+  - Do **not** implement runtime-wired judgment integration, Control
+    Gate, Tension, ReflectionTriageEvent, `current_operating_view`,
+    Context Compiler, provider/context integration, vector / graph
+    projections, Critique Lens, or any further runtime Judgment
+    surface unless the task explicitly authorizes them.
 
 ## When changing code
 
