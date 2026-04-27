@@ -1,7 +1,7 @@
 # Architecture
 
 > Status: thin current-state overview · Owner: project lead ·
-> Last updated: 2026-04-26
+> Last updated: 2026-04-27
 >
 > This is a short pointer doc. For why decisions were made, see
 > `docs/adr/` (ADR-0001 … ADR-0013). For acceptance contracts and
@@ -179,22 +179,41 @@ of scope** for this PR; see `docs/RUNTIME.md` and
 implemented shape, and `docs/JUDGMENT_SYSTEM.md` §Implementation
 Readiness for the Phase 1A scope itself.
 
-## Existing implementation that may need re-classification
+## Existing implementation re-classification (2026-04 salvage audit)
 
-Some modules predate the DB-native Judgment System direction (memory
-summaries, `memory_items` provenance, attachment promotion). They
-are fully implemented under the current PRD / HLD contract, but
-their fate under the Judgment System direction is **not yet
-decided**:
+The 2026-04 implementation salvage audit
+(`docs/design/salvage-audit-2026-04.md`) classified the
+pre-Judgment-System modules. Headlines:
 
-- Q-027 — `memory_items` ↔ `judgment_items` 관계 (통합 / 분리 /
-  단계적 마이그레이션) is open. ADR-0009 commits to "분리" as the
-  Phase 0 starting point.
-- The `docs/JUDGMENT_SYSTEM.md` §Relationship to memory layer
-  section is explicit that judgment is added **above** ADR-0006's
-  memory layer rather than superseding it.
+- **No DELETE candidates.** Most P0 runtime survives.
+- **One REPLACE candidate**: `src/context/builder.ts`. Its slot
+  taxonomy and `MemoryItemSlot.provenance` / `.status='active'`
+  input contract are incompatible with `current_operating_view` /
+  `lifecycle_status` / `activation_state`. Replaced by a Stage 4
+  Context Compiler in a later PR; the file stays in tree until
+  Compiler stabilises.
+- **ADAPT cluster** (`src/queue/worker.ts`,
+  `src/memory/summary.ts`, `src/memory/provenance.ts`,
+  `src/memory/items.ts`). The risk is the
+  *summary → memory_items.status='active' → worker context
+  injection* loop: `assistant_generated` / `inferred` summary
+  items currently land in active memory and are re-injected as
+  the next prompt input. Judgment direction requires those items
+  to remain proposal-only — see audit §5.1 and Q-027.
+- **JSONL / MD filesystem sidecar** in `src/queue/worker.ts`
+  (`memory/sessions/<session_id>.jsonl`,
+  `memory/personal/YYYY-MM-DD.md`) is **not** an Obsidian /
+  GitHub-repo runtime dependency, but its role under the new
+  direction is policy-pending — see audit §5.3.
+- Q-027 (`memory_items` ↔ `judgment_items`) and the
+  `docs/JUDGMENT_SYSTEM.md` §Relationship to memory layer
+  section both stand: judgment is added **above** ADR-0006's
+  memory layer, not in place of it.
 
-A future implementation salvage audit will classify the existing
-modules as KEEP / ADAPT / REPLACE / DELETE; in `docs/CODE_MAP.md`
-they are marked `needs audit` where relevant. **No
-re-classification is performed in this PR.**
+The audit performs no code changes. The full per-module
+classification table lives in the audit itself
+(`docs/design/salvage-audit-2026-04.md` §4). `docs/CODE_MAP.md`
+records the salvage status only for modules that were previously
+flagged `needs audit` or that the follow-up PR sequence directly
+affects (memory/*, context/*, queue/worker.ts). The follow-up PR
+sequence is in audit §6.

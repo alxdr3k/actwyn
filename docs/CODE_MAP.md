@@ -1,7 +1,7 @@
 # Code Map
 
 > Status: thin current-state map · Owner: project lead ·
-> Last updated: 2026-04-26
+> Last updated: 2026-04-27
 >
 > This file maps the actual files in `src/`, `test/`, `migrations/`,
 > `scripts/`, `config/`, and `deploy/`. It is meant to be skimmed by
@@ -12,9 +12,15 @@ Status legend:
 
 - `implemented` — present in `main`, exercised by tests.
 - `planned` — referenced by design docs but not present in code.
-- `needs audit` — implemented under the current PRD/HLD contract;
-  fate under the planned Judgment System direction is not yet
-  decided. Do not delete or rewrite without an explicit decision.
+- `salvage:KEEP|ADAPT|ADAPT-light|REPLACE` — classification from
+  the 2026-04 implementation salvage audit
+  (`docs/design/salvage-audit-2026-04.md`). Indicates the module's
+  fate under the DB-native Judgment System direction. KEEP = stays
+  as-is; ADAPT = behavior preserved, surface or call-site changes
+  expected; ADAPT-light = invariant preserved, only adjacent gate
+  semantics shift; REPLACE = surface contract incompatible with
+  the new model. Do not start the salvage refactors without the
+  follow-up PR sequence in §6 of the audit.
 - `possibly stale` — implemented but superseded by a newer module;
   flagged for cleanup. (None currently flagged.)
 
@@ -71,12 +77,12 @@ Status legend:
 
 | Path                              | Purpose                                                                                     | Status                                       |
 | --------------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| `src/memory/summary.ts`           | `/summary` and `/end` summary generation; provenance + confidence per PRD §12.2.            | implemented (needs audit under Judgment direction; Q-027) |
-| `src/memory/items.ts`             | Atomic `memory_items` rows with supersede semantics.                                        | implemented (needs audit under Judgment direction; Q-027) |
-| `src/memory/provenance.ts`        | Provenance / confidence helpers shared by summary + items.                                  | implemented (needs audit; tied to memory layer fate) |
-| `src/context/builder.ts`          | Assembles prompt inputs (resume vs replay decision, recent turns, memory snapshot).         | implemented (needs audit — replaced by Stage 4 Context Compiler in `docs/JUDGMENT_SYSTEM.md`) |
-| `src/context/packer.ts`           | Token-budget aware packer per PRD §12.5–§12.6.                                              | implemented (needs audit — same Stage 4 boundary)         |
-| `src/context/token_estimator.ts`  | CJK-safer token estimator (DEC-021).                                                        | implemented                                  |
+| `src/memory/summary.ts`           | `/summary` and `/end` summary generation; provenance + confidence per PRD §12.2.            | implemented · salvage:ADAPT (auto-promotion of fact / decision / open_task / caution → `memory_items.status='active'` re-injects via worker; Q-027) |
+| `src/memory/items.ts`             | Atomic `memory_items` rows with supersede semantics.                                        | implemented · salvage:ADAPT-light (writer invariants KEEP; insert path only gates `preference` provenance — baseline-eligibility moves to judgment layer per Q-027) |
+| `src/memory/provenance.ts`        | Provenance / confidence helpers shared by summary + items.                                  | implemented · salvage:ADAPT (`Provenance` enum KEEP; `mayPromoteToLongTerm` semantics must split — `mayPersistAsMemoryItem` / `mayBecomeBehaviorBaseline` / `mayProposeJudgment`) |
+| `src/context/builder.ts`          | Assembles prompt inputs (resume vs replay decision, recent turns, memory snapshot).         | implemented · salvage:REPLACE (slot taxonomy + `MemoryItemSlot.provenance` / `.status` input incompatible with `current_operating_view` / `lifecycle_status` / `activation_state` — superseded by Stage 4 Context Compiler) |
+| `src/context/packer.ts`           | Token-budget aware packer per PRD §12.5–§12.6.                                              | implemented · salvage:ADAPT (drop-by-priority + `injected_snapshot_json` shape KEEP; input type re-defined to Compiler output) |
+| `src/context/token_estimator.ts`  | CJK-safer token estimator (DEC-021).                                                        | implemented · salvage:KEEP                   |
 
 The Judgment System (`JudgmentItem`, Control Gate, Tension,
 ReflectionTriageEvent, `current_operating_view`, vector / graph
@@ -87,11 +93,11 @@ record per DEC-037). It has no module in `src/` yet. See
 
 ## Queue / orchestration
 
-| Path                                  | Purpose                                                                              |
-| ------------------------------------- | ------------------------------------------------------------------------------------ |
-| `src/queue/worker.ts`                 | Single job claim + dispatch loop; one `provider_run` at a time. Also runs the in-process attachment capture pre-step before each `provider_run`. |
-| `src/queue/notification_retry.ts`     | Handlers / helpers used by the worker to process `notification_retry` jobs (per-chunk re-send of `outbound_notification_chunks`). Not a separate loop. |
-| `src/startup/recovery.ts`             | Boot-time reconciliation of stale `running` jobs (force `interrupted`, requeue if `safe_retry`, kill orphan PIDs); offset fast-forward; enqueues one `storage_sync` job for `failed` / `delete_failed` rows only (not for `pending`). |
+| Path                                  | Purpose                                                                              | Status                                       |
+| ------------------------------------- | ------------------------------------------------------------------------------------ | -------------------------------------------- |
+| `src/queue/worker.ts`                 | Single job claim + dispatch loop; one `provider_run` at a time. Also runs the in-process attachment capture pre-step before each `provider_run`. | implemented · salvage:ADAPT (`buildContextForRun` reads `memory_items WHERE status='active'` / `memory_summaries` (latest) / `turns` and calls `buildContext` / `pack` directly — retrieval / packing responsibility moves to Stage 4 Compiler. JSONL / MD sidecar pending §5.3 of audit) |
+| `src/queue/notification_retry.ts`     | Handlers / helpers used by the worker to process `notification_retry` jobs (per-chunk re-send of `outbound_notification_chunks`). Not a separate loop. | implemented · salvage:KEEP |
+| `src/startup/recovery.ts`             | Boot-time reconciliation of stale `running` jobs (force `interrupted`, requeue if `safe_retry`, kill orphan PIDs); offset fast-forward; enqueues one `storage_sync` job for `failed` / `delete_failed` rows only (not for `pending`). | implemented · salvage:KEEP |
 
 ## Observability
 
@@ -153,7 +159,10 @@ record per DEC-037). It has no module in `src/` yet. See
 
 ## Stale / superseded
 
-None currently flagged. If a module is replaced under the Judgment
-System direction, mark it `possibly stale` here in the same PR that
-introduces the replacement, and remove it after the salvage audit
-decides KEEP / ADAPT / REPLACE / DELETE.
+None currently flagged. The 2026-04 salvage audit
+(`docs/design/salvage-audit-2026-04.md`) classified
+`src/context/builder.ts` as the only REPLACE candidate. It
+remains in tree until the Stage 4 Context Compiler path is
+available. The removal timing — immediate deletion vs a
+`possibly stale` soak period — is an open follow-up decision
+recorded in audit §7.
