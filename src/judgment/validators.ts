@@ -409,3 +409,117 @@ export function validateJsonValue(v: unknown): ValidationResult {
   }
   return { ok: true };
 }
+
+/**
+ * A top-level input must be a plain object (or Object.create(null)),
+ * not null, not an array, and not a class instance.
+ */
+export function validatePlainObjectInput(
+  value: unknown,
+  fieldName: string,
+): ValidationResult {
+  if (value === null) {
+    return { ok: false, reason: `${fieldName} must not be null` };
+  }
+  if (Array.isArray(value)) {
+    return { ok: false, reason: `${fieldName} must not be an array` };
+  }
+  if (typeof value !== "object") {
+    return { ok: false, reason: `${fieldName} must be a plain object, got ${typeof value}` };
+  }
+  const proto = Object.getPrototypeOf(value) as unknown;
+  if (proto !== Object.prototype && proto !== null) {
+    return { ok: false, reason: `${fieldName} must be a plain object, not a class instance` };
+  }
+  return { ok: true };
+}
+
+/** When defined, value must be a boolean. */
+export function validateBoolean(value: unknown, fieldName: string): ValidationResult {
+  if (typeof value !== "boolean") {
+    return { ok: false, reason: `${fieldName} must be a boolean` };
+  }
+  return { ok: true };
+}
+
+/**
+ * Validate one enum string against a fixed literal set.
+ * `allowedLabel` should be human-readable, e.g. "low / medium / high".
+ */
+export function validateEnumFilter(
+  value: unknown,
+  fieldName: string,
+  allowed: readonly string[],
+  allowedLabel = allowed.join(" / "),
+): ValidationResult {
+  if (typeof value !== "string") {
+    return { ok: false, reason: `${fieldName} must be one of ${allowedLabel}` };
+  }
+  if (!allowed.includes(value)) {
+    return { ok: false, reason: `${fieldName} must be one of ${allowedLabel}` };
+  }
+  return { ok: true };
+}
+
+/**
+ * Validate a non-empty array of enum strings.
+ */
+export function validateEnumArrayFilter(
+  value: unknown,
+  fieldName: string,
+  allowed: readonly string[],
+  allowedLabel = allowed.join(" / "),
+): ValidationResult {
+  if (!Array.isArray(value)) {
+    return { ok: false, reason: `${fieldName} must be a non-empty array` };
+  }
+  if (value.length === 0) {
+    return { ok: false, reason: `${fieldName} must be a non-empty array` };
+  }
+  for (let i = 0; i < value.length; i++) {
+    if (typeof value[i] !== "string" || !allowed.includes(value[i] as string)) {
+      return {
+        ok: false,
+        reason: `${fieldName}[${i}] must be one of ${allowedLabel}`,
+      };
+    }
+  }
+  return { ok: true };
+}
+
+export function validateLimit(value: unknown): ValidationResult {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return { ok: false, reason: "limit must be an integer between 1 and 100" };
+  }
+  if (!Number.isInteger(value)) {
+    return { ok: false, reason: "limit must be an integer between 1 and 100" };
+  }
+  if (value < 1 || value > 100) {
+    return { ok: false, reason: "limit must be an integer between 1 and 100" };
+  }
+  return { ok: true };
+}
+
+export function validateOffset(value: unknown): ValidationResult {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return { ok: false, reason: "offset must be an integer greater than or equal to 0" };
+  }
+  if (!Number.isInteger(value)) {
+    return { ok: false, reason: "offset must be an integer greater than or equal to 0" };
+  }
+  if (value < 0) {
+    return { ok: false, reason: "offset must be an integer greater than or equal to 0" };
+  }
+  return { ok: true };
+}
+
+export function validateOrderBy(
+  value: unknown,
+  allowed: readonly string[],
+): ValidationResult {
+  return validateEnumFilter(value, "order_by", allowed, allowed.join(" / "));
+}
+
+export function validateScopeContains(value: unknown): ValidationResult {
+  return validatePlainJsonObject(value, "scope_contains");
+}

@@ -1,7 +1,7 @@
 # Runtime Flow
 
 > Status: thin current-state map · Owner: project lead ·
-> Last updated: 2026-04-26
+> Last updated: 2026-04-27
 >
 > This file describes the implemented runtime as it exists in
 > `src/`. The fuller, design-level state-machine specifications
@@ -155,7 +155,8 @@ promotes a `session` attachment to `long_term`.
 Phase 1A.1 (schema skeleton + types + validators), Phase 1A.2
 (proposal-only write surface), Phase 1A.3 (proposal review
 local surface), Phase 1A.4 (source/evidence-link local surface),
-and Phase 1A.5 (commit/activation local surface) have landed on
+Phase 1A.5 (commit/activation local surface), and Phase 1A.6
+(query/explain local read surfaces) have landed on
 `main`. **Runtime request handling is unchanged.** The implemented
 runtime stages above — Telegram inbound, `provider_run`,
 `summary_generation`, `storage_sync`, `notification_retry`, and
@@ -232,18 +233,42 @@ still uses the existing `src/context/builder.ts` +
   `executeJudgmentCommitTool`) — local unregistered typed-tool
   contract.
 
-The proposal, review, source-recording, evidence-linking, and commit
-surfaces can be exercised by tests or direct local code. They are
+**Phase 1A.6** — query/explain local read surfaces:
+
+- `src/judgment/repository.ts` (`queryJudgments`) — read-only local
+  query surface over `judgment_items`, optionally using the
+  `judgment_items_fts` index and optionally including compact
+  evidence/source metadata. By default it returns only
+  `lifecycle_status=active` / `activation_state=eligible` /
+  `retention_state=normal` rows unless `include_history=true`.
+- `src/judgment/repository.ts` (`explainJudgment`) — read-only local
+  audit surface for one judgment plus linked evidence, linked
+  sources, and relevant lifecycle events. Deleted rows are not
+  explainable in the current implementation.
+- `src/judgment/tool.ts` (`JUDGMENT_QUERY_TOOL`,
+  `executeJudgmentQueryTool`, `JUDGMENT_EXPLAIN_TOOL`,
+  `executeJudgmentExplainTool`) — local unregistered typed-tool
+  contracts.
+
+The proposal, review, source-recording, evidence-linking, commit,
+query, and explain surfaces can be exercised by tests or direct
+local code. They are
 **not** exposed to providers, Telegram, commands, worker dispatch,
 or context building:
 
 - `judgment.propose`, `judgment.approve`, `judgment.reject`,
   `judgment.record_source`, `judgment.link_evidence`,
-  `judgment.commit` are not registered in `src/main.ts` or any
-  runtime module.
+  `judgment.commit`, `judgment.query`, `judgment.explain` are not
+  registered in `src/main.ts` or any runtime module.
 - `src/providers/*`, `src/context/*`, `src/queue/worker.ts`,
   `src/memory/*`, `src/telegram/*`, and `src/commands/*` do not
   import from `src/judgment/`.
+- Query/explain are read-only. They do not mutate `judgment_items`,
+  `judgment_sources`, `judgment_evidence_links`, `judgment_edges`,
+  or `judgment_events`, and they do not append telemetry events.
+- Active/eligible rows remain outside runtime context. No Context
+  Compiler, provider prompt integration, memory-promotion path,
+  worker dispatch hook, or Telegram command uses query/explain.
 
 Schema version remains **4**.
 
@@ -259,14 +284,16 @@ rows from provider output: **not implemented**.
 
 - A partial persistence substrate exists: schema, FTS5 index,
   proposal + review writers, source recording, evidence linking,
-  and `judgment.proposed` / `judgment.approved` /
+  commit/activation, local query/explain read surfaces, and
+  `judgment.proposed` / `judgment.approved` /
   `judgment.rejected` / `judgment.source.recorded` /
-  `judgment.evidence.linked` events.
-- Not implemented: `supersede`, `revoke`, `expire`, `query`,
-  `explain`. `judgment_edges` has no runtime writer. Active/eligible
-  judgment rows exist in DB (after commit) but are not read by
-  runtime context — no Context Compiler or provider read path exists
-  yet. Commit is local and unregistered.
+  `judgment.evidence.linked` / `judgment.committed` events.
+- Not implemented: `supersede`, `revoke`, `expire`.
+  `judgment_edges` has no runtime writer. Active/eligible judgment
+  rows exist in DB (after commit) and can be read locally through
+  query/explain, but are not read by runtime context — no Context
+  Compiler or provider read path exists yet. All judgment tools
+  remain local and unregistered.
 
 **Stage 4** — Context Compiler: `current_operating_view`
 projection (DEC-036) and the Stage 4 Context Compiler that would
