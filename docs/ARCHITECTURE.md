@@ -1,7 +1,7 @@
 # Architecture
 
 > Status: thin current-state overview · Owner: project lead ·
-> Last updated: 2026-04-26
+> Last updated: 2026-04-27
 >
 > This is a short pointer doc. For why decisions were made, see
 > `docs/adr/` (ADR-0001 … ADR-0013). For acceptance contracts and
@@ -210,6 +210,10 @@ pre-Judgment-System modules. Headlines:
   section both stand: judgment is added **above** ADR-0006's
   memory layer, not in place of it.
 
-The audit performs no code changes. Per-module classifications
-are recorded in `docs/CODE_MAP.md` (status column) and the
-follow-up PR sequence is in audit §6.
+The audit performs no code changes. The full per-module
+classification table lives in the audit itself
+(`docs/design/salvage-audit-2026-04.md` §4). `docs/CODE_MAP.md`
+records the salvage status only for modules that were previously
+flagged `needs audit` or that the follow-up PR sequence directly
+affects (memory/*, context/*, queue/worker.ts). The follow-up PR
+sequence is in audit §6.

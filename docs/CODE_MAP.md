@@ -1,7 +1,7 @@
 # Code Map
 
 > Status: thin current-state map · Owner: project lead ·
-> Last updated: 2026-04-26
+> Last updated: 2026-04-27
 >
 > This file maps the actual files in `src/`, `test/`, `migrations/`,
 > `scripts/`, `config/`, and `deploy/`. It is meant to be skimmed by
@@ -160,9 +160,9 @@ record per DEC-037). It has no module in `src/` yet. See
 ## Stale / superseded
 
 None currently flagged. The 2026-04 salvage audit
-(`docs/design/salvage-audit-2026-04.md`) classified the surviving
-modules as KEEP / ADAPT / ADAPT-light / REPLACE and identified
-**no DELETE candidates**. `src/context/builder.ts` is the only
-REPLACE candidate; it stays in tree until the Stage 4 Context
-Compiler PR (audit §6 step 9) marks it `possibly stale` and a
-follow-up PR removes it.
+(`docs/design/salvage-audit-2026-04.md`) classified
+`src/context/builder.ts` as the only REPLACE candidate. It
+remains in tree until the Stage 4 Context Compiler path is
+available. The removal timing — immediate deletion vs a
+`possibly stale` soak period — is an open follow-up decision
+recorded in audit §7.
