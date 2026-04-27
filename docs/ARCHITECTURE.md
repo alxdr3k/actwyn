@@ -157,10 +157,11 @@ Detailed module / state-machine diagrams live in `docs/02_HLD.md`.
   accepted on `main`; ADR-0009 … ADR-0013 cover the Judgment System
   direction; Phase 1A.1 schema/types/validators, Phase 1A.2 proposal
   repository/tool contract, Phase 1A.3 proposal review repository/tool
-  contracts, and Phase 1A.4 source/evidence-link repository/tool
-  contracts are implemented — full Judgment System runtime is not
-  implemented; Phase 1A.5+ lifecycle/runtime surfaces remain future
-  work; runtime wiring remains future work).
+  contracts, Phase 1A.4 source/evidence-link repository/tool
+  contracts, and Phase 1A.5 commit/activation repository/tool
+  contract are implemented — full Judgment System runtime is not
+  implemented; runtime wiring and Phase 1A.6+ lifecycle surfaces
+  remain future work).
 - **Tactical decisions and open questions** —
   `docs/08_DECISION_REGISTER.md`, `docs/07_QUESTIONS_REGISTER.md`
   (DEC-037 records the documentation lifecycle policy this set of
@@ -207,9 +208,10 @@ A short summary; the full file map lives in `docs/CODE_MAP.md`.
   orphan PIDs); offset fast-forward; one-shot `storage_sync` for
   `failed` / `delete_failed` rows only.
 - `src/judgment/*` — Phase 1A types, validators, proposal + proposal
-  review + source/evidence-link repository, and unregistered
-  `judgment.propose` / `judgment.approve` / `judgment.reject` /
-  `judgment.record_source` / `judgment.link_evidence` tool contracts.
+  review + source/evidence-link + commit/activation repository, and
+  unregistered `judgment.propose` / `judgment.approve` /
+  `judgment.reject` / `judgment.record_source` /
+  `judgment.link_evidence` / `judgment.commit` tool contracts.
   Not wired into any runtime module; see §Phase 1A below.
 
 ## Phase 1A current slice and planned architecture
@@ -241,7 +243,7 @@ exists only as local unregistered DB operations:
 
 The DB-native AI-first Judgment System direction (ADR-0009 …
 ADR-0013, `docs/JUDGMENT_SYSTEM.md`) defines the following
-components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4):
+components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4 / 1A.5):
 
 - **Schema skeleton** — `judgment_sources`, `judgment_items`,
   `judgment_evidence_links`, `judgment_edges`, `judgment_events`,
@@ -261,14 +263,21 @@ components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4):
   (`linkJudgmentEvidence`). Writes `judgment_evidence_links`,
   updates denormalized arrays on `judgment_items`, appends
   `judgment.evidence.linked` event. Does not activate or approve.
+- **Commit / activation repository** — `src/judgment/repository.ts`
+  (`commitApprovedJudgment`). Requires approved + evidence-linked
+  judgment. Sets `lifecycle_status=active` /
+  `activation_state=eligible` / `authority_source=user_confirmed`,
+  syncs denormalized arrays, appends `judgment.committed` event.
+  Local unregistered operation. Active/eligible rows not read by
+  runtime context.
 - **Unregistered typed-tool contracts** — `src/judgment/tool.ts`
   (`judgment.propose`, `judgment.approve`, `judgment.reject`,
-  `judgment.record_source`, `judgment.link_evidence`).
-  Not imported from any runtime module.
+  `judgment.record_source`, `judgment.link_evidence`,
+  `judgment.commit`). Not imported from any runtime module.
 
 `judgment_edges` has no runtime writer yet.
 
-**Not implemented** (Phase 1A.5+ and beyond):
+**Not implemented** (Phase 1A.6+ and beyond):
 
 - `Control Gate` evaluators and the `control_gate_events` /
   `control_plane_events` ledger (table name open per
@@ -281,10 +290,9 @@ components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4):
 - `current_operating_view` projection (DEC-036) — **not
   implemented**.
 - Vector and graph derived projections — **not implemented**.
-- Further typed tools (`commit` / `supersede` / `revoke` /
-  `query` / `explain` / `update_current_state` / activation
-  workflow) and Critique Lens v0.1 integration (ADR-0013) —
-  **not implemented**.
+- Further typed tools (`supersede` / `revoke` / `expire` /
+  `query` / `explain` / `update_current_state`) and Critique
+  Lens v0.1 integration (ADR-0013) — **not implemented**.
 - Provider / context / memory-promotion runtime integration —
   **not implemented**. The judgment tables are not read or written
   by `src/providers/*`, `src/context/*`, `src/queue/worker.ts`,
@@ -295,10 +303,12 @@ These are listed so AI coding agents do not mistake design
 documents for implemented behavior. Phase 1A.1 (schema + types +
 validators), Phase 1A.2 (proposal repository + unregistered tool
 contract), Phase 1A.3 (proposal review repository + unregistered
-approve/reject tool contracts), and Phase 1A.4 (source/evidence-link
-repository + unregistered tool contracts) have landed.
-**Activation, commit, supersede, revoke, expire, query, explain,
-context integration, and Control Gate work remains future scope.**
+approve/reject tool contracts), Phase 1A.4 (source/evidence-link
+repository + unregistered tool contracts), and Phase 1A.5
+(commit/activation repository + unregistered commit tool contract)
+have landed.
+**Supersede, revoke, expire, query, explain, context integration,
+and Control Gate work remains future scope.**
 See `docs/RUNTIME.md` and `docs/DATA_MODEL.md` for how the
 implemented slice sits next to the runtime, and
 `docs/JUDGMENT_SYSTEM.md` §Implementation Readiness for the broader

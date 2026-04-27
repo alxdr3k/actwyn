@@ -98,9 +98,14 @@ landed (see table below):
 - **Phase 1A.4**: source recording + evidence-link repository + unregistered
   `judgment.record_source` / `judgment.link_evidence` tool contracts. Evidence linking
   does **not** activate or approve.
+- **Phase 1A.5**: commit/activation repository + unregistered `judgment.commit` tool
+  contract. Commit requires approved + evidence-linked judgment; sets
+  `lifecycle_status=active` / `activation_state=eligible` /
+  `authority_source=user_confirmed`. Active/eligible rows exist in DB but are **not**
+  read by runtime context.
 
-No activation workflow, commit/supersede/revoke/expire/query/explain workflow, Control
-Gate, Context Compiler integration, or provider runtime wiring is implemented.
+No supersede/revoke/expire/query/explain workflow, Control Gate, Context Compiler
+integration, or provider runtime wiring is implemented.
 See `docs/DATA_MODEL.md` and `docs/RUNTIME.md`.
 
 ## Judgment (Phase 1A.5 — schema + proposal + review + source/evidence-link + commit/activation repository + typed-tool contracts)

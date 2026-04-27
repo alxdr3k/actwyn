@@ -374,7 +374,7 @@ to keep in mind:
 - A schema change is an architecture-level event for the affected
   table. If the table is new or its semantics change, add an ADR.
 
-## Judgment System schema (Phase 1A.4 — source/evidence-link repository landed; control-plane not wired)
+## Judgment System schema (Phase 1A.5 — commit/activation repository landed; control-plane not wired)
 
 The DB-native AI-first Judgment System direction defines a separate
 schema family. As of migration 004, **the five `judgment_*` tables
@@ -387,24 +387,29 @@ writer for `judgment_items` and `judgment_events`. Phase 1A.3 added
 approval and rejection review transitions. Phase 1A.4 added
 `recordJudgmentSource` (writes `judgment_sources`) and
 `linkJudgmentEvidence` (writes `judgment_evidence_links` and updates
-denormalized arrays on `judgment_items`). The tool contracts in
-`src/judgment/tool.ts` (`judgment.propose`, `judgment.approve`,
-`judgment.reject`, `judgment.record_source`, `judgment.link_evidence`)
-are not registered in any runtime module. No activation, context use,
-runtime extraction, Control Gate, or provider integration is wired.
-Evidence linking does not activate or approve judgments. Names and
-constraints come from the Phase 0/0.5 design records that landed on
-`main` as ADR-0009 … ADR-0013 plus `docs/JUDGMENT_SYSTEM.md` (per
-DEC-037, that spec is a historical architectural record, not
-implementation authority).
+denormalized arrays on `judgment_items`). Phase 1A.5 added
+`commitApprovedJudgment` (sets `lifecycle_status=active` /
+`activation_state=eligible` / `authority_source=user_confirmed`,
+syncs denormalized arrays, appends `judgment.committed` event). The
+tool contracts in `src/judgment/tool.ts` (`judgment.propose`,
+`judgment.approve`, `judgment.reject`, `judgment.record_source`,
+`judgment.link_evidence`, `judgment.commit`) are not registered in
+any runtime module. No Context Compiler, context use, runtime
+extraction, Control Gate, or provider integration is wired.
+Evidence linking does not activate or approve judgments. Commit is
+local and unregistered; active/eligible rows are not read by runtime
+context. Names and constraints come from the Phase 0/0.5 design
+records that landed on `main` as ADR-0009 … ADR-0013 plus
+`docs/JUDGMENT_SYSTEM.md` (per DEC-037, that spec is a historical
+architectural record, not implementation authority).
 
 | Table                                        | Purpose                                                              | Status (2026-04-27)                                                          |
 | -------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | `judgment_sources`                           | Source of a judgment fragment (turn, attachment, external).          | schema implemented in migration 004; local unregistered writer: `src/judgment/repository.ts` via `recordJudgmentSource` (Phase 1A.4). Not runtime-wired. |
-| `judgment_items`                             | Atomic judgment rows (the Judgment System analogue of memory_items). | schema implemented in migration 004; writer: `src/judgment/repository.ts` for propose/approve/reject only (Phase 1A.2/1A.3); `linkJudgmentEvidence` also updates denormalized JSON arrays (Phase 1A.4). No activation. |
+| `judgment_items`                             | Atomic judgment rows (the Judgment System analogue of memory_items). | schema implemented in migration 004; writer: `src/judgment/repository.ts` for propose/approve/reject/commit transitions (Phase 1A.2/1A.3/1A.5); `linkJudgmentEvidence` also updates denormalized JSON arrays (Phase 1A.4); `commitApprovedJudgment` sets `lifecycle_status=active` / `activation_state=eligible` / `authority_source=user_confirmed` (Phase 1A.5). Active/eligible rows not read by runtime context. |
 | `judgment_evidence_links`                    | Links between judgments and supporting evidence rows.                | schema implemented in migration 004; local unregistered writer: `src/judgment/repository.ts` via `linkJudgmentEvidence` (Phase 1A.4). Not runtime-wired. |
 | `judgment_edges`                             | Typed relations between judgments (supports, contradicts, refines).  | schema implemented in migration 004; no runtime writer.                       |
-| `judgment_events`                            | Append-only event log for judgment lifecycle changes.                | schema implemented in migration 004; writer: `src/judgment/repository.ts` for `judgment.proposed` / `judgment.approved` / `judgment.rejected` / `judgment.source.recorded` / `judgment.evidence.linked` events (Phase 1A.2/1A.3/1A.4). |
+| `judgment_events`                            | Append-only event log for judgment lifecycle changes.                | schema implemented in migration 004; writer: `src/judgment/repository.ts` for `judgment.proposed` / `judgment.approved` / `judgment.rejected` / `judgment.source.recorded` / `judgment.evidence.linked` / `judgment.committed` events (Phase 1A.2/1A.3/1A.4/1A.5). |
 | `judgment_items_fts`                         | FTS5 external-content index over `judgment_items.statement`.          | schema implemented in migration 004; sync triggers tested; populated by repository inserts. |
 | `control_gate_events` / `control_plane_events` | Control Gate decisions per query (table name itself is open per Phase 1A scope). | **planned** (`docs/JUDGMENT_SYSTEM.md` §Implementation Readiness; ADR-0012). |
 | `tensions`                                   | Telemetry for unresolved tension between judgments / sources.        | **planned** (`docs/JUDGMENT_SYSTEM.md` §Critique Lens + Tension Generalization; ADR-0013). |
@@ -414,10 +419,14 @@ For the implemented rows: `src/judgment/repository.ts` writes
 `judgment_items`, `judgment_sources`, `judgment_evidence_links`, and
 `judgment_events`. Phase 1A.2/1A.3 adds proposal and review
 transitions. Phase 1A.4 adds source recording and evidence linking.
-No active/eligible/context-visible judgment write path exists. No
-Control Gate or Context Compiler reads these tables. Do not migrate
-`memory_summaries` / `memory_items` data into them — Q-027 stays
-open and ADR-0009 commits to the "분리" starting point.
+Phase 1A.5 adds commit/activation transition (`commitApprovedJudgment`
+sets `lifecycle_status=active` / `activation_state=eligible` /
+`authority_source=user_confirmed`). Active/eligible rows can now exist
+in the DB after commit, but are not read by runtime context — no
+Context Compiler or provider read path exists yet. No Control Gate
+reads these tables. Do not migrate `memory_summaries` /
+`memory_items` data into them — Q-027 stays open and ADR-0009
+commits to the "분리" starting point.
 
 Q-027 (`memory_items` ↔ `judgment_items` 관계) is open. ADR-0009
 commits to "분리" as the Phase 0 starting point; the implementation
