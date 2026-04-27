@@ -153,8 +153,9 @@ promotes a `session` attachment to `long_term`.
 ## Judgment System: current state and runtime boundary
 
 Phase 1A.1 (schema skeleton + types + validators), Phase 1A.2
-(proposal-only write surface), and Phase 1A.3 (proposal review
-local surface) have landed on `main`. **Runtime request handling
+(proposal-only write surface), Phase 1A.3 (proposal review
+local surface), and Phase 1A.4 (source/evidence-link local
+surface) have landed on `main`. **Runtime request handling
 is unchanged.** The implemented runtime stages above — Telegram
 inbound, `provider_run`, `summary_generation`, `storage_sync`,
 `notification_retry`, and outbound delivery — do not call any
@@ -198,12 +199,31 @@ implementation.
   `executeJudgmentRejectTool`) — local unregistered typed-tool
   contracts.
 
-The proposal and review surfaces can be exercised by tests or
-direct local code. They are **not** exposed to providers, Telegram,
-commands, worker dispatch, or context building:
+**Phase 1A.4** — source recording and evidence-link local surface:
 
-- `judgment.propose`, `judgment.approve`, `judgment.reject` are
-  not registered in `src/main.ts` or any runtime module.
+- `src/judgment/repository.ts` (`recordJudgmentSource`) — inserts
+  one `judgment_sources` row and appends a
+  `judgment.source.recorded` event (`judgment_id = NULL`). Does
+  not create or mutate `judgment_items`.
+- `src/judgment/repository.ts` (`linkJudgmentEvidence`) — inserts
+  one `judgment_evidence_links` row, updates the denormalized
+  `source_ids_json` / `evidence_ids_json` arrays on
+  `judgment_items`, and appends a `judgment.evidence.linked` event.
+  **Does not activate, approve, commit, or make a judgment
+  context-visible.** Only links proposed/history_only judgments.
+- `src/judgment/tool.ts` (`JUDGMENT_RECORD_SOURCE_TOOL`,
+  `executeJudgmentRecordSourceTool`, `JUDGMENT_LINK_EVIDENCE_TOOL`,
+  `executeJudgmentLinkEvidenceTool`) — local unregistered
+  typed-tool contracts.
+
+The proposal, review, source-recording, and evidence-linking
+surfaces can be exercised by tests or direct local code. They are
+**not** exposed to providers, Telegram, commands, worker dispatch,
+or context building:
+
+- `judgment.propose`, `judgment.approve`, `judgment.reject`,
+  `judgment.record_source`, `judgment.link_evidence` are not
+  registered in `src/main.ts` or any runtime module.
 - `src/providers/*`, `src/context/*`, `src/queue/worker.ts`,
   `src/memory/*`, `src/telegram/*`, and `src/commands/*` do not
   import from `src/judgment/`.
@@ -221,12 +241,14 @@ rows from provider output: **not implemented**.
 **Stage 3** — Judgment Store lifecycle:
 
 - A partial persistence substrate exists: schema, FTS5 index,
-  proposal + review writers, and `judgment.proposed` /
-  `judgment.approved` / `judgment.rejected` events.
+  proposal + review writers, source recording, evidence linking,
+  and `judgment.proposed` / `judgment.approved` /
+  `judgment.rejected` / `judgment.source.recorded` /
+  `judgment.evidence.linked` events.
 - Not implemented: activation workflow, `commit`, `supersede`,
-  `revoke`, `expire`, `query`, `explain`, and evidence-linking
-  workflow. `judgment_sources`, `judgment_evidence_links`, and
-  `judgment_edges` have no runtime writer.
+  `revoke`, `expire`, `query`, `explain`. `judgment_edges` has
+  no runtime writer. Linked evidence does not make a judgment
+  active or context-visible.
 
 **Stage 4** — Context Compiler: `current_operating_view`
 projection (DEC-036) and the Stage 4 Context Compiler that would

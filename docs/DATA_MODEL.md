@@ -170,15 +170,15 @@ Attaches meaning to an artifact.
 - `relation_type ∈ { evidence, attachment, generated_output, reference, source }`.
 - CHECK requires `memory_summary_id` or `turn_id` to be non-null.
 
-### `judgment_*` (Phase 1A — schema + proposal + review repository)
+### `judgment_*` (Phase 1A — schema + proposal + review + source/evidence repository)
 
 Migration 004 (`migrations/004_judgment_skeleton.sql`) added the
 following tables and an FTS5 virtual table per ADR-0009 ..
 ADR-0013 and `docs/JUDGMENT_SYSTEM.md`.
 
 `src/judgment/repository.ts` is the **sole writer** for
-`judgment_items` and `judgment_events`. It supports three
-operations:
+`judgment_items`, `judgment_sources`, `judgment_evidence_links`,
+and `judgment_events`. It supports five operations:
 - **Proposal-only insert** (`proposeJudgment`) — creates rows with
   `lifecycle_status=proposed` / `approval_state=pending` /
   `activation_state=history_only`.
@@ -190,12 +190,26 @@ operations:
 - **Rejection review transition** (`rejectProposedJudgment`) — sets
   `approval_state=rejected`, `lifecycle_status=rejected`,
   `activation_state=excluded`. Row is retained for audit/history.
+- **Source recording** (`recordJudgmentSource`) — inserts one
+  `judgment_sources` row. Appends a `judgment.source.recorded` event
+  with `judgment_id=NULL`. Does not create or mutate any
+  `judgment_items` row.
+- **Evidence linking** (`linkJudgmentEvidence`) — inserts one
+  `judgment_evidence_links` row linking an existing judgment to an
+  existing source. Also updates the denormalized `source_ids_json`
+  and `evidence_ids_json` arrays on `judgment_items`, and appends a
+  `judgment.evidence.linked` event. **Does not activate, approve, or
+  commit a judgment.**
 
 No active/eligible/context-visible judgment write path exists yet.
 No activation workflow, supersede, revoke, or expire write path
 exists. The `src/judgment/tool.ts` typed-tool contracts
-(`judgment.propose`, `judgment.approve`, `judgment.reject`) wrap
-the repository but are not registered in any runtime module.
+(`judgment.propose`, `judgment.approve`, `judgment.reject`,
+`judgment.record_source`, `judgment.link_evidence`) wrap the
+repository but are not registered in any runtime module.
+
+Evidence linking does not activate or approve judgments. Linked
+evidence does not make a judgment context-visible.
 
 No Control Gate or Context Compiler reads from these tables. Future
 runtime writers must route through `src/judgment/repository.ts` (or
@@ -298,7 +312,10 @@ reasoning.
 | `judgment_items` (insert)             | `src/judgment/repository.ts` (`proposeJudgment`) — proposal rows only. No other module may write `judgment_items` directly. |
 | `judgment_items` (approve transition) | `src/judgment/repository.ts` (`approveProposedJudgment`) — sets `approval_state=approved` only. Does not activate. |
 | `judgment_items` (reject transition)  | `src/judgment/repository.ts` (`rejectProposedJudgment`) — sets `approval_state=rejected` / `lifecycle_status=rejected` / `activation_state=excluded`. |
-| `judgment_events` (insert)            | `src/judgment/repository.ts` — `judgment.proposed`, `judgment.approved`, `judgment.rejected` events only. |
+| `judgment_items` (evidence arrays)    | `src/judgment/repository.ts` (`linkJudgmentEvidence`) — updates `source_ids_json` / `evidence_ids_json` denormalized arrays only. No activation. |
+| `judgment_sources` (insert)           | `src/judgment/repository.ts` (`recordJudgmentSource`) — local unregistered writer. No runtime path. |
+| `judgment_evidence_links` (insert)    | `src/judgment/repository.ts` (`linkJudgmentEvidence`) — local unregistered writer. No runtime path. |
+| `judgment_events` (insert)            | `src/judgment/repository.ts` — `judgment.proposed`, `judgment.approved`, `judgment.rejected`, `judgment.source.recorded`, `judgment.evidence.linked` events only. |
 
 ## Cross-table invariants
 
@@ -340,7 +357,7 @@ to keep in mind:
 - A schema change is an architecture-level event for the affected
   table. If the table is new or its semantics change, add an ADR.
 
-## Judgment System schema (Phase 1A.2 — proposal repository landed; control-plane not wired)
+## Judgment System schema (Phase 1A.4 — source/evidence-link repository landed; control-plane not wired)
 
 The DB-native AI-first Judgment System direction defines a separate
 schema family. As of migration 004, **the five `judgment_*` tables
@@ -350,31 +367,38 @@ documentation only.
 
 Phase 1A.2 added `src/judgment/repository.ts` as the proposal-only
 writer for `judgment_items` and `judgment_events`. Phase 1A.3 added
-approval and rejection review transitions to the same module. The
-tool contracts in `src/judgment/tool.ts` (`judgment.propose`,
-`judgment.approve`, `judgment.reject`) are not registered in any
-runtime module. No activation, context use, runtime extraction,
-Control Gate, or provider integration is wired. Names and constraints
-come from the Phase 0/0.5 design records that landed on `main` as
-ADR-0009 … ADR-0013 plus `docs/JUDGMENT_SYSTEM.md` (per DEC-037,
-that spec is a historical architectural record, not implementation
-authority).
+approval and rejection review transitions. Phase 1A.4 added
+`recordJudgmentSource` (writes `judgment_sources`) and
+`linkJudgmentEvidence` (writes `judgment_evidence_links` and updates
+denormalized arrays on `judgment_items`). The tool contracts in
+`src/judgment/tool.ts` (`judgment.propose`, `judgment.approve`,
+`judgment.reject`, `judgment.record_source`, `judgment.link_evidence`)
+are not registered in any runtime module. No activation, context use,
+runtime extraction, Control Gate, or provider integration is wired.
+Evidence linking does not activate or approve judgments. Names and
+constraints come from the Phase 0/0.5 design records that landed on
+`main` as ADR-0009 … ADR-0013 plus `docs/JUDGMENT_SYSTEM.md` (per
+DEC-037, that spec is a historical architectural record, not
+implementation authority).
 
 | Table                                        | Purpose                                                              | Status (2026-04-27)                                                          |
 | -------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `judgment_sources`                           | Source of a judgment fragment (turn, attachment, external).          | schema implemented in migration 004; no runtime writer (Phase 1A.2 does not insert sources). |
-| `judgment_items`                             | Atomic judgment rows (the Judgment System analogue of memory_items). | schema implemented in migration 004; writer: `src/judgment/repository.ts` for propose/approve/reject only (Phase 1A.2/1A.3). |
-| `judgment_evidence_links`                    | Links between judgments and supporting evidence rows.                | schema implemented in migration 004; no runtime writer.                       |
+| `judgment_sources`                           | Source of a judgment fragment (turn, attachment, external).          | schema implemented in migration 004; local unregistered writer: `src/judgment/repository.ts` via `recordJudgmentSource` (Phase 1A.4). Not runtime-wired. |
+| `judgment_items`                             | Atomic judgment rows (the Judgment System analogue of memory_items). | schema implemented in migration 004; writer: `src/judgment/repository.ts` for propose/approve/reject only (Phase 1A.2/1A.3); `linkJudgmentEvidence` also updates denormalized JSON arrays (Phase 1A.4). No activation. |
+| `judgment_evidence_links`                    | Links between judgments and supporting evidence rows.                | schema implemented in migration 004; local unregistered writer: `src/judgment/repository.ts` via `linkJudgmentEvidence` (Phase 1A.4). Not runtime-wired. |
 | `judgment_edges`                             | Typed relations between judgments (supports, contradicts, refines).  | schema implemented in migration 004; no runtime writer.                       |
-| `judgment_events`                            | Append-only event log for judgment lifecycle changes.                | schema implemented in migration 004; writer: `src/judgment/repository.ts` for `judgment.proposed` / `judgment.approved` / `judgment.rejected` events only (Phase 1A.2/1A.3). |
+| `judgment_events`                            | Append-only event log for judgment lifecycle changes.                | schema implemented in migration 004; writer: `src/judgment/repository.ts` for `judgment.proposed` / `judgment.approved` / `judgment.rejected` / `judgment.source.recorded` / `judgment.evidence.linked` events (Phase 1A.2/1A.3/1A.4). |
 | `judgment_items_fts`                         | FTS5 external-content index over `judgment_items.statement`.          | schema implemented in migration 004; sync triggers tested; populated by repository inserts. |
 | `control_gate_events` / `control_plane_events` | Control Gate decisions per query (table name itself is open per Phase 1A scope). | **planned** (`docs/JUDGMENT_SYSTEM.md` §Implementation Readiness; ADR-0012). |
 | `tensions`                                   | Telemetry for unresolved tension between judgments / sources.        | **planned** (`docs/JUDGMENT_SYSTEM.md` §Critique Lens + Tension Generalization; ADR-0013). |
 | `reflection_triage_events`                   | Reflection / triage outcomes feeding back into judgments.            | **planned** (`docs/JUDGMENT_SYSTEM.md` §Metacognitive Critique Loop; ADR-0012, ADR-0013). |
 
 For the implemented rows: `src/judgment/repository.ts` writes
-`judgment_items` and `judgment_events` (proposal rows only). No
-Control Gate or Context Compiler reads them. Do not migrate
+`judgment_items`, `judgment_sources`, `judgment_evidence_links`, and
+`judgment_events`. Phase 1A.2/1A.3 adds proposal and review
+transitions. Phase 1A.4 adds source recording and evidence linking.
+No active/eligible/context-visible judgment write path exists. No
+Control Gate or Context Compiler reads these tables. Do not migrate
 `memory_summaries` / `memory_items` data into them — Q-027 stays
 open and ADR-0009 commits to the "분리" starting point.
 

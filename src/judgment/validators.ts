@@ -20,6 +20,7 @@ import {
   LIFECYCLE_STATUSES,
   PROCEDURE_SUBTYPES,
   RETENTION_STATES,
+  TRUST_LEVELS,
   type ActivationStateP05,
   type ApprovalState,
   type AuthoritySourceP05,
@@ -30,6 +31,7 @@ import {
   type LifecycleStatus,
   type ProcedureSubtype,
   type RetentionState,
+  type TrustLevel,
 } from "~/judgment/types.ts";
 
 export type ValidationResult =
@@ -344,6 +346,31 @@ export function validatePlainJsonObject(value: unknown, fieldName: string): Vali
     return { ok: false, reason: `${fieldName} must serialize to a JSON object` };
   }
   return { ok: true };
+}
+
+export function isTrustLevel(value: unknown): value is TrustLevel {
+  return (
+    typeof value === "string" &&
+    (TRUST_LEVELS as readonly string[]).includes(value)
+  );
+}
+
+/** `trust_level` must be one of low / medium / high. */
+export function validateTrustLevel(v: unknown): ValidationResult {
+  if (isTrustLevel(v)) return { ok: true };
+  return { ok: false, reason: "trust_level must be one of low / medium / high" };
+}
+
+/**
+ * When defined, value must be a non-empty string after trimming.
+ * Returns ok:true for undefined (field is absent).
+ */
+export function validateOptionalNonEmptyString(
+  value: unknown,
+  fieldName: string,
+): ValidationResult {
+  if (value === undefined) return { ok: true };
+  return validateNonEmptyString(value, fieldName);
 }
 
 /**

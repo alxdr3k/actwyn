@@ -43,11 +43,13 @@ import {
   validateImportance,
   validateKind,
   validateNonEmptyString,
+  validateOptionalNonEmptyString,
   validatePlainJsonObject,
   validateScopeJson,
   validateScopeObject,
   validateStatement,
   validateStringArray,
+  validateTrustLevel,
   type ValidationResult,
 } from "~/judgment/validators.ts";
 
@@ -776,6 +778,389 @@ export function rejectProposedJudgment(
       approved_at: existing.approved_at,
       updated_at: nowIsoStr,
       event_type: "judgment.rejected",
+      event_id: eventId,
+    };
+  });
+}
+
+// ---------------------------------------------------------------
+// Phase 1A.4 — Source recording and evidence linking
+// ---------------------------------------------------------------
+
+export interface SourceInput {
+  kind: string;
+  locator: string;
+  content_hash?: string;
+  trust_level?: string;
+  redacted?: boolean;
+  captured_at?: string;
+  payload?: Record<string, unknown>;
+}
+
+export interface SourceDeps {
+  newSourceId?: () => string;
+  newEventId?: () => string;
+  actor?: string;
+  _injectEventInsertError?: Error;
+}
+
+export interface RecordedSource {
+  id: string;
+  kind: string;
+  locator: string;
+  content_hash: string | null;
+  trust_level: string;
+  redacted: boolean;
+  captured_at: string;
+  event_type: "judgment.source.recorded";
+  event_id: string;
+}
+
+export function recordJudgmentSource(
+  db: DbHandle,
+  input: SourceInput,
+  deps: SourceDeps = {},
+): RecordedSource {
+  if (input === null || typeof input !== "object") {
+    throw new JudgmentValidationError("input must be a plain object");
+  }
+
+  assertValid(validateNonEmptyString(input.kind, "kind"), "kind");
+  const kind = input.kind.trim();
+
+  assertValid(validateNonEmptyString(input.locator, "locator"), "locator");
+  const locator = input.locator.trim();
+
+  let contentHash: string | null = null;
+  if (input.content_hash !== undefined) {
+    assertValid(validateNonEmptyString(input.content_hash, "content_hash"), "content_hash");
+    contentHash = input.content_hash.trim();
+  }
+
+  const trustLevelRaw = input.trust_level ?? "medium";
+  assertValid(validateTrustLevel(trustLevelRaw), "trust_level");
+  const trustLevel = trustLevelRaw as string;
+
+  let redacted: boolean;
+  if (input.redacted === undefined) {
+    redacted = true;
+  } else if (typeof input.redacted !== "boolean") {
+    throw new JudgmentValidationError("redacted must be a boolean", "redacted");
+  } else {
+    redacted = input.redacted;
+  }
+
+  let capturedAtOverride: string | null = null;
+  if (input.captured_at !== undefined) {
+    assertValid(validateNonEmptyString(input.captured_at, "captured_at"), "captured_at");
+    capturedAtOverride = input.captured_at.trim();
+  }
+
+  let payloadJsonObj: Record<string, unknown> | undefined;
+  if (input.payload !== undefined) {
+    const payloadSerialized = serializeOnce(input.payload, "payload");
+    assertValid(validatePlainJsonObject(input.payload, "payload"), "payload");
+    const payloadReparsed = JSON.parse(payloadSerialized) as unknown;
+    if (
+      payloadReparsed === null ||
+      Array.isArray(payloadReparsed) ||
+      typeof payloadReparsed !== "object"
+    ) {
+      throw new JudgmentValidationError("payload must serialize to a plain JSON object", "payload");
+    }
+    payloadJsonObj = payloadReparsed as Record<string, unknown>;
+  }
+
+  const makeSourceId = deps.newSourceId ?? (() => crypto.randomUUID());
+  const makeEventId = deps.newEventId ?? (() => crypto.randomUUID());
+  const sourceId = makeSourceId();
+  const eventId = makeEventId();
+  const actor = deps.actor ?? "system";
+
+  db.tx(() => {
+    db.prepare(
+      `INSERT INTO judgment_sources (id, kind, locator, content_hash, trust_level, redacted, captured_at)
+       VALUES ($id, $kind, $locator, $content_hash, $trust_level, $redacted,
+               COALESCE($captured_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))`,
+    ).run({
+      id: sourceId,
+      kind,
+      locator,
+      content_hash: contentHash,
+      trust_level: trustLevel,
+      redacted: redacted ? 1 : 0,
+      captured_at: capturedAtOverride,
+    } as never);
+
+    if (deps._injectEventInsertError) {
+      throw deps._injectEventInsertError;
+    }
+
+    const eventPayload: Record<string, unknown> = {
+      source_id: sourceId,
+      kind,
+      locator,
+      trust_level: trustLevel,
+      redacted,
+    };
+    if (contentHash !== null) eventPayload.content_hash = contentHash;
+    if (payloadJsonObj !== undefined) eventPayload.payload = payloadJsonObj;
+
+    db.prepare(
+      `INSERT INTO judgment_events (id, event_type, judgment_id, payload_json, actor)
+       VALUES ($id, 'judgment.source.recorded', NULL, $payload_json, $actor)`,
+    ).run({
+      id: eventId,
+      payload_json: JSON.stringify(eventPayload),
+      actor,
+    } as never);
+  });
+
+  const row = db
+    .prepare<{ captured_at: string }, [string]>(
+      `SELECT captured_at FROM judgment_sources WHERE id = ?`,
+    )
+    .get(sourceId);
+
+  return {
+    id: sourceId,
+    kind,
+    locator,
+    content_hash: contentHash,
+    trust_level: trustLevel,
+    redacted,
+    captured_at: row?.captured_at ?? "",
+    event_type: "judgment.source.recorded",
+    event_id: eventId,
+  };
+}
+
+// ---------------------------------------------------------------
+// Evidence link
+// ---------------------------------------------------------------
+
+export interface EvidenceLinkInput {
+  judgment_id: string;
+  source_id: string;
+  relation: string;
+  span_locator?: string;
+  quote_excerpt?: string;
+  rationale?: string;
+  payload?: Record<string, unknown>;
+}
+
+export interface EvidenceLinkDeps {
+  newLinkId?: () => string;
+  newEventId?: () => string;
+  actor?: string;
+  _injectEventInsertError?: Error;
+}
+
+export interface LinkedEvidence {
+  id: string;
+  judgment_id: string;
+  source_id: string;
+  relation: string;
+  span_locator: string | null;
+  quote_excerpt: string | null;
+  rationale: string | null;
+  created_at: string;
+  event_type: "judgment.evidence.linked";
+  event_id: string;
+}
+
+export function linkJudgmentEvidence(
+  db: DbHandle,
+  input: EvidenceLinkInput,
+  deps: EvidenceLinkDeps = {},
+): LinkedEvidence {
+  if (input === null || typeof input !== "object") {
+    throw new JudgmentValidationError("input must be a plain object");
+  }
+
+  assertValid(validateNonEmptyString(input.judgment_id, "judgment_id"), "judgment_id");
+  const judgment_id = input.judgment_id.trim();
+
+  assertValid(validateNonEmptyString(input.source_id, "source_id"), "source_id");
+  const source_id = input.source_id.trim();
+
+  assertValid(validateNonEmptyString(input.relation, "relation"), "relation");
+  const relation = input.relation.trim();
+
+  assertValid(validateOptionalNonEmptyString(input.span_locator, "span_locator"), "span_locator");
+  const spanLocator = input.span_locator !== undefined ? input.span_locator.trim() : null;
+
+  assertValid(validateOptionalNonEmptyString(input.quote_excerpt, "quote_excerpt"), "quote_excerpt");
+  const quoteExcerpt = input.quote_excerpt !== undefined ? input.quote_excerpt.trim() : null;
+
+  assertValid(validateOptionalNonEmptyString(input.rationale, "rationale"), "rationale");
+  const rationale = input.rationale !== undefined ? input.rationale.trim() : null;
+
+  let payloadJsonObj: Record<string, unknown> | undefined;
+  if (input.payload !== undefined) {
+    const payloadSerialized = serializeOnce(input.payload, "payload");
+    assertValid(validatePlainJsonObject(input.payload, "payload"), "payload");
+    const payloadReparsed = JSON.parse(payloadSerialized) as unknown;
+    if (
+      payloadReparsed === null ||
+      Array.isArray(payloadReparsed) ||
+      typeof payloadReparsed !== "object"
+    ) {
+      throw new JudgmentValidationError("payload must serialize to a plain JSON object", "payload");
+    }
+    payloadJsonObj = payloadReparsed as Record<string, unknown>;
+  }
+
+  const makeLinkId = deps.newLinkId ?? (() => crypto.randomUUID());
+  const makeEventId = deps.newEventId ?? (() => crypto.randomUUID());
+  const linkId = makeLinkId();
+  const eventId = makeEventId();
+  const actor = deps.actor ?? "system";
+
+  return db.tx(() => {
+    const existingJudgment = db
+      .prepare<
+        {
+          id: string;
+          lifecycle_status: string;
+          activation_state: string;
+          retention_state: string;
+        },
+        [string]
+      >(
+        `SELECT id, lifecycle_status, activation_state, retention_state
+         FROM judgment_items WHERE id = ?`,
+      )
+      .get(judgment_id);
+
+    if (!existingJudgment) {
+      throw new JudgmentNotFoundError(`judgment ${judgment_id} not found`, judgment_id);
+    }
+
+    // Reject deleted judgments regardless of lifecycle.
+    if (existingJudgment.retention_state === "deleted") {
+      throw new JudgmentStateError(
+        `judgment ${judgment_id} cannot receive evidence: retention_state=deleted`,
+        judgment_id,
+      );
+    }
+
+    // Only proposed / history_only judgments may receive evidence in Phase 1A.4.
+    // This covers rejected (lifecycle=rejected), revoked, superseded, expired, and
+    // any future lifecycle that is not "proposed". Evidence links on rejected
+    // judgments are disallowed — the canonical evidence relation is
+    // judgment_evidence_links; rejected judgments are out of scope.
+    if (
+      existingJudgment.lifecycle_status !== "proposed" ||
+      existingJudgment.activation_state !== "history_only"
+    ) {
+      throw new JudgmentStateError(
+        `judgment ${judgment_id} cannot receive evidence: ` +
+          `lifecycle=${existingJudgment.lifecycle_status}, activation=${existingJudgment.activation_state}`,
+        judgment_id,
+      );
+    }
+
+    const existingSource = db
+      .prepare<{ id: string }, [string]>(`SELECT id FROM judgment_sources WHERE id = ?`)
+      .get(source_id);
+
+    if (!existingSource) {
+      throw new JudgmentNotFoundError(`source ${source_id} not found`, source_id);
+    }
+
+    db.prepare(
+      `INSERT INTO judgment_evidence_links
+         (id, judgment_id, source_id, relation, span_locator, quote_excerpt, rationale)
+       VALUES ($id, $judgment_id, $source_id, $relation, $span_locator, $quote_excerpt, $rationale)`,
+    ).run({
+      id: linkId,
+      judgment_id,
+      source_id,
+      relation,
+      span_locator: spanLocator,
+      quote_excerpt: quoteExcerpt,
+      rationale,
+    } as never);
+
+    // Update denormalized JSON arrays on judgment_items.
+    // source_ids_json: unique source ids that have been linked to this judgment.
+    // evidence_ids_json: unique evidence link ids for this judgment.
+    // These are kept in insertion order; new ids are appended only when absent.
+    // judgment_evidence_links is the canonical relation; these arrays are a
+    // convenience denormalization derived from it.
+    const itemArrays = db
+      .prepare<{ source_ids_json: string | null; evidence_ids_json: string | null }, [string]>(
+        `SELECT source_ids_json, evidence_ids_json FROM judgment_items WHERE id = ?`,
+      )
+      .get(judgment_id)!;
+
+    const prevSourceIds: string[] = itemArrays.source_ids_json
+      ? (JSON.parse(itemArrays.source_ids_json) as string[])
+      : [];
+    const prevEvidenceIds: string[] = itemArrays.evidence_ids_json
+      ? (JSON.parse(itemArrays.evidence_ids_json) as string[])
+      : [];
+
+    const nextSourceIds = prevSourceIds.includes(source_id)
+      ? prevSourceIds
+      : [...prevSourceIds, source_id];
+    const nextEvidenceIds = prevEvidenceIds.includes(linkId)
+      ? prevEvidenceIds
+      : [...prevEvidenceIds, linkId];
+
+    db.prepare(
+      `UPDATE judgment_items
+       SET source_ids_json   = $source_ids_json,
+           evidence_ids_json = $evidence_ids_json
+       WHERE id = $id`,
+    ).run({
+      source_ids_json: JSON.stringify(nextSourceIds),
+      evidence_ids_json: JSON.stringify(nextEvidenceIds),
+      id: judgment_id,
+    } as never);
+
+    if (deps._injectEventInsertError) {
+      throw deps._injectEventInsertError;
+    }
+
+    const eventPayload: Record<string, unknown> = {
+      evidence_link_id: linkId,
+      judgment_id,
+      source_id,
+      relation,
+    };
+    if (spanLocator !== null) eventPayload.span_locator = spanLocator;
+    if (quoteExcerpt !== null) eventPayload.quote_excerpt = quoteExcerpt;
+    if (rationale !== null) eventPayload.rationale = rationale;
+    if (payloadJsonObj !== undefined) eventPayload.payload = payloadJsonObj;
+
+    db.prepare(
+      `INSERT INTO judgment_events (id, event_type, judgment_id, payload_json, actor)
+       VALUES ($id, 'judgment.evidence.linked', $judgment_id, $payload_json, $actor)`,
+    ).run({
+      id: eventId,
+      judgment_id,
+      payload_json: JSON.stringify(eventPayload),
+      actor,
+    } as never);
+
+    const linkRow = db
+      .prepare<{ created_at: string }, [string]>(
+        `SELECT created_at FROM judgment_evidence_links WHERE id = ?`,
+      )
+      .get(linkId)!;
+
+    return {
+      id: linkId,
+      judgment_id,
+      source_id,
+      relation,
+      span_locator: spanLocator,
+      quote_excerpt: quoteExcerpt,
+      rationale,
+      created_at: linkRow.created_at,
+      event_type: "judgment.evidence.linked",
       event_id: eventId,
     };
   });

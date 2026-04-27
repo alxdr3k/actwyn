@@ -97,22 +97,26 @@ Migration shape is asserted by:
 - `src/db/migrator.ts` — refuses missing prior versions at runtime,
   records applied versions in `settings`.
 
-Judgment System proposal-surface and review-surface tests
-(Phase 1A.2/1A.3) live under:
+Judgment System proposal, review, source-recording, and
+evidence-linking surface tests (Phase 1A.2/1A.3/1A.4) live under:
 
 - `test/judgment/validators.test.ts` — pure-TS validator behavior
-  including `validateNonEmptyString` / `validatePlainJsonObject`
-  (Phase 1A.3).
+  including `validateNonEmptyString` / `validatePlainJsonObject` /
+  `validateTrustLevel` / `validateOptionalNonEmptyString`
+  (Phase 1A.3/1A.4).
 - `test/judgment/repository.test.ts` — `proposeJudgment` DB
   integration: insert, defaults, validation rejections, FTS trigger,
-  transaction rollback; plus `approveProposedJudgment` /
-  `rejectProposedJudgment` approval/rejection transitions, event
-  payloads, state guards, transaction rollback (Phase 1A.3).
+  transaction rollback; `approveProposedJudgment` /
+  `rejectProposedJudgment` transitions, event payloads, state guards,
+  rollback; `recordJudgmentSource` insert, defaults, trimming, event,
+  rollback; `linkJudgmentEvidence` insert, state guards, trimming,
+  event, denormalized JSON array updates, rollback (Phase 1A.3/1A.4).
 - `test/judgment/tool.test.ts` — `executeJudgmentProposeTool` /
-  `executeJudgmentApproveTool` / `executeJudgmentRejectTool`
-  contracts + static boundary assertions (no bun:* import in
-  `src/judgment/*`; tools not imported by runtime modules)
-  (Phase 1A.3).
+  `executeJudgmentApproveTool` / `executeJudgmentRejectTool` /
+  `executeJudgmentRecordSourceTool` /
+  `executeJudgmentLinkEvidenceTool` contracts + static boundary
+  assertions (no bun:* import in `src/judgment/*`; tools not
+  imported by runtime modules) (Phase 1A.3/1A.4).
 
 When you add a migration:
 
