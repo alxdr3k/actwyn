@@ -18,8 +18,15 @@
 import type { DbHandle } from "~/db.ts";
 
 import {
+  ACTIVATION_STATES_P05,
+  APPROVAL_STATES,
+  AUTHORITY_SOURCES_P05,
+  CONFIDENCES,
+  JUDGMENT_KINDS,
+  LIFECYCLE_STATUSES,
   ONTOLOGY_VERSION,
   PROCEDURE_SUBTYPES,
+  RETENTION_STATES,
   SCHEMA_VERSION,
   type ActivationStateP05,
   type ApprovalState,
@@ -30,17 +37,26 @@ import {
   type LifecycleStatus,
   type ProcedureSubtype,
   type RetentionState,
+  type TrustLevel,
 } from "~/judgment/types.ts";
 
 import {
+  validateBoolean,
   isProcedureSubtype,
   validateConfidenceLabel,
   validateEpistemicOrigin,
+  validateEnumArrayFilter,
+  validateEnumFilter,
   validateImportance,
   validateKind,
+  validateLimit,
   validateNonEmptyString,
+  validateOffset,
   validateOptionalNonEmptyString,
+  validateOrderBy,
   validatePlainJsonObject,
+  validatePlainObjectInput,
+  validateScopeContains,
   validateScopeJson,
   validateScopeObject,
   validateStatement,
@@ -149,6 +165,92 @@ function serializeOnce(v: unknown, field: string): string {
     throw new JudgmentValidationError(`${field} cannot be serialized to a JSON string`, field);
   }
   return raw;
+}
+
+type JsonObject = Record<string, unknown>;
+type JsonArrayOrObject = JsonObject | unknown[];
+
+function parsePersistedJson(raw: string, field: string, owner: string): unknown {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    throw new JudgmentValidationError(`${owner} has malformed ${field}`, field);
+  }
+}
+
+function parsePersistedObject(raw: string, field: string, owner: string): JsonObject {
+  const parsed = parsePersistedJson(raw, field, owner);
+  if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+    throw new JudgmentValidationError(`${owner} ${field} must be a JSON object`, field);
+  }
+  return parsed as JsonObject;
+}
+
+function parsePersistedStringArray(
+  raw: string | null,
+  field: string,
+  owner: string,
+): string[] {
+  if (raw === null) return [];
+  const parsed = parsePersistedJson(raw, field, owner);
+  if (!Array.isArray(parsed)) {
+    throw new JudgmentValidationError(`${owner} ${field} must be a JSON array`, field);
+  }
+  const validation = validateStringArray(parsed, field);
+  if (!validation.ok) {
+    throw new JudgmentValidationError(validation.reason, field);
+  }
+  return parsed as string[];
+}
+
+function parsePersistedJsonValue(
+  raw: string | null,
+  field: string,
+  owner: string,
+): JsonArrayOrObject | null {
+  if (raw === null) return null;
+  const parsed = parsePersistedJson(raw, field, owner);
+  if (parsed === null || typeof parsed !== "object") {
+    throw new JudgmentValidationError(
+      `${owner} ${field} must be a JSON object or array`,
+      field,
+    );
+  }
+  return parsed as JsonArrayOrObject;
+}
+
+function jsonStableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => jsonStableStringify(entry)).join(",")}]`;
+  }
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${jsonStableStringify(record[key])}`)
+    .join(",")}}`;
+}
+
+function jsonValuesEqual(left: unknown, right: unknown): boolean {
+  return jsonStableStringify(left) === jsonStableStringify(right);
+}
+
+function matchesScopeContains(
+  scope: JsonObject,
+  scopeContains: JsonObject | undefined,
+): boolean {
+  if (scopeContains === undefined) return true;
+  for (const [key, expectedValue] of Object.entries(scopeContains)) {
+    if (!Object.prototype.hasOwnProperty.call(scope, key)) {
+      return false;
+    }
+    if (!jsonValuesEqual(scope[key], expectedValue)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------
@@ -1282,53 +1384,21 @@ export function commitApprovedJudgment(
       );
     }
 
-    // Validate denormalized JSON arrays if present — malformed arrays and invalid element
-    // types fail before any update.
-    if (existing.source_ids_json !== null) {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(existing.source_ids_json);
-      } catch {
-        throw new JudgmentValidationError(
-          `judgment ${judgment_id} has malformed source_ids_json`,
-          "source_ids_json",
-        );
-      }
-      if (!Array.isArray(parsed)) {
-        throw new JudgmentValidationError(
-          `judgment ${judgment_id} source_ids_json must be a JSON array`,
-          "source_ids_json",
-        );
-      }
-      const srcElemCheck = validateStringArray(parsed, "source_ids_json");
-      if (!srcElemCheck.ok) {
-        throw new JudgmentValidationError(srcElemCheck.reason, "source_ids_json");
-      }
-    }
+    const owner = `judgment ${judgment_id}`;
+    const existingSourceIds = parsePersistedStringArray(
+      existing.source_ids_json,
+      "source_ids_json",
+      owner,
+    );
+    const existingEvidenceIds = parsePersistedStringArray(
+      existing.evidence_ids_json,
+      "evidence_ids_json",
+      owner,
+    );
 
-    if (existing.evidence_ids_json !== null) {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(existing.evidence_ids_json);
-      } catch {
-        throw new JudgmentValidationError(
-          `judgment ${judgment_id} has malformed evidence_ids_json`,
-          "evidence_ids_json",
-        );
-      }
-      if (!Array.isArray(parsed)) {
-        throw new JudgmentValidationError(
-          `judgment ${judgment_id} evidence_ids_json must be a JSON array`,
-          "evidence_ids_json",
-        );
-      }
-      const evElemCheck = validateStringArray(parsed, "evidence_ids_json");
-      if (!evElemCheck.ok) {
-        throw new JudgmentValidationError(evElemCheck.reason, "evidence_ids_json");
-      }
-    }
-
-    // Compute canonical evidence links ordered by created_at, then id.
+    // Compute canonical evidence links from the relation table, but preserve the
+    // existing validated denormalized array order where possible. This keeps the
+    // committed audit order aligned with the evidence-link insertion order.
     const evidenceLinkRows = db
       .prepare<{ id: string; source_id: string }, [string]>(
         `SELECT id, source_id FROM judgment_evidence_links
@@ -1344,14 +1414,11 @@ export function commitApprovedJudgment(
       );
     }
 
-    // Collect canonical arrays: evidence_link_ids in link order,
-    // source_ids deduplicated preserving first-link order.
-    const evidenceLinkIds: string[] = [];
-    const sourceIds: string[] = [];
-    const seenSourceIds = new Set<string>();
+    const evidenceLinkRowById = new Map<string, { id: string; source_id: string }>();
+    const linkedSourceIds = new Set<string>();
 
     for (const row of evidenceLinkRows) {
-      evidenceLinkIds.push(row.id);
+      evidenceLinkRowById.set(row.id, row);
 
       // Verify every linked source exists.
       const sourceExists = db
@@ -1364,10 +1431,52 @@ export function commitApprovedJudgment(
         );
       }
 
-      if (!seenSourceIds.has(row.source_id)) {
-        seenSourceIds.add(row.source_id);
-        sourceIds.push(row.source_id);
+      linkedSourceIds.add(row.source_id);
+    }
+
+    // Collect canonical arrays: preserve the validated existing denormalized order,
+    // then append any missing ids from the canonical relation.
+    const evidenceLinkIds: string[] = [];
+    const seenEvidenceLinkIds = new Set<string>();
+
+    for (const evidenceId of existingEvidenceIds) {
+      const row = evidenceLinkRowById.get(evidenceId);
+      if (!row) {
+        throw new JudgmentValidationError(
+          `judgment ${judgment_id} evidence_ids_json references missing evidence link ${evidenceId}`,
+          "evidence_ids_json",
+        );
       }
+      evidenceLinkIds.push(evidenceId);
+      seenEvidenceLinkIds.add(evidenceId);
+    }
+
+    for (const row of evidenceLinkRows) {
+      if (seenEvidenceLinkIds.has(row.id)) continue;
+      evidenceLinkIds.push(row.id);
+      seenEvidenceLinkIds.add(row.id);
+    }
+
+    const sourceIds: string[] = [];
+    const seenSourceIds = new Set<string>();
+
+    for (const sourceId of existingSourceIds) {
+      if (!linkedSourceIds.has(sourceId)) {
+        throw new JudgmentValidationError(
+          `judgment ${judgment_id} source_ids_json references unlinked source ${sourceId}`,
+          "source_ids_json",
+        );
+      }
+      if (seenSourceIds.has(sourceId)) continue;
+      seenSourceIds.add(sourceId);
+      sourceIds.push(sourceId);
+    }
+
+    for (const evidenceId of evidenceLinkIds) {
+      const row = evidenceLinkRowById.get(evidenceId)!;
+      if (seenSourceIds.has(row.source_id)) continue;
+      seenSourceIds.add(row.source_id);
+      sourceIds.push(row.source_id);
     }
 
     const nowIsoStr = deps.nowIso !== undefined ? deps.nowIso() : new Date().toISOString();
@@ -1453,4 +1562,888 @@ export function commitApprovedJudgment(
       source_ids: sourceIds,
     };
   });
+}
+
+// ---------------------------------------------------------------
+// Phase 1A.6 — Read-only query / explain
+// ---------------------------------------------------------------
+
+export type JudgmentQueryOrderBy =
+  | "updated_at_desc"
+  | "created_at_desc"
+  | "importance_desc"
+  | "confidence_desc"
+  | "statement_asc";
+
+const JUDGMENT_QUERY_ORDER_BYS: readonly JudgmentQueryOrderBy[] = [
+  "updated_at_desc",
+  "created_at_desc",
+  "importance_desc",
+  "confidence_desc",
+  "statement_asc",
+] as const;
+
+interface JudgmentReadRow {
+  id: string;
+  kind: string;
+  statement: string;
+  confidence: string;
+  importance: number;
+  scope_json: string;
+  epistemic_origin: string;
+  authority_source: string;
+  approval_state: string;
+  lifecycle_status: string;
+  activation_state: string;
+  retention_state: string;
+  procedure_subtype: string | null;
+  source_ids_json: string | null;
+  evidence_ids_json: string | null;
+  created_at: string;
+  updated_at: string;
+  revisit_at: string | null;
+  valid_from: string | null;
+  valid_until: string | null;
+  supersedes_json: string | null;
+  superseded_by_json: string | null;
+  would_change_if_json: string | null;
+  missing_evidence_json: string | null;
+  review_trigger_json: string | null;
+}
+
+interface JudgmentSourceRow {
+  id: string;
+  kind: string;
+  locator: string;
+  content_hash: string | null;
+  trust_level: string;
+  redacted: number;
+  captured_at: string;
+}
+
+interface JudgmentEvidenceLinkRow {
+  id: string;
+  judgment_id: string;
+  source_id: string;
+  relation: string;
+  span_locator: string | null;
+  quote_excerpt: string | null;
+  rationale: string | null;
+  created_at: string;
+}
+
+interface JudgmentEventRow {
+  id: string;
+  event_type: string;
+  actor: string;
+  created_at: string;
+  payload_json: string;
+}
+
+export interface QueryJudgmentsInput {
+  kind?: string;
+  kinds?: string[];
+  lifecycle_status?: string;
+  lifecycle_statuses?: string[];
+  approval_state?: string;
+  approval_states?: string[];
+  activation_state?: string;
+  activation_states?: string[];
+  retention_state?: string;
+  retention_states?: string[];
+  authority_source?: string;
+  authority_sources?: string[];
+  confidence?: string;
+  confidences?: string[];
+  procedure_subtype?: string;
+  statement_match?: string;
+  scope_contains?: Record<string, unknown>;
+  include_history?: boolean;
+  include_evidence?: boolean;
+  limit?: number;
+  offset?: number;
+  order_by?: string;
+}
+
+export interface JudgmentQuerySourceSummary {
+  id: string;
+  kind: string;
+  locator: string;
+  trust_level: TrustLevel;
+  redacted: boolean;
+}
+
+export interface JudgmentQueryEvidenceLinkSummary {
+  id: string;
+  source_id: string;
+  relation: string;
+  span_locator: string | null;
+  quote_excerpt: string | null;
+}
+
+export interface QueriedJudgment {
+  id: string;
+  kind: JudgmentKind;
+  statement: string;
+  confidence: Confidence;
+  importance: number;
+  scope: JsonObject;
+  epistemic_origin: EpistemicOrigin;
+  authority_source: AuthoritySourceP05;
+  approval_state: ApprovalState;
+  lifecycle_status: LifecycleStatus;
+  activation_state: ActivationStateP05;
+  retention_state: RetentionState;
+  procedure_subtype: ProcedureSubtype | null;
+  source_ids: string[];
+  evidence_ids: string[];
+  created_at: string;
+  updated_at: string;
+  revisit_at: string | null;
+  valid_from: string | null;
+  valid_until: string | null;
+  evidence_count?: number;
+  source_count?: number;
+  sources?: JudgmentQuerySourceSummary[];
+  evidence_links?: JudgmentQueryEvidenceLinkSummary[];
+}
+
+export interface QueryJudgmentsResult {
+  items: QueriedJudgment[];
+  limit: number;
+  offset: number;
+  returned: number;
+  has_more: boolean;
+}
+
+export interface ExplainJudgmentInput {
+  judgment_id: string;
+  include_events?: boolean;
+  include_sources?: boolean;
+  include_payloads?: boolean;
+}
+
+export interface ExplainedJudgment {
+  id: string;
+  kind: JudgmentKind;
+  statement: string;
+  confidence: Confidence;
+  importance: number;
+  scope: JsonObject;
+  epistemic_origin: EpistemicOrigin;
+  authority_source: AuthoritySourceP05;
+  approval_state: ApprovalState;
+  lifecycle_status: LifecycleStatus;
+  activation_state: ActivationStateP05;
+  retention_state: RetentionState;
+  procedure_subtype: ProcedureSubtype | null;
+  source_ids: string[];
+  evidence_ids: string[];
+  created_at: string;
+  updated_at: string;
+  valid_from: string | null;
+  valid_until: string | null;
+  revisit_at: string | null;
+}
+
+export interface ExplainedEvidenceLink {
+  id: string;
+  judgment_id: string;
+  source_id: string;
+  relation: string;
+  span_locator: string | null;
+  quote_excerpt: string | null;
+  rationale: string | null;
+  created_at: string;
+}
+
+export interface ExplainedSource {
+  id: string;
+  kind: string;
+  locator: string;
+  content_hash: string | null;
+  trust_level: TrustLevel;
+  redacted: boolean;
+  captured_at: string;
+}
+
+export interface JudgmentWhyEntry {
+  source_id: string;
+  evidence_link_id: string;
+  relation: string;
+  source_kind: string;
+  locator: string;
+  trust_level: TrustLevel;
+  quote_excerpt: string | null;
+  span_locator: string | null;
+  rationale: string | null;
+}
+
+export interface JudgmentEventSummary {
+  id: string;
+  event_type: string;
+  actor: string;
+  created_at: string;
+  payload?: unknown;
+}
+
+export interface JudgmentExplanation {
+  judgment: ExplainedJudgment;
+  why: JudgmentWhyEntry[];
+  evidence_links: ExplainedEvidenceLink[];
+  sources: ExplainedSource[];
+  events: JudgmentEventSummary[];
+  would_change_if: JsonArrayOrObject | null;
+  missing_evidence: JsonArrayOrObject | null;
+  review_trigger: JsonArrayOrObject | null;
+  supersedes: string[];
+  superseded_by: string[];
+}
+
+interface NormalizedQueryInput {
+  kinds?: string[];
+  lifecycle_statuses?: string[];
+  approval_states?: string[];
+  activation_states?: string[];
+  retention_states?: string[];
+  authority_sources?: string[];
+  confidences?: string[];
+  procedure_subtype?: string;
+  statement_match?: string;
+  scope_contains?: JsonObject;
+  include_history: boolean;
+  include_evidence: boolean;
+  limit: number;
+  offset: number;
+  order_by: JudgmentQueryOrderBy;
+}
+
+const JUDGMENT_QUERY_SELECT = `
+  SELECT id, kind, statement, confidence, importance, scope_json,
+         epistemic_origin, authority_source, approval_state,
+         lifecycle_status, activation_state, retention_state,
+         procedure_subtype, source_ids_json, evidence_ids_json,
+         created_at, updated_at, revisit_at, valid_from, valid_until,
+         supersedes_json, superseded_by_json,
+         would_change_if_json, missing_evidence_json, review_trigger_json
+  FROM judgment_items
+`;
+
+function assertExclusiveFilter(
+  singularValue: unknown,
+  pluralValue: unknown,
+  singularField: string,
+  pluralField: string,
+): void {
+  if (singularValue !== undefined && pluralValue !== undefined) {
+    throw new JudgmentValidationError(
+      `${singularField} and ${pluralField} must not both be supplied`,
+      singularField,
+    );
+  }
+}
+
+function normalizeEnumFilterSet(
+  singularValue: unknown,
+  pluralValue: unknown,
+  singularField: string,
+  pluralField: string,
+  allowed: readonly string[],
+): string[] | undefined {
+  assertExclusiveFilter(singularValue, pluralValue, singularField, pluralField);
+  if (singularValue !== undefined) {
+    assertValid(
+      validateEnumFilter(singularValue, singularField, allowed),
+      singularField,
+    );
+    return [singularValue as string];
+  }
+  if (pluralValue !== undefined) {
+    assertValid(
+      validateEnumArrayFilter(pluralValue, pluralField, allowed),
+      pluralField,
+    );
+    return [...(pluralValue as string[])];
+  }
+  return undefined;
+}
+
+function normalizeQueryInput(input: QueryJudgmentsInput | undefined): NormalizedQueryInput {
+  if (input === undefined) {
+    return {
+      include_history: false,
+      include_evidence: false,
+      limit: 20,
+      offset: 0,
+      order_by: "updated_at_desc",
+    };
+  }
+
+  assertValid(validatePlainObjectInput(input, "input"), "input");
+
+  if (input.include_history !== undefined) {
+    assertValid(validateBoolean(input.include_history, "include_history"), "include_history");
+  }
+  if (input.include_evidence !== undefined) {
+    assertValid(validateBoolean(input.include_evidence, "include_evidence"), "include_evidence");
+  }
+  if (input.limit !== undefined) {
+    assertValid(validateLimit(input.limit), "limit");
+  }
+  if (input.offset !== undefined) {
+    assertValid(validateOffset(input.offset), "offset");
+  }
+  if (input.order_by !== undefined) {
+    assertValid(
+      validateOrderBy(input.order_by, JUDGMENT_QUERY_ORDER_BYS),
+      "order_by",
+    );
+  }
+
+  let statementMatch: string | undefined;
+  if (input.statement_match !== undefined) {
+    assertValid(validateNonEmptyString(input.statement_match, "statement_match"), "statement_match");
+    statementMatch = input.statement_match.trim();
+  }
+
+  let scopeContains: JsonObject | undefined;
+  if (input.scope_contains !== undefined) {
+    assertValid(validateScopeContains(input.scope_contains), "scope_contains");
+    const normalizedJson = serializeOnce(input.scope_contains, "scope_contains");
+    scopeContains = parsePersistedObject(
+      normalizedJson,
+      "scope_contains",
+      "query input",
+    );
+  }
+
+  const kinds = normalizeEnumFilterSet(
+    input.kind,
+    input.kinds,
+    "kind",
+    "kinds",
+    JUDGMENT_KINDS,
+  );
+  const lifecycleStatuses = normalizeEnumFilterSet(
+    input.lifecycle_status,
+    input.lifecycle_statuses,
+    "lifecycle_status",
+    "lifecycle_statuses",
+    LIFECYCLE_STATUSES,
+  );
+  const approvalStates = normalizeEnumFilterSet(
+    input.approval_state,
+    input.approval_states,
+    "approval_state",
+    "approval_states",
+    APPROVAL_STATES,
+  );
+  const activationStates = normalizeEnumFilterSet(
+    input.activation_state,
+    input.activation_states,
+    "activation_state",
+    "activation_states",
+    ACTIVATION_STATES_P05,
+  );
+  const retentionStates = normalizeEnumFilterSet(
+    input.retention_state,
+    input.retention_states,
+    "retention_state",
+    "retention_states",
+    RETENTION_STATES,
+  );
+  const authoritySources = normalizeEnumFilterSet(
+    input.authority_source,
+    input.authority_sources,
+    "authority_source",
+    "authority_sources",
+    AUTHORITY_SOURCES_P05,
+  );
+  const confidences = normalizeEnumFilterSet(
+    input.confidence,
+    input.confidences,
+    "confidence",
+    "confidences",
+    CONFIDENCES,
+  );
+
+  let procedureSubtype: string | undefined;
+  if (input.procedure_subtype !== undefined) {
+    assertValid(
+      validateEnumFilter(
+        input.procedure_subtype,
+        "procedure_subtype",
+        PROCEDURE_SUBTYPES,
+      ),
+      "procedure_subtype",
+    );
+    procedureSubtype = input.procedure_subtype;
+  }
+
+  return {
+    kinds,
+    lifecycle_statuses: lifecycleStatuses,
+    approval_states: approvalStates,
+    activation_states: activationStates,
+    retention_states: retentionStates,
+    authority_sources: authoritySources,
+    confidences,
+    procedure_subtype: procedureSubtype,
+    statement_match: statementMatch,
+    scope_contains: scopeContains,
+    include_history: input.include_history ?? false,
+    include_evidence: input.include_evidence ?? false,
+    limit: input.limit ?? 20,
+    offset: input.offset ?? 0,
+    order_by: (input.order_by ?? "updated_at_desc") as JudgmentQueryOrderBy,
+  };
+}
+
+function buildOrderByClause(orderBy: JudgmentQueryOrderBy): string {
+  switch (orderBy) {
+    case "updated_at_desc":
+      return "ORDER BY updated_at DESC, id ASC";
+    case "created_at_desc":
+      return "ORDER BY created_at DESC, id ASC";
+    case "importance_desc":
+      return "ORDER BY importance DESC, updated_at DESC, id ASC";
+    case "confidence_desc":
+      return `ORDER BY CASE confidence
+        WHEN 'high' THEN 3
+        WHEN 'medium' THEN 2
+        WHEN 'low' THEN 1
+        ELSE 0
+      END DESC, updated_at DESC, id ASC`;
+    case "statement_asc":
+      return "ORDER BY statement ASC, id ASC";
+  }
+}
+
+function toFtsPhraseQuery(input: string): string {
+  return `"${input.replaceAll("\"", "\"\"")}"`;
+}
+
+function mapRowToQueriedJudgment(row: JudgmentReadRow): QueriedJudgment {
+  const owner = `judgment ${row.id}`;
+  return {
+    id: row.id,
+    kind: row.kind as JudgmentKind,
+    statement: row.statement,
+    confidence: row.confidence as Confidence,
+    importance: row.importance,
+    scope: parsePersistedObject(row.scope_json, "scope_json", owner),
+    epistemic_origin: row.epistemic_origin as EpistemicOrigin,
+    authority_source: row.authority_source as AuthoritySourceP05,
+    approval_state: row.approval_state as ApprovalState,
+    lifecycle_status: row.lifecycle_status as LifecycleStatus,
+    activation_state: row.activation_state as ActivationStateP05,
+    retention_state: row.retention_state as RetentionState,
+    procedure_subtype: row.procedure_subtype as ProcedureSubtype | null,
+    source_ids: parsePersistedStringArray(row.source_ids_json, "source_ids_json", owner),
+    evidence_ids: parsePersistedStringArray(row.evidence_ids_json, "evidence_ids_json", owner),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    revisit_at: row.revisit_at,
+    valid_from: row.valid_from,
+    valid_until: row.valid_until,
+  };
+}
+
+function mapRowToExplainedJudgment(row: JudgmentReadRow): ExplainedJudgment {
+  const summary = mapRowToQueriedJudgment(row);
+  return {
+    id: summary.id,
+    kind: summary.kind,
+    statement: summary.statement,
+    confidence: summary.confidence,
+    importance: summary.importance,
+    scope: summary.scope,
+    epistemic_origin: summary.epistemic_origin,
+    authority_source: summary.authority_source,
+    approval_state: summary.approval_state,
+    lifecycle_status: summary.lifecycle_status,
+    activation_state: summary.activation_state,
+    retention_state: summary.retention_state,
+    procedure_subtype: summary.procedure_subtype,
+    source_ids: summary.source_ids,
+    evidence_ids: summary.evidence_ids,
+    created_at: summary.created_at,
+    updated_at: summary.updated_at,
+    valid_from: summary.valid_from,
+    valid_until: summary.valid_until,
+    revisit_at: summary.revisit_at,
+  };
+}
+
+function getSourceRowById(db: DbHandle, sourceId: string, judgmentId: string): JudgmentSourceRow {
+  const source = db
+    .prepare<JudgmentSourceRow, [string]>(
+      `SELECT id, kind, locator, content_hash, trust_level, redacted, captured_at
+       FROM judgment_sources WHERE id = ?`,
+    )
+    .get(sourceId);
+  if (!source) {
+    throw new JudgmentValidationError(
+      `judgment ${judgmentId} references missing source ${sourceId}`,
+      "source_id",
+    );
+  }
+  assertValid(validateTrustLevel(source.trust_level), "trust_level");
+  return source;
+}
+
+function loadEvidenceBundle(
+  db: DbHandle,
+  judgmentId: string,
+  hints: {
+    sourceIds?: string[];
+    evidenceIds?: string[];
+  } = {},
+): {
+  evidence_links: ExplainedEvidenceLink[];
+  sources: ExplainedSource[];
+  why: JudgmentWhyEntry[];
+} {
+  const linkRows = db
+    .prepare<JudgmentEvidenceLinkRow, [string]>(
+      `SELECT id, judgment_id, source_id, relation, span_locator,
+              quote_excerpt, rationale, created_at
+       FROM judgment_evidence_links
+       WHERE judgment_id = ?
+       ORDER BY created_at ASC, id ASC`,
+    )
+    .all(judgmentId);
+
+  const linkRowMap = new Map<string, JudgmentEvidenceLinkRow>();
+  for (const link of linkRows) {
+    linkRowMap.set(link.id, link);
+  }
+
+  const orderedLinkRows: JudgmentEvidenceLinkRow[] = [];
+  const seenLinkIds = new Set<string>();
+
+  for (const evidenceId of hints.evidenceIds ?? []) {
+    const link = linkRowMap.get(evidenceId);
+    if (!link) {
+      throw new JudgmentValidationError(
+        `judgment ${judgmentId} evidence_ids_json references missing evidence link ${evidenceId}`,
+        "evidence_ids_json",
+      );
+    }
+    orderedLinkRows.push(link);
+    seenLinkIds.add(evidenceId);
+  }
+
+  for (const link of linkRows) {
+    if (seenLinkIds.has(link.id)) continue;
+    orderedLinkRows.push(link);
+  }
+
+  const linkedSourceIds = new Set(orderedLinkRows.map((link) => link.source_id));
+  const sourceOrder: string[] = [];
+  const seenSourceIds = new Set<string>();
+
+  for (const sourceId of hints.sourceIds ?? []) {
+    if (!linkedSourceIds.has(sourceId)) {
+      throw new JudgmentValidationError(
+        `judgment ${judgmentId} source_ids_json references unlinked source ${sourceId}`,
+        "source_ids_json",
+      );
+    }
+    if (seenSourceIds.has(sourceId)) continue;
+    sourceOrder.push(sourceId);
+    seenSourceIds.add(sourceId);
+  }
+
+  for (const link of orderedLinkRows) {
+    if (seenSourceIds.has(link.source_id)) continue;
+    sourceOrder.push(link.source_id);
+    seenSourceIds.add(link.source_id);
+  }
+
+  const sourceMap = new Map<string, ExplainedSource>();
+  for (const sourceId of sourceOrder) {
+    const source = getSourceRowById(db, sourceId, judgmentId);
+    sourceMap.set(sourceId, {
+      id: source.id,
+      kind: source.kind,
+      locator: source.locator,
+      content_hash: source.content_hash,
+      trust_level: source.trust_level as TrustLevel,
+      redacted: source.redacted === 1,
+      captured_at: source.captured_at,
+    });
+  }
+
+  const evidenceLinks = orderedLinkRows.map((link) => ({
+    id: link.id,
+    judgment_id: link.judgment_id,
+    source_id: link.source_id,
+    relation: link.relation,
+    span_locator: link.span_locator,
+    quote_excerpt: link.quote_excerpt,
+    rationale: link.rationale,
+    created_at: link.created_at,
+  }));
+
+  const sources = sourceOrder
+    .map((sourceId) => sourceMap.get(sourceId))
+    .filter((source): source is ExplainedSource => source !== undefined);
+
+  const why = orderedLinkRows.map((link) => {
+    const source = sourceMap.get(link.source_id);
+    if (!source) {
+      throw new JudgmentValidationError(
+        `judgment ${judgmentId} references missing source ${link.source_id}`,
+        "source_id",
+      );
+    }
+    return {
+      source_id: link.source_id,
+      evidence_link_id: link.id,
+      relation: link.relation,
+      source_kind: source.kind,
+      locator: source.locator,
+      trust_level: source.trust_level,
+      quote_excerpt: link.quote_excerpt,
+      span_locator: link.span_locator,
+      rationale: link.rationale,
+    };
+  });
+
+  return { evidence_links: evidenceLinks, sources, why };
+}
+
+function loadEvents(
+  db: DbHandle,
+  judgmentId: string,
+  includePayloads: boolean,
+): JudgmentEventSummary[] {
+  const eventRows = db
+    .prepare<JudgmentEventRow, [string]>(
+      `SELECT id, event_type, actor, created_at, payload_json
+       FROM judgment_events
+       WHERE judgment_id = ?
+       ORDER BY created_at ASC, id ASC`,
+    )
+    .all(judgmentId);
+
+  return eventRows.map((row) => {
+    if (!includePayloads) {
+      return {
+        id: row.id,
+        event_type: row.event_type,
+        actor: row.actor,
+        created_at: row.created_at,
+      };
+    }
+    return {
+      id: row.id,
+      event_type: row.event_type,
+      actor: row.actor,
+      created_at: row.created_at,
+      payload: parsePersistedJson(
+        row.payload_json,
+        "payload_json",
+        `judgment event ${row.id}`,
+      ),
+    };
+  });
+}
+
+export function queryJudgments(
+  db: DbHandle,
+  input?: QueryJudgmentsInput,
+): QueryJudgmentsResult {
+  const normalized = normalizeQueryInput(input);
+
+  const bindings: Record<string, unknown> = {};
+  let bindIndex = 0;
+  const bind = (value: unknown): string => {
+    const name = `p${bindIndex}`;
+    bindings[name] = value;
+    bindIndex += 1;
+    return `$${name}`;
+  };
+
+  const where: string[] = [];
+
+  const appendInFilter = (column: string, values: string[] | undefined): void => {
+    if (!values || values.length === 0) return;
+    const placeholders = values.map((value) => bind(value)).join(", ");
+    where.push(`${column} IN (${placeholders})`);
+  };
+
+  appendInFilter("kind", normalized.kinds);
+  appendInFilter("approval_state", normalized.approval_states);
+  appendInFilter("authority_source", normalized.authority_sources);
+  appendInFilter("confidence", normalized.confidences);
+
+  if (normalized.procedure_subtype !== undefined) {
+    where.push(`procedure_subtype = ${bind(normalized.procedure_subtype)}`);
+  }
+
+  if (normalized.statement_match !== undefined) {
+    where.push(
+      `fts_rowid IN (
+         SELECT rowid FROM judgment_items_fts
+         WHERE judgment_items_fts MATCH ${bind(toFtsPhraseQuery(normalized.statement_match))}
+       )`,
+    );
+  }
+
+  if (normalized.include_history) {
+    appendInFilter("lifecycle_status", normalized.lifecycle_statuses);
+    appendInFilter("activation_state", normalized.activation_states);
+    appendInFilter("retention_state", normalized.retention_states);
+
+    const hasHistoryStatusFilter =
+      normalized.lifecycle_statuses !== undefined ||
+      normalized.activation_states !== undefined ||
+      normalized.retention_states !== undefined;
+
+    const explicitlyRequestsDeleted =
+      normalized.retention_states !== undefined &&
+      normalized.retention_states.includes("deleted");
+
+    if (!hasHistoryStatusFilter) {
+      where.push(`retention_state != ${bind("deleted")}`);
+    } else if (normalized.retention_states === undefined && !explicitlyRequestsDeleted) {
+      where.push(`retention_state != ${bind("deleted")}`);
+    }
+  } else {
+    where.push(`lifecycle_status = ${bind("active")}`);
+    where.push(`activation_state = ${bind("eligible")}`);
+    where.push(`retention_state = ${bind("normal")}`);
+    appendInFilter("lifecycle_status", normalized.lifecycle_statuses);
+    appendInFilter("activation_state", normalized.activation_states);
+    appendInFilter("retention_state", normalized.retention_states);
+  }
+
+  const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+  const sql = `${JUDGMENT_QUERY_SELECT} ${whereClause} ${buildOrderByClause(normalized.order_by)}`;
+  const rows = db.prepare<JudgmentReadRow>(sql).all(bindings as never);
+
+  const filtered = rows
+    .map((row) => mapRowToQueriedJudgment(row))
+    .filter((item) => matchesScopeContains(item.scope, normalized.scope_contains));
+
+  const sliced = filtered.slice(
+    normalized.offset,
+    normalized.offset + normalized.limit,
+  );
+
+  const items = normalized.include_evidence
+    ? sliced.map((item) => {
+        const bundle = loadEvidenceBundle(db, item.id, {
+          sourceIds: item.source_ids,
+          evidenceIds: item.evidence_ids,
+        });
+        return {
+          ...item,
+          evidence_count: bundle.evidence_links.length,
+          source_count: bundle.sources.length,
+          sources: bundle.sources.map((source) => ({
+            id: source.id,
+            kind: source.kind,
+            locator: source.locator,
+            trust_level: source.trust_level,
+            redacted: source.redacted,
+          })),
+          evidence_links: bundle.evidence_links.map((link) => ({
+            id: link.id,
+            source_id: link.source_id,
+            relation: link.relation,
+            span_locator: link.span_locator,
+            quote_excerpt: link.quote_excerpt,
+          })),
+        };
+      })
+    : sliced;
+
+  return {
+    items,
+    limit: normalized.limit,
+    offset: normalized.offset,
+    returned: items.length,
+    has_more: filtered.length > normalized.offset + normalized.limit,
+  };
+}
+
+export function explainJudgment(
+  db: DbHandle,
+  input: ExplainJudgmentInput,
+): JudgmentExplanation {
+  assertValid(validatePlainObjectInput(input, "input"), "input");
+  assertValid(validateNonEmptyString(input.judgment_id, "judgment_id"), "judgment_id");
+
+  if (input.include_events !== undefined) {
+    assertValid(validateBoolean(input.include_events, "include_events"), "include_events");
+  }
+  if (input.include_sources !== undefined) {
+    assertValid(validateBoolean(input.include_sources, "include_sources"), "include_sources");
+  }
+  if (input.include_payloads !== undefined) {
+    assertValid(validateBoolean(input.include_payloads, "include_payloads"), "include_payloads");
+  }
+
+  const judgmentId = input.judgment_id.trim();
+  const includeEvents = input.include_events ?? true;
+  const includeSources = input.include_sources ?? true;
+  const includePayloads = input.include_payloads ?? false;
+
+  const row = db
+    .prepare<JudgmentReadRow, [string]>(
+      `${JUDGMENT_QUERY_SELECT} WHERE id = ?`,
+    )
+    .get(judgmentId);
+
+  if (!row) {
+    throw new JudgmentNotFoundError(`judgment ${judgmentId} not found`, judgmentId);
+  }
+
+  if (row.retention_state === "deleted") {
+    throw new JudgmentStateError(
+      `judgment ${judgmentId} cannot be explained: retention_state=deleted`,
+      judgmentId,
+    );
+  }
+
+  const owner = `judgment ${judgmentId}`;
+  const judgment = mapRowToExplainedJudgment(row);
+  const evidenceBundle = loadEvidenceBundle(db, judgmentId, {
+    sourceIds: judgment.source_ids,
+    evidenceIds: judgment.evidence_ids,
+  });
+
+  return {
+    judgment,
+    why: evidenceBundle.why,
+    evidence_links: evidenceBundle.evidence_links,
+    sources: includeSources ? evidenceBundle.sources : [],
+    events: includeEvents
+      ? loadEvents(db, judgmentId, includePayloads)
+      : [],
+    would_change_if: parsePersistedJsonValue(
+      row.would_change_if_json,
+      "would_change_if_json",
+      owner,
+    ),
+    missing_evidence: parsePersistedJsonValue(
+      row.missing_evidence_json,
+      "missing_evidence_json",
+      owner,
+    ),
+    review_trigger: parsePersistedJsonValue(
+      row.review_trigger_json,
+      "review_trigger_json",
+      owner,
+    ),
+    supersedes: parsePersistedStringArray(row.supersedes_json, "supersedes_json", owner),
+    superseded_by: parsePersistedStringArray(
+      row.superseded_by_json,
+      "superseded_by_json",
+      owner,
+    ),
+  };
 }

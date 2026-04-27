@@ -16,14 +16,18 @@ import { migrate } from "../../src/db/migrator.ts";
 import {
   JUDGMENT_APPROVE_TOOL,
   JUDGMENT_COMMIT_TOOL,
+  JUDGMENT_EXPLAIN_TOOL,
   JUDGMENT_LINK_EVIDENCE_TOOL,
   JUDGMENT_PROPOSE_TOOL,
+  JUDGMENT_QUERY_TOOL,
   JUDGMENT_RECORD_SOURCE_TOOL,
   JUDGMENT_REJECT_TOOL,
   executeJudgmentApproveTool,
   executeJudgmentCommitTool,
+  executeJudgmentExplainTool,
   executeJudgmentLinkEvidenceTool,
   executeJudgmentProposeTool,
+  executeJudgmentQueryTool,
   executeJudgmentRecordSourceTool,
   executeJudgmentRejectTool,
   type ApproveInput,
@@ -969,11 +973,123 @@ describe("executeJudgmentCommitTool — error paths", () => {
 });
 
 // ---------------------------------------------------------------
+// Phase 1A.6 — Query / explain tool tests
+// ---------------------------------------------------------------
+
+describe("JUDGMENT_QUERY_TOOL", () => {
+  test("tool contract name is judgment.query", () => {
+    expect(JUDGMENT_QUERY_TOOL.name).toBe("judgment.query");
+  });
+});
+
+describe("JUDGMENT_EXPLAIN_TOOL", () => {
+  test("tool contract name is judgment.explain", () => {
+    expect(JUDGMENT_EXPLAIN_TOOL.name).toBe("judgment.explain");
+  });
+});
+
+describe("executeJudgmentQueryTool / executeJudgmentExplainTool", () => {
+  test("valid query input returns ok true", () => {
+    const { j } = makeApprovedJudgmentWithEvidence(db);
+    executeJudgmentCommitTool(db, { ...validCommitInput, judgment_id: j.id });
+
+    const result = executeJudgmentQueryTool(db, { statement_match: "dark mode" });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.result.items.map((item) => item.id)).toContain(j.id);
+    }
+  });
+
+  test("valid explain input returns ok true", () => {
+    const { j } = makeApprovedJudgmentWithEvidence(db);
+    executeJudgmentCommitTool(db, { ...validCommitInput, judgment_id: j.id });
+
+    const result = executeJudgmentExplainTool(db, { judgment_id: j.id });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.explanation.judgment.id).toBe(j.id);
+      expect(result.explanation.events.length).toBeGreaterThan(0);
+    }
+  });
+
+  test("invalid query input returns ok false with validation_error", () => {
+    const result = executeJudgmentQueryTool(db, { limit: 0 });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("validation_error");
+      expect(result.error.field).toBe("limit");
+    }
+  });
+
+  test("invalid explain input returns ok false with validation_error", () => {
+    const result = executeJudgmentExplainTool(db, { judgment_id: "" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("validation_error");
+      expect(result.error.field).toBe("judgment_id");
+    }
+  });
+
+  test("missing explain target returns ok false with not_found", () => {
+    const result = executeJudgmentExplainTool(db, { judgment_id: "missing-judgment" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("not_found");
+    }
+  });
+
+  test("deleted explain target returns ok false with invalid_state", () => {
+    const { j } = makeApprovedJudgmentWithEvidence(db);
+    executeJudgmentCommitTool(db, { ...validCommitInput, judgment_id: j.id });
+    db.prepare(`UPDATE judgment_items SET retention_state = 'deleted' WHERE id = ?`).run(j.id);
+
+    const result = executeJudgmentExplainTool(db, { judgment_id: j.id });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("invalid_state");
+    }
+  });
+
+  test("query/explain tools do not append events or mutate judgment_items", () => {
+    const { j } = makeApprovedJudgmentWithEvidence(db);
+    executeJudgmentCommitTool(db, { ...validCommitInput, judgment_id: j.id });
+    const beforeEvents = db
+      .prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_events")
+      .get()!.n;
+    const beforeRow = db
+      .prepare<{ updated_at: string; source_ids_json: string | null; evidence_ids_json: string | null }, [string]>(
+        `SELECT updated_at, source_ids_json, evidence_ids_json
+         FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!;
+
+    const queryResult = executeJudgmentQueryTool(db, { statement_match: "dark mode" });
+    const explainResult = executeJudgmentExplainTool(db, { judgment_id: j.id });
+
+    expect(queryResult.ok).toBe(true);
+    expect(explainResult.ok).toBe(true);
+
+    const afterEvents = db
+      .prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_events")
+      .get()!.n;
+    const afterRow = db
+      .prepare<{ updated_at: string; source_ids_json: string | null; evidence_ids_json: string | null }, [string]>(
+        `SELECT updated_at, source_ids_json, evidence_ids_json
+         FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!;
+
+    expect(afterEvents).toBe(beforeEvents);
+    expect(afterRow).toEqual(beforeRow);
+  });
+});
+
+// ---------------------------------------------------------------
 // Static boundary tests
 // ---------------------------------------------------------------
 
 describe("static boundary — ADR-0014 Bun boundary", () => {
-  test("src/judgment/*.ts has no direct bun: import", () => {
+  test("src/judgment/*.ts has no direct bun:* import or Bun global use", () => {
     const judgmentDir = join(SRC_DIR, "judgment");
     const files = readdirSync(judgmentDir).filter((f) => f.endsWith(".ts"));
     expect(files.length).toBeGreaterThan(0);
@@ -983,6 +1099,10 @@ describe("static boundary — ADR-0014 Bun boundary", () => {
         content,
         `${file} must not contain a direct bun: import`,
       ).not.toMatch(/from ['"]bun:/);
+      expect(
+        content,
+        `${file} must not use the Bun global directly`,
+      ).not.toMatch(/\bBun\./);
     }
   });
 });
@@ -996,6 +1116,8 @@ describe("static boundary — judgment tools not registered", () => {
     /['"]judgment\.record_source['"]/,
     /['"]judgment\.link_evidence['"]/,
     /['"]judgment\.commit['"]/,
+    /['"]judgment\.query['"]/,
+    /['"]judgment\.explain['"]/,
   ];
 
   function checkDir(dirName: string): void {

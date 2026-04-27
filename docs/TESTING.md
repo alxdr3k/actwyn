@@ -98,12 +98,14 @@ Migration shape is asserted by:
   records applied versions in `settings`.
 
 Judgment System proposal, review, source-recording, evidence-linking,
-and commit surface tests (Phase 1A.2/1A.3/1A.4/1A.5) live under:
+commit, query, and explain surface tests (Phase 1A.2/1A.3/1A.4/1A.5/1A.6)
+live under:
 
 - `test/judgment/validators.test.ts` — pure-TS validator behavior
   including `validateNonEmptyString` / `validatePlainJsonObject` /
-  `validateTrustLevel` / `validateOptionalNonEmptyString`
-  (Phase 1A.3/1A.4).
+  `validateTrustLevel` / `validateOptionalNonEmptyString`, plus
+  query/explain helper validators for booleans, enum filters,
+  pagination, ordering, and `scope_contains` (Phase 1A.3/1A.4/1A.6).
 - `test/judgment/repository.test.ts` — `proposeJudgment` DB
   integration: insert, defaults, validation rejections, FTS trigger,
   transaction rollback; `approveProposedJudgment` /
@@ -117,15 +119,21 @@ and commit surface tests (Phase 1A.2/1A.3/1A.4/1A.5) live under:
   evidence requirement, denormalized array sync), invalid state guards,
   malformed denormalized array element guards (invalid element types
   [123]/[null]/[{}]/[""] fail before update), validation rejections,
-  transaction rollback (Phase 1A.3/1A.4/1A.5).
+  transaction rollback; `queryJudgments` filters, FTS query,
+  `scope_contains`, ordering, pagination, evidence metadata, and
+  read-only behavior; `explainJudgment` evidence/source/event output,
+  parsed JSON metadata, malformed persisted JSON handling, and
+  no-mutation/no-event-append assertions (Phase 1A.3/1A.4/1A.5/1A.6).
 - `test/judgment/tool.test.ts` — `executeJudgmentProposeTool` /
   `executeJudgmentApproveTool` / `executeJudgmentRejectTool` /
   `executeJudgmentRecordSourceTool` /
-  `executeJudgmentLinkEvidenceTool` / `executeJudgmentCommitTool`
-  contracts + static boundary assertions (no bun:* import in
-  `src/judgment/*`; tools not imported by runtime modules);
+  `executeJudgmentLinkEvidenceTool` / `executeJudgmentCommitTool` /
+  `executeJudgmentQueryTool` / `executeJudgmentExplainTool`
+  contracts + static boundary assertions (no bun:* import or `Bun`
+  global use in `src/judgment/*`; tools not imported by runtime modules);
   `invalid_state` coverage for archived/deleted target judgments in
-  `executeJudgmentLinkEvidenceTool` (Phase 1A.3/1A.4/1A.5).
+  `executeJudgmentLinkEvidenceTool`, missing/deleted explain targets,
+  and read-only query/explain behavior (Phase 1A.3/1A.4/1A.5/1A.6).
 
 When you add a migration:
 

@@ -3,6 +3,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  validateBoolean,
   isActivationStateP05,
   isApprovalState,
   isAuthoritySourceP05,
@@ -14,12 +15,19 @@ import {
   isProcedureSubtype,
   isRetentionState,
   validateConfidenceLabel,
+  validateEnumArrayFilter,
+  validateEnumFilter,
   validateEpistemicOrigin,
   validateImportance,
   validateJsonValue,
   validateKind,
+  validateLimit,
   validateNonEmptyString,
+  validateOffset,
+  validateOrderBy,
   validatePlainJsonObject,
+  validatePlainObjectInput,
+  validateScopeContains,
   validateScopeJson,
   validateScopeObject,
   validateStatement,
@@ -435,5 +443,52 @@ describe("validateJsonValue", () => {
     // JSON.stringify returns undefined — JSON.parse would throw without this guard.
     const undefinedJson = { toJSON() { return undefined; } };
     expect(validateJsonValue(undefinedJson).ok).toBe(false);
+  });
+});
+
+describe("Phase 1A.6 helper validators", () => {
+  test("validatePlainObjectInput accepts plain objects and rejects arrays/class instances", () => {
+    expect(validatePlainObjectInput({ ok: true }, "input").ok).toBe(true);
+    expect(validatePlainObjectInput([], "input").ok).toBe(false);
+    expect(validatePlainObjectInput(new Date(), "input").ok).toBe(false);
+  });
+
+  test("validateBoolean requires booleans", () => {
+    expect(validateBoolean(true, "flag")).toEqual({ ok: true });
+    expect(validateBoolean("true", "flag").ok).toBe(false);
+  });
+
+  test("validateEnumFilter and validateEnumArrayFilter enforce allowed values", () => {
+    expect(validateEnumFilter("active", "lifecycle_status", ["active", "rejected"]).ok).toBe(true);
+    expect(validateEnumFilter("other", "lifecycle_status", ["active", "rejected"]).ok).toBe(false);
+    expect(
+      validateEnumArrayFilter(["active", "rejected"], "lifecycle_statuses", ["active", "rejected"]).ok,
+    ).toBe(true);
+    expect(
+      validateEnumArrayFilter([], "lifecycle_statuses", ["active", "rejected"]).ok,
+    ).toBe(false);
+  });
+
+  test("validateLimit and validateOffset enforce pagination bounds", () => {
+    expect(validateLimit(1).ok).toBe(true);
+    expect(validateLimit(100).ok).toBe(true);
+    expect(validateLimit(0).ok).toBe(false);
+    expect(validateLimit(101).ok).toBe(false);
+    expect(validateOffset(0).ok).toBe(true);
+    expect(validateOffset(10).ok).toBe(true);
+    expect(validateOffset(-1).ok).toBe(false);
+  });
+
+  test("validateOrderBy and validateScopeContains reject invalid values", () => {
+    expect(
+      validateOrderBy("updated_at_desc", ["updated_at_desc", "created_at_desc"]).ok,
+    ).toBe(true);
+    expect(
+      validateOrderBy("importance_desc", ["updated_at_desc", "created_at_desc"]).ok,
+    ).toBe(false);
+    expect(validateScopeContains({ project: "actwyn" }).ok).toBe(true);
+    expect(validateScopeContains(null).ok).toBe(false);
+    expect(validateScopeContains([]).ok).toBe(false);
+    expect(validateScopeContains(42).ok).toBe(false);
   });
 });

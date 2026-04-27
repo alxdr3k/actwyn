@@ -1,6 +1,6 @@
 # Personal Agent — Questions Register
 
-> Status: living document · Owner: project lead · Last updated: 2026-04-26
+> Status: living document · Owner: project lead · Last updated: 2026-04-27
 >
 > This file is the **question ledger**: it captures questions, proposed
 > answers, and the promotion pointers that route each decided answer
@@ -725,6 +725,10 @@ committed for a later milestone.
     contract) landed. `memory_items` and `judgment_items` remain
     separate schemas. Question stays open; broader migration /
     unification policy unresolved.
+  - 2026-04-27 Phase 1A.6 implementation: local unregistered
+    `judgment.query` / `judgment.explain` read surfaces landed.
+    `memory_items` and `judgment_items` remain separate, and runtime
+    context is still not wired to judgment rows.
 
 ### Q-028 — `JudgmentItem.kind` v1 enum 범위는 어디까지인가?
 

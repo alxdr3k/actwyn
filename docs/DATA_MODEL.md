@@ -170,7 +170,7 @@ Attaches meaning to an artifact.
 - `relation_type ∈ { evidence, attachment, generated_output, reference, source }`.
 - CHECK requires `memory_summary_id` or `turn_id` to be non-null.
 
-### `judgment_*` (Phase 1A — schema + proposal + review + source/evidence + commit/activation repository)
+### `judgment_*` (Phase 1A — schema + proposal/review/source/evidence/commit writers + query/explain read surfaces)
 
 Migration 004 (`migrations/004_judgment_skeleton.sql`) added the
 following tables and an FTS5 virtual table per ADR-0009 ..
@@ -178,7 +178,9 @@ ADR-0013 and `docs/JUDGMENT_SYSTEM.md`.
 
 `src/judgment/repository.ts` is the **sole writer** for
 `judgment_items`, `judgment_sources`, `judgment_evidence_links`,
-and `judgment_events`. It supports six operations:
+and `judgment_events`. It also owns the local read-only
+`queryJudgments` / `explainJudgment` surfaces. It supports eight
+operations:
 
 - **Proposal-only insert** (`proposeJudgment`) — creates rows with
   `lifecycle_status=proposed` / `approval_state=pending` /
@@ -214,23 +216,37 @@ and `judgment_events`. It supports six operations:
   unregistered operation. Active/eligible rows are not read by
   runtime context — no Context Compiler or provider integration
   exists yet.**
+- **Query** (`queryJudgments`) — read-only local query surface over
+  `judgment_items`, optionally using FTS5 on `statement` and
+  optionally returning compact evidence/source metadata. By default
+  it returns only `lifecycle_status=active` /
+  `activation_state=eligible` / `retention_state=normal` rows.
+  Historical rows require `include_history=true`. Query does **not**
+  mutate tables, append `judgment_events`, or make judgments
+  context-visible.
+- **Explain** (`explainJudgment`) — read-only local audit surface
+  for one judgment row plus linked evidence, linked sources, and
+  relevant lifecycle events. Explain does **not** mutate tables,
+  append `judgment_events`, or make judgments context-visible.
 
 The `src/judgment/tool.ts` typed-tool contracts (`judgment.propose`,
 `judgment.approve`, `judgment.reject`, `judgment.record_source`,
-`judgment.link_evidence`, `judgment.commit`) wrap the repository but
-are not registered in any runtime module.
+`judgment.link_evidence`, `judgment.commit`, `judgment.query`,
+`judgment.explain`) wrap the repository but are not registered in
+any runtime module.
 
 Commit requires approval and at least one evidence link. It sets
 `lifecycle_status=active` / `activation_state=eligible` /
 `authority_source=user_confirmed`. Active/eligible rows exist in DB
-after commit but are not read by runtime context. No Context
-Compiler exists yet. No provider prompt integration exists yet.
-No Telegram command for commit exists yet.
+after commit but are not read by runtime context. Query/explain can
+read those rows locally, but no Context Compiler exists yet, no
+provider prompt integration exists yet, and no Telegram command
+exists for any judgment tool.
 
-No supersede, revoke, expire, query, or explain write path exists.
-No Control Gate or Context Compiler reads from these tables. Future
-runtime writers must route through `src/judgment/repository.ts` (or
-a successor) per the single-writer policy.
+No supersede, revoke, or expire write path exists. No Control Gate
+or Context Compiler reads from these tables. Future runtime writers
+must route through `src/judgment/repository.ts` (or a successor) per
+the single-writer policy.
 
 #### `judgment_sources`
 
@@ -335,6 +351,11 @@ reasoning.
 | `judgment_evidence_links` (insert)    | `src/judgment/repository.ts` (`linkJudgmentEvidence`) — local unregistered writer. No runtime path. |
 | `judgment_events` (insert)            | `src/judgment/repository.ts` — `judgment.proposed`, `judgment.approved`, `judgment.rejected`, `judgment.source.recorded`, `judgment.evidence.linked`, `judgment.committed` events only. |
 
+Read-surface note: `src/judgment/repository.ts` also owns the local
+unregistered read-only `queryJudgments` and `explainJudgment`
+surfaces. They do not mutate any `judgment_*` table, do not append
+`judgment_events`, and do not make judgments context-visible.
+
 ## Cross-table invariants
 
 These are enforced in code + invariant tests, not in SQL triggers.
@@ -375,7 +396,7 @@ to keep in mind:
 - A schema change is an architecture-level event for the affected
   table. If the table is new or its semantics change, add an ADR.
 
-## Judgment System schema (Phase 1A.5 — commit/activation repository landed; runtime not wired)
+## Judgment System schema (Phase 1A.6 — commit/activation + query/explain landed; runtime not wired)
 
 The DB-native AI-first Judgment System direction defines a separate
 schema family. As of migration 004, **the five `judgment_*` tables
@@ -392,20 +413,24 @@ denormalized arrays on `judgment_items`). Phase 1A.5 added
 `commitApprovedJudgment` which sets `lifecycle_status=active` /
 `activation_state=eligible` / `authority_source=user_confirmed`, syncs
 denormalized arrays, and appends a `judgment.committed` event.
+Phase 1A.6 added `queryJudgments` and `explainJudgment` as local
+read-only surfaces over judgment rows, evidence, sources, and events.
 The tool contracts in `src/judgment/tool.ts` (`judgment.propose`,
 `judgment.approve`, `judgment.reject`, `judgment.record_source`,
-`judgment.link_evidence`, `judgment.commit`) are not registered in any
-runtime module. No runtime context use, runtime extraction, Control
-Gate, or provider integration is wired. Names and constraints come
-from the Phase 0/0.5 design records that landed on `main` as
-ADR-0009 … ADR-0013 plus `docs/JUDGMENT_SYSTEM.md` (per DEC-037,
-that spec is a historical architectural record, not implementation
-authority).
+`judgment.link_evidence`, `judgment.commit`, `judgment.query`,
+`judgment.explain`) are not registered in any runtime module.
+Query/explain are read-only: they do not append events and do not
+make judgments context-visible. No runtime context use, runtime
+extraction, Control Gate, or provider integration is wired. Names
+and constraints come from the Phase 0/0.5 design records that landed
+on `main` as ADR-0009 … ADR-0013 plus `docs/JUDGMENT_SYSTEM.md`
+(per DEC-037, that spec is a historical architectural record, not
+implementation authority).
 
 | Table                                        | Purpose                                                              | Status (2026-04-27)                                                          |
 | -------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | `judgment_sources`                           | Source of a judgment fragment (turn, attachment, external).          | schema implemented in migration 004; local unregistered writer: `src/judgment/repository.ts` via `recordJudgmentSource` (Phase 1A.4). Not runtime-wired. |
-| `judgment_items`                             | Atomic judgment rows (the Judgment System analogue of memory_items). | schema implemented in migration 004; writer: `src/judgment/repository.ts` for propose/approve/reject (Phase 1A.2/1A.3); `linkJudgmentEvidence` updates denormalized arrays (Phase 1A.4); `commitApprovedJudgment` sets lifecycle=active/activation=eligible/authority=user_confirmed (Phase 1A.5). Active/eligible rows exist in DB after commit; not read by runtime context. |
+| `judgment_items`                             | Atomic judgment rows (the Judgment System analogue of memory_items). | schema implemented in migration 004; writer: `src/judgment/repository.ts` for propose/approve/reject (Phase 1A.2/1A.3); `linkJudgmentEvidence` updates denormalized arrays (Phase 1A.4); `commitApprovedJudgment` sets lifecycle=active/activation=eligible/authority=user_confirmed (Phase 1A.5); `queryJudgments` / `explainJudgment` read rows locally without mutation (Phase 1A.6). Active/eligible rows exist in DB after commit; not read by runtime context. |
 | `judgment_evidence_links`                    | Links between judgments and supporting evidence rows.                | schema implemented in migration 004; local unregistered writer: `src/judgment/repository.ts` via `linkJudgmentEvidence` (Phase 1A.4). Not runtime-wired. |
 | `judgment_edges`                             | Typed relations between judgments (supports, contradicts, refines).  | schema implemented in migration 004; no runtime writer.                       |
 | `judgment_events`                            | Append-only event log for judgment lifecycle changes.                | schema implemented in migration 004; writer: `src/judgment/repository.ts` for `judgment.proposed` / `judgment.approved` / `judgment.rejected` / `judgment.source.recorded` / `judgment.evidence.linked` / `judgment.committed` events (Phase 1A.2/1A.3/1A.4/1A.5). |
@@ -418,9 +443,11 @@ For the implemented rows: `src/judgment/repository.ts` writes
 `judgment_items`, `judgment_sources`, `judgment_evidence_links`, and
 `judgment_events`. Phase 1A.2/1A.3 added proposal and review
 transitions. Phase 1A.4 added source recording and evidence linking.
-Phase 1A.5 added commit/activation. Active/eligible rows can exist in
-DB after `commitApprovedJudgment`, but they are not read by runtime
-context — no Context Compiler or provider integration exists. No
+Phase 1A.5 added commit/activation. Phase 1A.6 added local read-only
+query/explain. Active/eligible rows can exist in DB after
+`commitApprovedJudgment`, and query/explain can read them locally,
+but they are not read by runtime context — no Context Compiler or
+provider integration exists. Query/explain do not append events. No
 Control Gate reads these tables. Do not migrate `memory_summaries` /
 `memory_items` data into them — Q-027 stays open and ADR-0009 commits
 to the "분리" starting point.

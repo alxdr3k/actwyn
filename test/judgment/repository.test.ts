@@ -16,14 +16,18 @@ import {
   JudgmentValidationError,
   approveProposedJudgment,
   commitApprovedJudgment,
+  explainJudgment,
   linkJudgmentEvidence,
   proposeJudgment,
+  queryJudgments,
   recordJudgmentSource,
   rejectProposedJudgment,
   type ApproveInput,
   type CommitInput,
+  type ExplainJudgmentInput,
   type EvidenceLinkInput,
   type ProposalInput,
+  type QueryJudgmentsInput,
   type RejectInput,
   type SourceInput,
 } from "../../src/judgment/repository.ts";
@@ -2918,5 +2922,596 @@ describe("commitApprovedJudgment — validation rejections", () => {
     expect(() =>
       commitApprovedJudgment(db, null as unknown as CommitInput),
     ).toThrow(JudgmentValidationError);
+  });
+});
+
+// ---------------------------------------------------------------
+// Phase 1A.6 — queryJudgments / explainJudgment
+// ---------------------------------------------------------------
+
+function makeCommittedJudgment(inputOverrides: Partial<ProposalInput> = {}) {
+  const proposalInput: ProposalInput = {
+    ...validInput,
+    ...inputOverrides,
+  };
+  const proposed = proposeJudgment(db, proposalInput);
+  approveProposedJudgment(db, { judgment_id: proposed.id, reviewer: "approver" });
+  const source = recordJudgmentSource(db, {
+    kind: "turn",
+    locator: `session:${proposed.id}`,
+  });
+  const link = linkJudgmentEvidence(db, {
+    judgment_id: proposed.id,
+    source_id: source.id,
+    relation: "supports",
+    quote_excerpt: `evidence for ${proposed.id}`,
+  });
+  const committed = commitApprovedJudgment(db, {
+    judgment_id: proposed.id,
+    committer: "committer",
+    reason: "ready",
+  });
+  return { proposed, source, link, committed };
+}
+
+function countJudgmentEdges(): number {
+  return db
+    .prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_edges")
+    .get()!.n;
+}
+
+function snapshotJudgmentTables() {
+  return {
+    items: countItems(),
+    sources: countSources(),
+    links: countLinks(),
+    edges: countJudgmentEdges(),
+    events: countEvents(),
+  };
+}
+
+function getJudgmentMetadataRow(id: string) {
+  return db
+    .prepare<
+      {
+        updated_at: string;
+        retention_state: string;
+        source_ids_json: string | null;
+        evidence_ids_json: string | null;
+      },
+      [string]
+    >(
+      `SELECT updated_at, retention_state, source_ids_json, evidence_ids_json
+       FROM judgment_items WHERE id = ?`,
+    )
+    .get(id)!;
+}
+
+describe("queryJudgments — default visibility", () => {
+  test("default query returns only active / eligible / normal judgments", () => {
+    const active = makeCommittedJudgment({ statement: "active visible judgment" });
+    const proposedPending = proposeJudgment(db, {
+      ...validInput,
+      statement: "pending hidden proposal",
+      scope: { bucket: "pending" },
+    });
+    const approvedHistory = makeApprovedJudgmentWithEvidence();
+    const rejected = proposeJudgment(db, {
+      ...validInput,
+      statement: "rejected hidden judgment",
+      scope: { bucket: "rejected" },
+    });
+    rejectProposedJudgment(db, {
+      judgment_id: rejected.id,
+      reviewer: "reviewer",
+      reason: "wrong",
+    });
+    const archived = makeCommittedJudgment({ statement: "archived hidden judgment" });
+    db.prepare(`UPDATE judgment_items SET retention_state = 'archived' WHERE id = ?`).run(
+      archived.proposed.id,
+    );
+    const deleted = makeCommittedJudgment({ statement: "deleted hidden judgment" });
+    db.prepare(`UPDATE judgment_items SET retention_state = 'deleted' WHERE id = ?`).run(
+      deleted.proposed.id,
+    );
+
+    const result = queryJudgments(db);
+    expect(result.items.map((item) => item.id)).toEqual([active.proposed.id]);
+    expect(result.items.map((item) => item.id)).not.toContain(proposedPending.id);
+    expect(result.items.map((item) => item.id)).not.toContain(approvedHistory.j.id);
+    expect(result.items.map((item) => item.id)).not.toContain(rejected.id);
+    expect(result.items.map((item) => item.id)).not.toContain(archived.proposed.id);
+    expect(result.items.map((item) => item.id)).not.toContain(deleted.proposed.id);
+  });
+
+  test("include_history=true returns historical rows but still excludes deleted by default", () => {
+    const active = makeCommittedJudgment({ statement: "history active" });
+    const proposedPending = proposeJudgment(db, {
+      ...validInput,
+      statement: "history pending",
+      scope: { bucket: "pending" },
+    });
+    const approvedHistory = makeApprovedJudgmentWithEvidence();
+    const rejected = proposeJudgment(db, {
+      ...validInput,
+      statement: "history rejected",
+      scope: { bucket: "rejected" },
+    });
+    rejectProposedJudgment(db, {
+      judgment_id: rejected.id,
+      reviewer: "reviewer",
+      reason: "wrong",
+    });
+    const archived = makeCommittedJudgment({ statement: "history archived" });
+    db.prepare(`UPDATE judgment_items SET retention_state = 'archived' WHERE id = ?`).run(
+      archived.proposed.id,
+    );
+    const deleted = makeCommittedJudgment({ statement: "history deleted" });
+    db.prepare(`UPDATE judgment_items SET retention_state = 'deleted' WHERE id = ?`).run(
+      deleted.proposed.id,
+    );
+
+    const result = queryJudgments(db, { include_history: true });
+    const ids = result.items.map((item) => item.id);
+    expect(ids).toContain(active.proposed.id);
+    expect(ids).toContain(proposedPending.id);
+    expect(ids).toContain(approvedHistory.j.id);
+    expect(ids).toContain(rejected.id);
+    expect(ids).toContain(archived.proposed.id);
+    expect(ids).not.toContain(deleted.proposed.id);
+  });
+
+  test("deleted rows are returned only when explicitly filtered with include_history", () => {
+    const deleted = makeCommittedJudgment({ statement: "explicitly deleted" });
+    db.prepare(`UPDATE judgment_items SET retention_state = 'deleted' WHERE id = ?`).run(
+      deleted.proposed.id,
+    );
+
+    const result = queryJudgments(db, {
+      include_history: true,
+      retention_state: "deleted",
+    });
+    expect(result.items.map((item) => item.id)).toEqual([deleted.proposed.id]);
+  });
+});
+
+describe("queryJudgments — filters and validation", () => {
+  test("filters by kind, kinds, confidence, approval_state, lifecycle_status, activation_state, retention_state, authority_source, and procedure_subtype", () => {
+    const activeFact = makeCommittedJudgment({
+      kind: "fact",
+      confidence: "low",
+      statement: "alpha fact result",
+      scope: { project: "actwyn", tier: "prod" },
+    });
+    const activeProcedure = makeCommittedJudgment({
+      kind: "procedure",
+      procedure_subtype: "policy",
+      confidence: "high",
+      statement: "beta procedure result",
+      scope: { project: "actwyn", area: "ops" },
+    });
+    const pending = proposeJudgment(db, {
+      ...validInput,
+      statement: "pending filter row",
+      scope: { project: "actwyn", area: "draft" },
+    });
+    const approvedHistory = makeApprovedJudgmentWithEvidence();
+    const rejected = proposeJudgment(db, {
+      ...validInput,
+      statement: "rejected filter row",
+      scope: { project: "actwyn", area: "rejected" },
+    });
+    rejectProposedJudgment(db, {
+      judgment_id: rejected.id,
+      reviewer: "reviewer",
+      reason: "wrong",
+    });
+    const archived = makeCommittedJudgment({
+      statement: "archived filter row",
+      scope: { project: "actwyn", area: "archive" },
+    });
+    db.prepare(`UPDATE judgment_items SET retention_state = 'archived' WHERE id = ?`).run(
+      archived.proposed.id,
+    );
+
+    expect(queryJudgments(db, { kind: "procedure" }).items.map((item) => item.id)).toEqual([
+      activeProcedure.proposed.id,
+    ]);
+    expect(
+      queryJudgments(db, { kinds: ["fact", "procedure"] }).items.map((item) => item.id).sort(),
+    ).toEqual([activeFact.proposed.id, activeProcedure.proposed.id].sort());
+    expect(queryJudgments(db, { confidence: "high" }).items.map((item) => item.id)).toEqual([
+      activeProcedure.proposed.id,
+    ]);
+    expect(
+      queryJudgments(db, {
+        include_history: true,
+        approval_state: "pending",
+      }).items.map((item) => item.id),
+    ).toEqual([pending.id]);
+    expect(
+      queryJudgments(db, {
+        include_history: true,
+        lifecycle_status: "rejected",
+      }).items.map((item) => item.id),
+    ).toEqual([rejected.id]);
+    expect(
+      queryJudgments(db, {
+        include_history: true,
+        activation_state: "history_only",
+      }).items.map((item) => item.id).sort(),
+    ).toEqual([approvedHistory.j.id, pending.id].sort());
+    expect(
+      queryJudgments(db, {
+        include_history: true,
+        retention_state: "archived",
+      }).items.map((item) => item.id),
+    ).toEqual([archived.proposed.id]);
+    expect(
+      queryJudgments(db, {
+        include_history: true,
+        authority_source: "user_confirmed",
+      }).items.map((item) => item.id).sort(),
+    ).toEqual([
+      activeFact.proposed.id,
+      activeProcedure.proposed.id,
+      archived.proposed.id,
+    ].sort());
+    expect(
+      queryJudgments(db, {
+        procedure_subtype: "policy",
+      }).items.map((item) => item.id),
+    ).toEqual([activeProcedure.proposed.id]);
+  });
+
+  test("invalid enum filters and singular/plural duplicates fail before querying", () => {
+    expect(() =>
+      queryJudgments(db, { kind: "banana" } as QueryJudgmentsInput),
+    ).toThrow(JudgmentValidationError);
+    expect(() =>
+      queryJudgments(db, {
+        kind: "fact",
+        kinds: ["decision"],
+      }),
+    ).toThrow(JudgmentValidationError);
+  });
+
+  test("statement_match uses FTS, does not inject, and handles dangerous syntax deterministically", () => {
+    const alpha = makeCommittedJudgment({ statement: "deep space station" });
+    makeCommittedJudgment({ statement: "station operations handbook" });
+
+    const phraseHit = queryJudgments(db, {
+      statement_match: "deep space",
+    });
+    expect(phraseHit.items.map((item) => item.id)).toEqual([alpha.proposed.id]);
+
+    const injectionAttempt = queryJudgments(db, {
+      statement_match: `deep" OR station`,
+    });
+    expect(injectionAttempt.items).toHaveLength(0);
+
+    const dangerousSyntax = queryJudgments(db, {
+      statement_match: `" OR *`,
+    });
+    expect(dangerousSyntax.items).toHaveLength(0);
+  });
+
+  test("scope_contains matches shallow keys and rejects null/array/primitive", () => {
+    const scoped = makeCommittedJudgment({
+      statement: "scope contains row",
+      scope: { project: "actwyn", tags: ["judgment"], meta: { env: "prod" } },
+    });
+    makeCommittedJudgment({
+      statement: "other scope row",
+      scope: { project: "other", tags: ["judgment"], meta: { env: "prod" } },
+    });
+
+    const byProject = queryJudgments(db, {
+      scope_contains: { project: "actwyn" },
+    });
+    expect(byProject.items.map((item) => item.id)).toEqual([scoped.proposed.id]);
+
+    const byObject = queryJudgments(db, {
+      scope_contains: { meta: { env: "prod" } },
+    });
+    expect(byObject.items.map((item) => item.id).sort()).toContain(scoped.proposed.id);
+
+    for (const badScope of [null, [], 42] as const) {
+      expect(() =>
+        queryJudgments(db, { scope_contains: badScope as never }),
+      ).toThrow(JudgmentValidationError);
+    }
+  });
+
+  test("limit defaults to 20, pagination has_more is correct, and bad limit/offset values are rejected", () => {
+    for (let i = 0; i < 21; i++) {
+      const row = makeCommittedJudgment({ statement: `bulk row ${i}` });
+      db.prepare(`UPDATE judgment_items SET updated_at = ? WHERE id = ?`).run(
+        `2026-05-01T00:00:${i.toString().padStart(2, "0")}.000Z`,
+        row.proposed.id,
+      );
+    }
+
+    const defaultPage = queryJudgments(db);
+    expect(defaultPage.limit).toBe(20);
+    expect(defaultPage.returned).toBe(20);
+    expect(defaultPage.has_more).toBe(true);
+
+    const secondPage = queryJudgments(db, { limit: 5, offset: 20 });
+    expect(secondPage.returned).toBe(1);
+    expect(secondPage.has_more).toBe(false);
+
+    for (const badLimit of [0, -1, 101] as const) {
+      expect(() => queryJudgments(db, { limit: badLimit })).toThrow(JudgmentValidationError);
+    }
+    expect(() => queryJudgments(db, { offset: -1 })).toThrow(JudgmentValidationError);
+  });
+
+  test("updated_at_desc ordering is deterministic, result parses JSON fields, and fts_rowid is not exposed", () => {
+    const first = makeCommittedJudgment({
+      statement: "order first",
+      scope: { project: "actwyn", order: 1 },
+    });
+    const second = makeCommittedJudgment({
+      statement: "order second",
+      scope: { project: "actwyn", order: 2 },
+    });
+    const third = makeCommittedJudgment({
+      statement: "order third",
+      scope: { project: "actwyn", order: 3 },
+    });
+
+    db.prepare(`UPDATE judgment_items SET updated_at = ? WHERE id = ?`).run(
+      "2026-06-01T00:00:01.000Z",
+      first.proposed.id,
+    );
+    db.prepare(`UPDATE judgment_items SET updated_at = ? WHERE id = ?`).run(
+      "2026-06-01T00:00:03.000Z",
+      second.proposed.id,
+    );
+    db.prepare(`UPDATE judgment_items SET updated_at = ? WHERE id = ?`).run(
+      "2026-06-01T00:00:02.000Z",
+      third.proposed.id,
+    );
+
+    const result = queryJudgments(db, { order_by: "updated_at_desc" });
+    expect(result.items.map((item) => item.id)).toEqual([
+      second.proposed.id,
+      third.proposed.id,
+      first.proposed.id,
+    ]);
+    expect(result.items[0]!.scope).toEqual({ project: "actwyn", order: 2 });
+    expect(Array.isArray(result.items[0]!.source_ids)).toBe(true);
+    expect(Array.isArray(result.items[0]!.evidence_ids)).toBe(true);
+    expect("fts_rowid" in (result.items[0] as Record<string, unknown>)).toBe(false);
+  });
+
+  test("include_evidence=true includes compact evidence metadata and include_evidence=false omits it", () => {
+    const proposed = proposeJudgment(db, {
+      ...validInput,
+      statement: "evidence rich row",
+    });
+    approveProposedJudgment(db, { judgment_id: proposed.id, reviewer: "approver" });
+    const sourceA = recordJudgmentSource(db, { kind: "turn", locator: "turn:1", trust_level: "high" });
+    const sourceB = recordJudgmentSource(db, { kind: "attachment", locator: "file:1", trust_level: "medium" });
+    linkJudgmentEvidence(db, {
+      judgment_id: proposed.id,
+      source_id: sourceA.id,
+      relation: "supports",
+      quote_excerpt: "first quote",
+    });
+    linkJudgmentEvidence(db, {
+      judgment_id: proposed.id,
+      source_id: sourceB.id,
+      relation: "contextualizes",
+      quote_excerpt: "second quote",
+    });
+    commitApprovedJudgment(db, {
+      judgment_id: proposed.id,
+      committer: "committer",
+      reason: "ready",
+    });
+
+    const withEvidence = queryJudgments(db, {
+      include_evidence: true,
+      statement_match: "evidence rich row",
+    });
+    expect(withEvidence.items).toHaveLength(1);
+    expect(withEvidence.items[0]!.evidence_count).toBe(2);
+    expect(withEvidence.items[0]!.source_count).toBe(2);
+    expect(withEvidence.items[0]!.sources).toEqual([
+      {
+        id: sourceA.id,
+        kind: "turn",
+        locator: "turn:1",
+        trust_level: "high",
+        redacted: true,
+      },
+      {
+        id: sourceB.id,
+        kind: "attachment",
+        locator: "file:1",
+        trust_level: "medium",
+        redacted: true,
+      },
+    ]);
+    expect(withEvidence.items[0]!.evidence_links).toHaveLength(2);
+
+    const withoutEvidence = queryJudgments(db, {
+      statement_match: "evidence rich row",
+    });
+    expect(withoutEvidence.items).toHaveLength(1);
+    expect("sources" in (withoutEvidence.items[0] as Record<string, unknown>)).toBe(false);
+    expect("evidence_links" in (withoutEvidence.items[0] as Record<string, unknown>)).toBe(false);
+  });
+});
+
+describe("explainJudgment — states, payloads, and read-only behavior", () => {
+  test("explains active, proposed, rejected, and archived judgments", () => {
+    const active = makeCommittedJudgment({ statement: "explain active" });
+    const proposed = proposeJudgment(db, {
+      ...validInput,
+      statement: "explain proposed",
+    });
+    const rejected = proposeJudgment(db, {
+      ...validInput,
+      statement: "explain rejected",
+    });
+    rejectProposedJudgment(db, {
+      judgment_id: rejected.id,
+      reviewer: "reviewer",
+      reason: "bad",
+    });
+    const archived = makeCommittedJudgment({ statement: "explain archived" });
+    db.prepare(`UPDATE judgment_items SET retention_state = 'archived' WHERE id = ?`).run(
+      archived.proposed.id,
+    );
+
+    expect(explainJudgment(db, { judgment_id: active.proposed.id }).judgment.lifecycle_status).toBe("active");
+    expect(explainJudgment(db, { judgment_id: proposed.id }).judgment.lifecycle_status).toBe("proposed");
+    expect(explainJudgment(db, { judgment_id: rejected.id }).judgment.lifecycle_status).toBe("rejected");
+    expect(explainJudgment(db, { judgment_id: archived.proposed.id }).judgment.retention_state).toBe("archived");
+  });
+
+  test("missing and deleted judgments fail with not_found / invalid_state repository errors", () => {
+    expect(() =>
+      explainJudgment(db, { judgment_id: "missing-judgment" }),
+    ).toThrow(JudgmentNotFoundError);
+
+    const deleted = makeCommittedJudgment({ statement: "deleted explain row" });
+    db.prepare(`UPDATE judgment_items SET retention_state = 'deleted' WHERE id = ?`).run(
+      deleted.proposed.id,
+    );
+    expect(() =>
+      explainJudgment(db, { judgment_id: deleted.proposed.id }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("includes evidence links, linked sources, why entries, and lifecycle events", () => {
+    const proposed = proposeJudgment(db, {
+      ...validInput,
+      statement: "rich explain row",
+      would_change_if: [{ trigger: "new evidence" }],
+      missing_evidence: { needed: ["direct quote"] },
+      review_trigger: { when: "quarterly" },
+    });
+    approveProposedJudgment(db, { judgment_id: proposed.id, reviewer: "approver" });
+    const sourceA = recordJudgmentSource(db, { kind: "turn", locator: "turn:11", trust_level: "high" });
+    const sourceB = recordJudgmentSource(db, { kind: "attachment", locator: "file:77", trust_level: "medium" });
+    linkJudgmentEvidence(db, {
+      judgment_id: proposed.id,
+      source_id: sourceA.id,
+      relation: "supports",
+      span_locator: "p.1",
+      quote_excerpt: "primary evidence",
+      rationale: "direct quote",
+    });
+    linkJudgmentEvidence(db, {
+      judgment_id: proposed.id,
+      source_id: sourceB.id,
+      relation: "contextualizes",
+      span_locator: "p.2",
+      quote_excerpt: "secondary evidence",
+      rationale: "supporting context",
+    });
+    commitApprovedJudgment(db, {
+      judgment_id: proposed.id,
+      committer: "committer",
+      reason: "ready",
+    });
+    db.prepare(
+      `UPDATE judgment_items
+       SET supersedes_json = ?, superseded_by_json = ?
+       WHERE id = ?`,
+    ).run(JSON.stringify(["old-1"]), JSON.stringify(["new-1"]), proposed.id);
+
+    const explanation = explainJudgment(db, {
+      judgment_id: proposed.id,
+      include_payloads: true,
+    });
+
+    expect(explanation.judgment.source_ids).toEqual([sourceA.id, sourceB.id]);
+    expect(explanation.evidence_links).toHaveLength(2);
+    expect(explanation.sources).toHaveLength(2);
+    expect(explanation.why).toEqual([
+      {
+        source_id: sourceA.id,
+        evidence_link_id: explanation.evidence_links[0]!.id,
+        relation: "supports",
+        source_kind: "turn",
+        locator: "turn:11",
+        trust_level: "high",
+        quote_excerpt: "primary evidence",
+        span_locator: "p.1",
+        rationale: "direct quote",
+      },
+      {
+        source_id: sourceB.id,
+        evidence_link_id: explanation.evidence_links[1]!.id,
+        relation: "contextualizes",
+        source_kind: "attachment",
+        locator: "file:77",
+        trust_level: "medium",
+        quote_excerpt: "secondary evidence",
+        span_locator: "p.2",
+        rationale: "supporting context",
+      },
+    ]);
+    expect(explanation.events.length).toBeGreaterThan(0);
+    expect(explanation.events.some((event) => "payload" in event)).toBe(true);
+    expect(explanation.would_change_if).toEqual([{ trigger: "new evidence" }]);
+    expect(explanation.missing_evidence).toEqual({ needed: ["direct quote"] });
+    expect(explanation.review_trigger).toEqual({ when: "quarterly" });
+    expect(explanation.supersedes).toEqual(["old-1"]);
+    expect(explanation.superseded_by).toEqual(["new-1"]);
+  });
+
+  test("include_events=false omits events and default explain omits payloads", () => {
+    const active = makeCommittedJudgment({ statement: "event toggle row" });
+    const withoutEvents = explainJudgment(db, {
+      judgment_id: active.proposed.id,
+      include_events: false,
+    });
+    expect(withoutEvents.events).toEqual([]);
+
+    const defaultExplain = explainJudgment(db, { judgment_id: active.proposed.id });
+    expect(defaultExplain.events.length).toBeGreaterThan(0);
+    expect("payload" in defaultExplain.events[0]!).toBe(false);
+  });
+
+  test("successful explain is read-only and appends no events", () => {
+    const active = makeCommittedJudgment({ statement: "read only explain row" });
+    const tablesBefore = snapshotJudgmentTables();
+    const rowBefore = getJudgmentMetadataRow(active.proposed.id);
+    const eventsBefore = countEvents(active.proposed.id);
+
+    const explanation = explainJudgment(db, { judgment_id: active.proposed.id });
+    expect(explanation.judgment.id).toBe(active.proposed.id);
+
+    const tablesAfter = snapshotJudgmentTables();
+    const rowAfter = getJudgmentMetadataRow(active.proposed.id);
+    expect(tablesAfter).toEqual(tablesBefore);
+    expect(rowAfter).toEqual(rowBefore);
+    expect(countEvents(active.proposed.id)).toBe(eventsBefore);
+  });
+
+  test("malformed persisted JSON fails deterministically and explain remains read-only", () => {
+    const active = makeCommittedJudgment({ statement: "malformed explain row" });
+    const tablesBefore = snapshotJudgmentTables();
+    const rowBefore = getJudgmentMetadataRow(active.proposed.id);
+    const eventsBefore = countEvents(active.proposed.id);
+
+    db.prepare(`UPDATE judgment_items SET would_change_if_json = '42' WHERE id = ?`).run(
+      active.proposed.id,
+    );
+    expect(() =>
+      explainJudgment(db, { judgment_id: active.proposed.id } as ExplainJudgmentInput),
+    ).toThrow(JudgmentValidationError);
+
+    const tablesAfter = snapshotJudgmentTables();
+    const rowAfter = getJudgmentMetadataRow(active.proposed.id);
+    expect(tablesAfter).toEqual(tablesBefore);
+    expect(rowAfter.updated_at).toBe(rowBefore.updated_at);
+    expect(countEvents(active.proposed.id)).toBe(eventsBefore);
   });
 });

@@ -13,6 +13,10 @@
 //   executeJudgmentLinkEvidenceTool(db, input, deps?) → EvidenceLinkToolResult
 //   JUDGMENT_COMMIT_TOOL         — name + description constant  (Phase 1A.5)
 //   executeJudgmentCommitTool(db, input, deps?) → CommitToolResult
+//   JUDGMENT_QUERY_TOOL          — name + description constant  (Phase 1A.6)
+//   executeJudgmentQueryTool(db, input)         → QueryToolResult
+//   JUDGMENT_EXPLAIN_TOOL        — name + description constant  (Phase 1A.6)
+//   executeJudgmentExplainTool(db, input)       → ExplainToolResult
 //
 // These tools are NOT registered anywhere. They must not be imported from
 // src/main.ts, src/providers/*, src/context/*, src/queue/worker.ts,
@@ -24,6 +28,7 @@
 import type { DbHandle } from "~/db.ts";
 
 import {
+  explainJudgment,
   JudgmentNotFoundError,
   JudgmentStateError,
   JudgmentValidationError,
@@ -31,6 +36,7 @@ import {
   commitApprovedJudgment,
   linkJudgmentEvidence,
   proposeJudgment,
+  queryJudgments,
   recordJudgmentSource,
   rejectProposedJudgment,
   type ApproveInput,
@@ -43,12 +49,16 @@ import {
   type ProposalDeps,
   type ProposalInput,
   type ProposedJudgment,
+  type QueryJudgmentsInput,
+  type QueryJudgmentsResult,
   type RecordedSource,
   type RejectInput,
   type ReviewDeps,
   type ReviewedJudgment,
   type SourceDeps,
   type SourceInput,
+  type ExplainJudgmentInput,
+  type JudgmentExplanation,
 } from "~/judgment/repository.ts";
 
 // ---------------------------------------------------------------
@@ -87,6 +97,18 @@ export const JUDGMENT_COMMIT_TOOL = {
   name: "judgment.commit" as const,
   description:
     "commits an approved, evidence-linked proposed judgment as active/eligible without wiring it into runtime context",
+} as const;
+
+export const JUDGMENT_QUERY_TOOL = {
+  name: "judgment.query" as const,
+  description:
+    "queries local judgment rows by status, kind, scope, and FTS without wiring results into runtime context",
+} as const;
+
+export const JUDGMENT_EXPLAIN_TOOL = {
+  name: "judgment.explain" as const,
+  description:
+    "explains one local judgment by returning its evidence, sources, and lifecycle events",
 } as const;
 
 // ---------------------------------------------------------------
@@ -165,6 +187,33 @@ export type CommitToolSuccess = {
 
 export type CommitToolResult = CommitToolSuccess | ReviewToolError;
 
+// ---------------------------------------------------------------
+// Query / explain tool result types (Phase 1A.6)
+// ---------------------------------------------------------------
+
+export type QueryToolSuccess = {
+  readonly ok: true;
+  readonly result: QueryJudgmentsResult;
+};
+
+export type QueryToolError = {
+  readonly ok: false;
+  readonly error: {
+    readonly code: "validation_error";
+    readonly field: string | undefined;
+    readonly message: string;
+  };
+};
+
+export type QueryToolResult = QueryToolSuccess | QueryToolError;
+
+export type ExplainToolSuccess = {
+  readonly ok: true;
+  readonly explanation: JudgmentExplanation;
+};
+
+export type ExplainToolResult = ExplainToolSuccess | ReviewToolError;
+
 // Re-export input/deps types so callers import from tool.ts only.
 export type {
   ProposalInput,
@@ -182,6 +231,10 @@ export type {
   CommitInput,
   CommitDeps,
   CommittedJudgment,
+  QueryJudgmentsInput,
+  QueryJudgmentsResult,
+  ExplainJudgmentInput,
+  JudgmentExplanation,
 };
 
 // ---------------------------------------------------------------
@@ -317,6 +370,48 @@ export function executeJudgmentCommitTool(
   try {
     const judgment = commitApprovedJudgment(db, input, deps);
     return { ok: true, judgment };
+  } catch (e) {
+    return mapReviewError(e);
+  }
+}
+
+// ---------------------------------------------------------------
+// Query executor (Phase 1A.6)
+// ---------------------------------------------------------------
+
+export function executeJudgmentQueryTool(
+  db: DbHandle,
+  input?: QueryJudgmentsInput,
+): QueryToolResult {
+  try {
+    const result = queryJudgments(db, input);
+    return { ok: true, result };
+  } catch (e) {
+    if (e instanceof JudgmentValidationError) {
+      return {
+        ok: false,
+        error: {
+          code: "validation_error",
+          field: e.field,
+          message: e.message,
+        },
+      };
+    }
+    throw e;
+  }
+}
+
+// ---------------------------------------------------------------
+// Explain executor (Phase 1A.6)
+// ---------------------------------------------------------------
+
+export function executeJudgmentExplainTool(
+  db: DbHandle,
+  input: ExplainJudgmentInput,
+): ExplainToolResult {
+  try {
+    const explanation = explainJudgment(db, input);
+    return { ok: true, explanation };
   } catch (e) {
     return mapReviewError(e);
   }

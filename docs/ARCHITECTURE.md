@@ -22,7 +22,7 @@
 | Redaction at the persistence boundary             | implemented |
 | Memory summaries with provenance + confidence     | implemented |
 | Telegram attachment two-phase capture             | implemented |
-| DB-native AI-first Judgment System (Phase 1A+)    | schema skeleton + proposal repository + proposal review repository + source/evidence-link repository + commit/activation repository + unregistered tool contracts (not runtime-wired) |
+| DB-native AI-first Judgment System (Phase 1A+)    | schema skeleton + proposal/review/source/evidence/commit repositories + local query/explain read surfaces + unregistered tool contracts (not runtime-wired) |
 | Vector / graph derived projections                | planned     |
 | second-brain repo as canonical runtime memory     | not planned (history/seed only) |
 | Obsidian / Markdown active write path             | not planned |
@@ -90,6 +90,17 @@ provider prompt integration, no Telegram command, and no memory
 promotion path exists yet.** The commit tool is not registered
 anywhere in the runtime.
 
+Phase 1A.6 has added the **query / explain local read surfaces**:
+`src/judgment/repository.ts` now also exports `queryJudgments`
+and `explainJudgment`, and `src/judgment/tool.ts` now also exports
+`JUDGMENT_QUERY_TOOL` / `JUDGMENT_EXPLAIN_TOOL` and
+`executeJudgmentQueryTool` / `executeJudgmentExplainTool`.
+These are local, unregistered, read-only surfaces only:
+they query or explain committed or historical judgment rows,
+but they do **not** mutate any `judgment_*` table, append
+`judgment_events`, or make judgments context-visible. Active /
+eligible rows remain outside runtime request handling.
+
 No Control Gate, no Context Compiler, no context/provider runtime
 hookup, and no memory-promotion path exists yet — those remain
 Phase 1A+ work.
@@ -155,7 +166,7 @@ Detailed module / state-machine diagrams live in `docs/02_HLD.md`.
   `/var/lib/actwyn/actwyn.db` on prod).
 - **Architecture decisions** — `docs/adr/*` (ADR-0001 … ADR-0013
   accepted on `main`; ADR-0009 … ADR-0013 cover the Judgment System
-  direction; Phase 1A.1 through Phase 1A.5 are implemented — full
+  direction; Phase 1A.1 through Phase 1A.6 are implemented — full
   Judgment System runtime is not implemented; runtime wiring remains
   future work).
 - **Tactical decisions and open questions** —
@@ -204,10 +215,12 @@ A short summary; the full file map lives in `docs/CODE_MAP.md`.
   orphan PIDs); offset fast-forward; one-shot `storage_sync` for
   `failed` / `delete_failed` rows only.
 - `src/judgment/*` — Phase 1A types, validators, proposal + proposal
-  review + source/evidence-link + commit/activation repository, and
+  review + source/evidence-link + commit/activation + query/explain
+  repository surfaces, and
   unregistered `judgment.propose` / `judgment.approve` /
   `judgment.reject` / `judgment.record_source` /
-  `judgment.link_evidence` / `judgment.commit` tool contracts.
+  `judgment.link_evidence` / `judgment.commit` /
+  `judgment.query` / `judgment.explain` tool contracts.
   Not wired into any runtime module; see §Phase 1A below.
 
 ## Phase 1A current slice and planned architecture
@@ -242,7 +255,7 @@ exists only as local unregistered DB operations:
 
 The DB-native AI-first Judgment System direction (ADR-0009 …
 ADR-0013, `docs/JUDGMENT_SYSTEM.md`) defines the following
-components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4 / 1A.5):
+components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4 / 1A.5 / 1A.6):
 
 - **Schema skeleton** — `judgment_sources`, `judgment_items`,
   `judgment_evidence_links`, `judgment_edges`, `judgment_events`,
@@ -269,14 +282,19 @@ components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4 / 1A.5):
   appends `judgment.committed`. Active/eligible rows can now exist
   in DB, but runtime context does not read them — no Context
   Compiler or provider integration exists.
+- **Query / explain read surfaces** — `src/judgment/repository.ts`
+  (`queryJudgments`, `explainJudgment`). Read-only local query and
+  audit/explain surfaces over judgment rows, evidence, sources, and
+  lifecycle events. They do not mutate tables or append events.
 - **Unregistered typed-tool contracts** — `src/judgment/tool.ts`
   (`judgment.propose`, `judgment.approve`, `judgment.reject`,
   `judgment.record_source`, `judgment.link_evidence`,
-  `judgment.commit`). Not imported from any runtime module.
+  `judgment.commit`, `judgment.query`, `judgment.explain`).
+  Not imported from any runtime module.
 
 `judgment_edges` has no runtime writer yet.
 
-**Not implemented** (beyond Phase 1A.5):
+**Not implemented** (beyond Phase 1A.6):
 
 - `Control Gate` evaluators and the `control_gate_events` /
   `control_plane_events` ledger (table name open per
@@ -290,7 +308,7 @@ components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4 / 1A.5):
   implemented**.
 - Vector and graph derived projections — **not implemented**.
 - Further typed tools (`supersede` / `revoke` / `expire` /
-  `query` / `explain` / `update_current_state`) and Critique Lens
+  `update_current_state`) and Critique Lens
   v0.1 integration (ADR-0013) — **not implemented**.
 - Provider / context / memory-promotion runtime integration —
   **not implemented**. The judgment tables are not read or written
@@ -299,10 +317,10 @@ components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4 / 1A.5):
   are wired into any of these modules.
 
 These are listed so AI coding agents do not mistake design
-documents for implemented behavior. Phase 1A.1 through Phase 1A.5
-have landed. Local commit/activation exists. **Supersede, revoke,
-expire, query, explain, runtime context integration, and Control
-Gate work remain future scope.** See `docs/RUNTIME.md` and
+documents for implemented behavior. Phase 1A.1 through Phase 1A.6
+have landed. Local commit/activation plus local query/explain
+exist. **Supersede, revoke, expire, runtime context integration,
+and Control Gate work remain future scope.** See `docs/RUNTIME.md` and
 `docs/DATA_MODEL.md` for how the implemented slice sits next to
 the runtime, and `docs/JUDGMENT_SYSTEM.md` §Implementation
 Readiness for the broader Phase 1A scope.

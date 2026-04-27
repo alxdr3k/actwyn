@@ -93,12 +93,20 @@ Do not read `docs/design/archive/` by default. Those are history.
     explicitly tasked** — no Context Compiler, no provider prompt
     integration, no Telegram command, and no memory-promotion path for
     judgments exists yet.
+  - **Phase 1A.6 (landed)**: `src/judgment/repository.ts` now also
+    exports `queryJudgments` and `explainJudgment`, and
+    `src/judgment/tool.ts` now also exports `JUDGMENT_QUERY_TOOL` /
+    `JUDGMENT_EXPLAIN_TOOL` and `executeJudgmentQueryTool` /
+    `executeJudgmentExplainTool`. These are **local, unregistered,
+    read-only** surfaces. They do **not** mutate judgment rows,
+    append `judgment_events`, or make judgments context-visible.
   - None of the judgment tools are **registered** anywhere in `src/`.
     They must not be imported from `src/main.ts`, `src/providers/*`,
     `src/context/*`, `src/queue/worker.ts`, `src/memory/*`,
     `src/telegram/*`, or `src/commands/*`.
-  - Do **not** implement supersede, revoke, expire, query, explain,
-    Control Gate, Tension, ReflectionTriageEvent,
+  - Do **not** implement supersede, revoke, expire, runtime-wired
+    judgment integration, Control Gate, Tension,
+    ReflectionTriageEvent,
     `current_operating_view`, Context Compiler, provider/context
     integration, vector / graph projections, Critique Lens,
     or any further runtime Judgment surface unless the task explicitly
