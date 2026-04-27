@@ -74,3 +74,4 @@ Register (`DEC-###`), not here.
 | ADR-0011 | Architecture upgradeability and memory activation lifecycle | accepted |
 | ADR-0012 | Origin/Authority separation and Metacognitive Critique Loop | accepted |
 | ADR-0013 | Critique Lens v0.1 + Tension Generalization + Status Axis Separation | accepted |
+| ADR-0014 | Bun runtime stack confirmation: cautions, principles, roadmap | accepted |
