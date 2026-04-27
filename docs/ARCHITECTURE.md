@@ -230,6 +230,7 @@ Phase 1A.3 landed the **proposal review transitions**:
 `executeJudgmentRejectTool` in `src/judgment/tool.ts`. These are
 local, unregistered DB operations only. Approval/rejection review
 exists only as local unregistered DB operations:
+
 - Approval does **not** activate a judgment.
 - Approved judgments remain `lifecycle_status = proposed` and
   `activation_state = history_only`.
