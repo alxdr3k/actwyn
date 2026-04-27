@@ -2357,6 +2357,33 @@ function batchLoadEvidenceBundles(
   // Assemble per-item compact bundles
   return items.map((item) => {
     const links = linksByJudgment.get(item.id) ?? [];
+
+    // Denormalized consistency checks — mirrors loadEvidenceBundle behavior so
+    // queryJudgments(include_evidence=true) and explainJudgment throw the same
+    // errors for the same corrupted rows rather than silently diverging.
+    //
+    // 1. Every ID in evidence_ids_json must map to an actual link row.
+    const linkById = new Map(links.map((l) => [l.id, l]));
+    for (const evidenceId of item.evidence_ids) {
+      if (!linkById.has(evidenceId)) {
+        throw new JudgmentValidationError(
+          `judgment ${item.id} evidence_ids_json references missing evidence link ${evidenceId}`,
+          "evidence_ids_json",
+        );
+      }
+    }
+
+    // 2. Every source in source_ids_json must be referenced by at least one link.
+    const linkedSourceIds = new Set(links.map((l) => l.source_id));
+    for (const sourceId of item.source_ids) {
+      if (!linkedSourceIds.has(sourceId)) {
+        throw new JudgmentValidationError(
+          `judgment ${item.id} source_ids_json references unlinked source ${sourceId}`,
+          "source_ids_json",
+        );
+      }
+    }
+
     const seenSourceIds = new Set<string>();
     const sources: JudgmentQuerySourceSummary[] = [];
     for (const link of links) {
