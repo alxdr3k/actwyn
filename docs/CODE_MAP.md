@@ -87,20 +87,21 @@ Status legend:
 
 The Judgment System (`JudgmentItem`, Control Gate, Tension,
 ReflectionTriageEvent, `current_operating_view`, vector / graph
-projections) is **planned** under ADR-0009 … ADR-0013 and
-`docs/JUDGMENT_SYSTEM.md` (Phase 0 / 0.5 architectural design
-record per DEC-037). The Phase 1A.1 schema skeleton + types /
-validators have landed (see "Judgment (Phase 1A schema/types
-only)" below); no runtime writer, typed tool, Control Gate, or
-Context Compiler integration is implemented yet. See
-`docs/DATA_MODEL.md` and `docs/RUNTIME.md`.
+projections) is architecturally committed under ADR-0009 … ADR-0013
+and `docs/JUDGMENT_SYSTEM.md`. Phase 1A.1 and Phase 1A.2 have landed
+partial implementation (see table below). No Control Gate, Context
+Compiler integration, approval workflow, activation workflow, or
+runtime provider wiring is implemented yet. See `docs/DATA_MODEL.md`
+and `docs/RUNTIME.md`.
 
-## Judgment (Phase 1A schema/types only)
+## Judgment (Phase 1A.2 — schema + proposal repository + typed-tool contract)
 
 | Path                                  | Purpose                                                                              | Status                                                                       |
 | ------------------------------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| `src/judgment/types.ts`               | `as const` literal arrays + union types for the P0.5 enum surfaces (`kind`, `epistemic_origin`, `authority_source`, `approval_state`, `lifecycle_status`, `activation_state`, `retention_state`, `confidence`, `decay_policy`, `procedure_subtype`) plus `ONTOLOGY_VERSION` / `SCHEMA_VERSION` defaults (DEC-028). Pure TS, no `Bun` / `bun:*` import (ADR-0014). | implemented (schema/types only — not runtime-integrated)                     |
-| `src/judgment/validators.ts`          | Pure-TS type guards over the literal arrays in `types.ts`, plus `validateStatement` / `validateScopeJson` / `validateImportance` / `validateConfidenceLabel` returning a tagged result. No DB / writer / repository surface in this PR. | implemented (schema/types only — not runtime-integrated)                     |
+| `src/judgment/types.ts`               | `as const` literal arrays + union types for the P0.5 enum surfaces (`kind`, `epistemic_origin`, `authority_source`, `approval_state`, `lifecycle_status`, `activation_state`, `retention_state`, `confidence`, `decay_policy`, `procedure_subtype`) plus `ONTOLOGY_VERSION` / `SCHEMA_VERSION` defaults (DEC-028). Pure TS, no `Bun` / `bun:*` import (ADR-0014). | implemented (Phase 1A.1 — not runtime-integrated)                     |
+| `src/judgment/validators.ts`          | Pure-TS type guards over the literal arrays in `types.ts`, plus `validateStatement` / `validateScopeJson` / `validateScopeObject` / `validateKind` / `validateEpistemicOrigin` / `validateImportance` / `validateConfidenceLabel` / `validateStringArray` / `validateJsonValue` returning a tagged result. | implemented (Phase 1A.1/1A.2 — not runtime-integrated)                     |
+| `src/judgment/repository.ts`          | Proposal-only writer: `proposeJudgment(db, input, deps?)`. Inserts one `judgment_items` row + one `judgment_events` row in a single transaction. Forces `lifecycle_status=proposed` / `approval_state=pending` / `activation_state=history_only`. No approval, activation, supersede, or revoke path. | implemented (Phase 1A.2 — not runtime-integrated)                     |
+| `src/judgment/tool.ts`                | Unregistered local typed-tool contract: `JUDGMENT_PROPOSE_TOOL` constant + `executeJudgmentProposeTool(db, input, deps?)`. Wraps the repository and returns a stable `ok`/`error` result. **Not imported from any runtime module.** | implemented (Phase 1A.2 — not runtime-registered)                     |
 
 ## Queue / orchestration
 
@@ -155,7 +156,11 @@ Context Compiler integration is implemented yet. See
 | `test/context/token_estimator.test.ts`            | CJK-safer token estimator behavior (DEC-021).                                    |
 | `test/db/invariants.test.ts`                      | Cross-table invariants from HLD §5.2.                                            |
 | `test/db/schema.test.ts`                          | Schema / migration shape assertions.                                             |
+| `test/db/judgment_schema.test.ts`                 | Judgment schema CHECK / NOT NULL / JSON / FTS5 trigger coverage (Phase 1A.1).    |
 | `test/events.test.ts`                             | Event emitter contract.                                                          |
+| `test/judgment/validators.test.ts`                | Pure-TS validator type guards + field validator behavior (Phase 1A.1/1A.2).      |
+| `test/judgment/repository.test.ts`                | Proposal repository insert, defaults, validation rejections, FTS trigger, transaction rollback (Phase 1A.2). |
+| `test/judgment/tool.test.ts`                      | Typed-tool contract constants, executor happy/error paths, static boundary assertions (Phase 1A.2). |
 | `test/memory/correction.test.ts`                  | Memory correction supersede semantics (AC-MEM-004).                              |
 | `test/memory/summary.test.ts`                     | Summary generation + provenance (AC-MEM-002).                                    |
 | `test/notifications/*.test.ts`                    | Notification chunking, ledger, retry state machine, worker wiring (AC-NOTIF-*). |

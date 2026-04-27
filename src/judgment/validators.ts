@@ -181,3 +181,84 @@ export function validateConfidenceLabel(s: unknown): ValidationResult {
   if (isConfidence(s)) return { ok: true };
   return { ok: false, reason: "confidence must be one of low / medium / high" };
 }
+
+export function validateKind(v: unknown): ValidationResult {
+  if (isJudgmentKind(v)) return { ok: true };
+  return {
+    ok: false,
+    reason: `kind must be one of ${JUDGMENT_KINDS.join(", ")}`,
+  };
+}
+
+export function validateEpistemicOrigin(v: unknown): ValidationResult {
+  if (isEpistemicOrigin(v)) return { ok: true };
+  return {
+    ok: false,
+    reason: `epistemic_origin must be one of ${EPISTEMIC_ORIGINS.join(", ")}`,
+  };
+}
+
+/**
+ * `scope` at the application layer must be a plain object — not null,
+ * not an array, not a primitive — and must be JSON-serializable.
+ * Unlike `validateScopeJson`, this takes the live object directly.
+ */
+export function validateScopeObject(v: unknown): ValidationResult {
+  if (v === null) {
+    return { ok: false, reason: "scope must not be null" };
+  }
+  if (Array.isArray(v)) {
+    return { ok: false, reason: "scope must not be an array" };
+  }
+  if (typeof v !== "object") {
+    return { ok: false, reason: `scope must be a plain object, got ${typeof v}` };
+  }
+  try {
+    JSON.stringify(v);
+  } catch (e) {
+    return {
+      ok: false,
+      reason: `scope cannot be serialized to JSON: ${(e as Error).message}`,
+    };
+  }
+  return { ok: true };
+}
+
+/** Every element must be a non-empty string. */
+export function validateStringArray(
+  v: unknown,
+  fieldName: string,
+): ValidationResult {
+  if (!Array.isArray(v)) {
+    return { ok: false, reason: `${fieldName} must be an array` };
+  }
+  for (let i = 0; i < v.length; i++) {
+    if (typeof v[i] !== "string" || (v[i] as string).length === 0) {
+      return {
+        ok: false,
+        reason: `${fieldName}[${i}] must be a non-empty string`,
+      };
+    }
+  }
+  return { ok: true };
+}
+
+/**
+ * `v` must be a JSON-serializable object or array.
+ * Used for metacognitive fields (`would_change_if`, `missing_evidence`,
+ * `review_trigger`).
+ */
+export function validateJsonValue(v: unknown): ValidationResult {
+  if (v === null || typeof v !== "object") {
+    return { ok: false, reason: "value must be a JSON object or array" };
+  }
+  try {
+    JSON.stringify(v);
+  } catch (e) {
+    return {
+      ok: false,
+      reason: `value cannot be serialized to JSON: ${(e as Error).message}`,
+    };
+  }
+  return { ok: true };
+}

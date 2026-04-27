@@ -22,7 +22,7 @@
 | Redaction at the persistence boundary             | implemented |
 | Memory summaries with provenance + confidence     | implemented |
 | Telegram attachment two-phase capture             | implemented |
-| DB-native AI-first Judgment System (Phase 1A+)    | schema skeleton present (not runtime-wired) |
+| DB-native AI-first Judgment System (Phase 1A+)    | schema skeleton + proposal repository + unregistered tool contract (not runtime-wired) |
 | Vector / graph derived projections                | planned     |
 | second-brain repo as canonical runtime memory     | not planned (history/seed only) |
 | Obsidian / Markdown active write path             | not planned |
@@ -34,10 +34,19 @@ those documents are the architectural authority for *why* the
 direction was chosen but are **not** the source of truth for
 implemented runtime behavior.
 
-Phase 1A.1 has landed the **judgment schema skeleton only**:
+Phase 1A.1 landed the **judgment schema skeleton**:
 `migrations/004_judgment_skeleton.sql` (5 tables + FTS5),
-`src/judgment/types.ts`, and `src/judgment/validators.ts`. No typed
-tool surface, no repository writer, no Control Gate, no
+`src/judgment/types.ts`, and `src/judgment/validators.ts`.
+
+Phase 1A.2 has added a **proposal-only write surface**:
+`src/judgment/repository.ts` (`proposeJudgment`) and a local
+**unregistered typed-tool contract** `src/judgment/tool.ts`
+(`judgment.propose`). The repository can create rows with
+`lifecycle_status = proposed` / `approval_state = pending` /
+`activation_state = history_only` only. The tool is not registered
+anywhere in the runtime.
+
+No Control Gate, no approval workflow, no activation workflow, no
 context-compiler integration, no provider runtime hookup, and no
 memory-promotion path exists yet — those remain Phase 1A+ work.
 
@@ -179,18 +188,21 @@ components. The pieces below remain **not implemented**:
   earlier "current truth" framing) — **not implemented**.
 - Vector and graph derived projections (FTS5 first; vector / graph
   deferred per ADR-0009) — **not implemented**.
-- Typed tool surface (`judgment.propose` / `commit` / `supersede` /
-  `revoke` / `query` / `explain` / `link_evidence` /
+- `judgment.propose` **unregistered local contract** —
+  **implemented** in `src/judgment/tool.ts` (Phase 1A.2), but not
+  registered in any runtime surface. Further typed tools (`commit` /
+  `supersede` / `revoke` / `query` / `explain` / `link_evidence` /
   `update_current_state`) and Critique Lens v0.1 integration
   (ADR-0013) — **not implemented**.
-- Repository / writer module under `src/judgment/*` — **not
-  implemented**. Only `src/judgment/types.ts` and
-  `src/judgment/validators.ts` exist today (pure-TS literal sets
-  and field validators per ADR-0014).
+- **Proposal-only repository** `src/judgment/repository.ts` —
+  **implemented** (Phase 1A.2). Creates `proposed` / `pending` /
+  `history_only` rows only. No approval, activation, supersede, or
+  revoke write path exists yet.
 - Provider / context / memory-promotion runtime integration —
   **not implemented**. The judgment tables are not read or written
   by `src/providers/*`, `src/context/*`, `src/queue/worker.ts`,
-  `src/memory/*`, or `src/telegram/*`.
+  `src/memory/*`, or `src/telegram/*`. The `judgment.propose` tool
+  is not wired into any of these modules.
 
 These are listed here so AI coding agents do not mistake design
 documents for implemented behavior. Beyond Phase 1A.1's schema +

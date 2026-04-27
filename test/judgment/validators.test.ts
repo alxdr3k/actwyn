@@ -1,4 +1,4 @@
-// Judgment System Phase 1A.1 — pure-TS validator coverage.
+// Judgment System Phase 1A.1/1A.2 — pure-TS validator coverage.
 
 import { describe, expect, test } from "bun:test";
 
@@ -14,9 +14,14 @@ import {
   isProcedureSubtype,
   isRetentionState,
   validateConfidenceLabel,
+  validateEpistemicOrigin,
   validateImportance,
+  validateJsonValue,
+  validateKind,
   validateScopeJson,
+  validateScopeObject,
   validateStatement,
+  validateStringArray,
 } from "../../src/judgment/validators.ts";
 
 describe("type guards", () => {
@@ -148,5 +153,116 @@ describe("validateConfidenceLabel", () => {
 
   test("rejects definite", () => {
     expect(validateConfidenceLabel("definite").ok).toBe(false);
+  });
+});
+
+// Phase 1A.2 additions
+
+describe("validateKind", () => {
+  test("accepts all valid kinds", () => {
+    for (const k of ["fact", "preference", "decision", "current_state", "procedure", "caution"]) {
+      expect(validateKind(k).ok).toBe(true);
+    }
+  });
+
+  test("rejects unknown kind", () => {
+    expect(validateKind("banana").ok).toBe(false);
+    expect(validateKind("").ok).toBe(false);
+    expect(validateKind(null).ok).toBe(false);
+  });
+});
+
+describe("validateEpistemicOrigin", () => {
+  test("accepts all valid origins", () => {
+    for (const o of [
+      "observed",
+      "user_stated",
+      "user_confirmed",
+      "inferred",
+      "assistant_generated",
+      "tool_output",
+    ]) {
+      expect(validateEpistemicOrigin(o).ok).toBe(true);
+    }
+  });
+
+  test("rejects unknown origin", () => {
+    expect(validateEpistemicOrigin("rumor").ok).toBe(false);
+    expect(validateEpistemicOrigin(42).ok).toBe(false);
+  });
+});
+
+describe("validateScopeObject", () => {
+  test("accepts plain object", () => {
+    expect(validateScopeObject({ project: "actwyn" }).ok).toBe(true);
+  });
+
+  test("rejects null", () => {
+    expect(validateScopeObject(null).ok).toBe(false);
+  });
+
+  test("rejects array", () => {
+    expect(validateScopeObject([]).ok).toBe(false);
+    expect(validateScopeObject(["a"]).ok).toBe(false);
+  });
+
+  test("rejects primitive", () => {
+    expect(validateScopeObject("string").ok).toBe(false);
+    expect(validateScopeObject(42).ok).toBe(false);
+    expect(validateScopeObject(true).ok).toBe(false);
+  });
+
+  test("rejects circular / unserializable object", () => {
+    const circ: Record<string, unknown> = {};
+    circ["self"] = circ;
+    expect(validateScopeObject(circ).ok).toBe(false);
+  });
+});
+
+describe("validateStringArray", () => {
+  test("accepts array of non-empty strings", () => {
+    expect(validateStringArray(["a", "b"], "ids").ok).toBe(true);
+    expect(validateStringArray([], "ids").ok).toBe(true);
+  });
+
+  test("rejects non-array", () => {
+    expect(validateStringArray("a", "ids").ok).toBe(false);
+    expect(validateStringArray(null, "ids").ok).toBe(false);
+  });
+
+  test("rejects array with empty string element", () => {
+    expect(validateStringArray(["a", ""], "ids").ok).toBe(false);
+  });
+
+  test("rejects array with non-string element", () => {
+    expect(validateStringArray([1, 2], "ids").ok).toBe(false);
+    expect(validateStringArray([null], "ids").ok).toBe(false);
+  });
+});
+
+describe("validateJsonValue", () => {
+  test("accepts plain object", () => {
+    expect(validateJsonValue({ a: 1 }).ok).toBe(true);
+  });
+
+  test("accepts array", () => {
+    expect(validateJsonValue(["x"]).ok).toBe(true);
+    expect(validateJsonValue([]).ok).toBe(true);
+  });
+
+  test("rejects null", () => {
+    expect(validateJsonValue(null).ok).toBe(false);
+  });
+
+  test("rejects primitives", () => {
+    expect(validateJsonValue("str").ok).toBe(false);
+    expect(validateJsonValue(42).ok).toBe(false);
+    expect(validateJsonValue(true).ok).toBe(false);
+  });
+
+  test("rejects unserializable object", () => {
+    const circ: Record<string, unknown> = {};
+    circ["self"] = circ;
+    expect(validateJsonValue(circ).ok).toBe(false);
   });
 });
