@@ -3198,6 +3198,44 @@ describe("queryJudgments — filters and validation", () => {
     expect(() => queryJudgments(db, { statement_match: atLimit })).not.toThrow();
   });
 
+  test("unknown keys in query input are rejected (strict-mode)", () => {
+    expect(() =>
+      queryJudgments(db, { filter: "active" } as unknown as QueryJudgmentsInput),
+    ).toThrow(JudgmentValidationError);
+    expect(() =>
+      queryJudgments(db, { kind: "fact", typo_field: "x" } as unknown as QueryJudgmentsInput),
+    ).toThrow(JudgmentValidationError);
+    // Known keys should still work
+    expect(() => queryJudgments(db, { kind: "fact" })).not.toThrow();
+  });
+
+  test("SQL LIMIT/OFFSET is used when scope_contains is absent — has_more and returned are accurate", () => {
+    // Create 3 committed judgments to test pagination without scope_contains.
+    const a = makeCommittedJudgment({ statement: "pagination item a" });
+    const b = makeCommittedJudgment({ statement: "pagination item b" });
+    makeCommittedJudgment({ statement: "pagination item c" });
+
+    const page1 = queryJudgments(db, { limit: 2, offset: 0 });
+    expect(page1.returned).toBe(2);
+    expect(page1.has_more).toBe(true);
+    expect(page1.limit).toBe(2);
+    expect(page1.offset).toBe(0);
+    // Items contain only the first two (order: updated_at desc, id asc).
+    expect(page1.items).toHaveLength(2);
+
+    const page2 = queryJudgments(db, { limit: 2, offset: 2 });
+    expect(page2.returned).toBe(1);
+    expect(page2.has_more).toBe(false);
+
+    // All three distinct ids across pages
+    const allIds = [...page1.items, ...page2.items].map((i) => i.id);
+    expect(new Set(allIds).size).toBe(3);
+
+    // Verify no fts_rowid or extra sentinel row leaked
+    expect(allIds).toContain(a.proposed.id);
+    expect(allIds).toContain(b.proposed.id);
+  });
+
   test("statement_match uses FTS, does not inject, and handles dangerous syntax deterministically", () => {
     const alpha = makeCommittedJudgment({ statement: "deep space station" });
     makeCommittedJudgment({ statement: "station operations handbook" });
@@ -3369,6 +3407,20 @@ describe("queryJudgments — filters and validation", () => {
 });
 
 describe("explainJudgment — states, payloads, and read-only behavior", () => {
+  test("unknown keys in explain input are rejected (strict-mode)", () => {
+    const proposed = proposeJudgment(db, { ...validInput, statement: "strict explain target" });
+    expect(() =>
+      explainJudgment(db, {
+        judgment_id: proposed.id,
+        unknown_key: true,
+      } as unknown as ExplainJudgmentInput),
+    ).toThrow(JudgmentValidationError);
+    // Valid input still works
+    expect(() =>
+      explainJudgment(db, { judgment_id: proposed.id }),
+    ).not.toThrow();
+  });
+
   test("explains active, proposed, rejected, and archived judgments", () => {
     const active = makeCommittedJudgment({ statement: "explain active" });
     const proposed = proposeJudgment(db, {
