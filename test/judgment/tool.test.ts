@@ -1,4 +1,4 @@
-// Judgment System Phase 1A.2–1A.5 — typed-tool contract tests.
+// Judgment System Phase 1A.2–1A.7 — typed-tool contract tests.
 //
 // Covers:
 //   1. Tool contract constants
@@ -16,32 +16,45 @@ import { migrate } from "../../src/db/migrator.ts";
 import {
   JUDGMENT_APPROVE_TOOL,
   JUDGMENT_COMMIT_TOOL,
+  JUDGMENT_EXPIRE_TOOL,
   JUDGMENT_EXPLAIN_TOOL,
   JUDGMENT_LINK_EVIDENCE_TOOL,
   JUDGMENT_PROPOSE_TOOL,
   JUDGMENT_QUERY_TOOL,
   JUDGMENT_RECORD_SOURCE_TOOL,
   JUDGMENT_REJECT_TOOL,
+  JUDGMENT_REVOKE_TOOL,
+  JUDGMENT_SUPERSEDE_TOOL,
   executeJudgmentApproveTool,
   executeJudgmentCommitTool,
+  executeJudgmentExpireTool,
   executeJudgmentExplainTool,
   executeJudgmentLinkEvidenceTool,
   executeJudgmentProposeTool,
   executeJudgmentQueryTool,
   executeJudgmentRecordSourceTool,
   executeJudgmentRejectTool,
+  executeJudgmentRevokeTool,
+  executeJudgmentSupersedeTool,
   type ApproveInput,
   type CommitInput,
+  type ExpireInput,
   type EvidenceLinkInput,
   type ProposalInput,
   type RejectInput,
+  type RevokeInput,
   type SourceInput,
+  type SupersedeInput,
 } from "../../src/judgment/tool.ts";
 import {
   approveProposedJudgment,
+  commitApprovedJudgment,
+  expireJudgment,
   linkJudgmentEvidence,
   proposeJudgment,
   recordJudgmentSource,
+  revokeJudgment,
+  supersedeJudgment,
 } from "../../src/judgment/repository.ts";
 
 const MIGRATIONS_DIR = join(import.meta.dir, "..", "..", "migrations");
@@ -1107,6 +1120,225 @@ describe("static boundary — ADR-0014 Bun boundary", () => {
   });
 });
 
+// ---------------------------------------------------------------
+// Phase 1A.7 — lifecycle tool contract constants
+// ---------------------------------------------------------------
+
+describe("JUDGMENT_SUPERSEDE_TOOL", () => {
+  test("tool name is judgment.supersede", () => {
+    expect(JUDGMENT_SUPERSEDE_TOOL.name).toBe("judgment.supersede");
+  });
+});
+
+describe("JUDGMENT_REVOKE_TOOL", () => {
+  test("tool name is judgment.revoke", () => {
+    expect(JUDGMENT_REVOKE_TOOL.name).toBe("judgment.revoke");
+  });
+});
+
+describe("JUDGMENT_EXPIRE_TOOL", () => {
+  test("tool name is judgment.expire", () => {
+    expect(JUDGMENT_EXPIRE_TOOL.name).toBe("judgment.expire");
+  });
+});
+
+// ---------------------------------------------------------------
+// Phase 1A.7 — lifecycle executors
+// ---------------------------------------------------------------
+
+function makeCommittedJudgment(statement = "committed judgment") {
+  const p = proposeJudgment(db, {
+    kind: "fact",
+    statement,
+    epistemic_origin: "user_stated",
+    confidence: "medium",
+    scope: { project: "test" },
+  });
+  approveProposedJudgment(db, { judgment_id: p.id, reviewer: "rev" });
+  const src = recordJudgmentSource(db, { kind: "turn", locator: `session:${p.id}` });
+  linkJudgmentEvidence(db, { judgment_id: p.id, source_id: src.id, relation: "supports", quote_excerpt: "e" });
+  commitApprovedJudgment(db, { judgment_id: p.id, committer: "c", reason: "r" });
+  return p;
+}
+
+describe("executeJudgmentSupersedeTool — happy path", () => {
+  test("valid supersede input returns ok: true", () => {
+    const old = makeCommittedJudgment("tool supersede old");
+    const rep = makeCommittedJudgment("tool supersede rep");
+    const result = executeJudgmentSupersedeTool(db, {
+      old_judgment_id: old.id,
+      replacement_judgment_id: rep.id,
+      actor: "a",
+      reason: "r",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.result.old_lifecycle_status).toBe("superseded");
+      expect(result.result.replacement_lifecycle_status).toBe("active");
+    }
+  });
+});
+
+describe("executeJudgmentSupersedeTool — error path", () => {
+  test("invalid supersede input returns ok: false with validation_error", () => {
+    const result = executeJudgmentSupersedeTool(db, { old_judgment_id: "", replacement_judgment_id: "x", actor: "a", reason: "r" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("validation_error");
+    }
+  });
+
+  test("same old and replacement id returns ok: false with validation_error", () => {
+    const j = makeCommittedJudgment("same-id tool");
+    const result = executeJudgmentSupersedeTool(db, { old_judgment_id: j.id, replacement_judgment_id: j.id, actor: "a", reason: "r" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("validation_error");
+    }
+  });
+
+  test("missing target returns ok: false with not_found", () => {
+    const rep = makeCommittedJudgment("rep-not-found tool");
+    const result = executeJudgmentSupersedeTool(db, { old_judgment_id: "no-such", replacement_judgment_id: rep.id, actor: "a", reason: "r" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("not_found");
+    }
+  });
+
+  test("invalid state returns ok: false with invalid_state", () => {
+    const proposed = proposeJudgment(db, { kind: "fact", statement: "prop tool", epistemic_origin: "user_stated", confidence: "medium", scope: {} });
+    const rep = makeCommittedJudgment("rep-for-inv-tool");
+    const result = executeJudgmentSupersedeTool(db, { old_judgment_id: proposed.id, replacement_judgment_id: rep.id, actor: "a", reason: "r" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("invalid_state");
+    }
+  });
+
+  test("failed supersede does not insert judgment_edges", () => {
+    const edgesBefore = db.prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_edges").get()!.n;
+    executeJudgmentSupersedeTool(db, { old_judgment_id: "x", replacement_judgment_id: "y", actor: "a", reason: "r" });
+    expect(db.prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_edges").get()!.n).toBe(edgesBefore);
+  });
+
+  test("failed supersede does not mutate judgment_items", () => {
+    const j = makeCommittedJudgment("no-mutate tool");
+    const rowBefore = db.prepare<{ lifecycle_status: string }, [string]>("SELECT lifecycle_status FROM judgment_items WHERE id = ?").get(j.id)!;
+    executeJudgmentSupersedeTool(db, { old_judgment_id: "bad", replacement_judgment_id: j.id, actor: "a", reason: "r" });
+    const rowAfter = db.prepare<{ lifecycle_status: string }, [string]>("SELECT lifecycle_status FROM judgment_items WHERE id = ?").get(j.id)!;
+    expect(rowAfter.lifecycle_status).toBe(rowBefore.lifecycle_status);
+  });
+
+  test("failed supersede does not append events", () => {
+    const eventsBefore = db.prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_events").get()!.n;
+    executeJudgmentSupersedeTool(db, { old_judgment_id: "bad", replacement_judgment_id: "worse", actor: "a", reason: "r" });
+    expect(db.prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_events").get()!.n).toBe(eventsBefore);
+  });
+});
+
+describe("executeJudgmentRevokeTool — happy path", () => {
+  test("valid revoke input returns ok: true", () => {
+    const j = makeCommittedJudgment("tool revoke");
+    const result = executeJudgmentRevokeTool(db, { judgment_id: j.id, actor: "a", reason: "r" });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.result.lifecycle_status).toBe("revoked");
+    }
+  });
+});
+
+describe("executeJudgmentRevokeTool — error path", () => {
+  test("invalid revoke input returns ok: false with validation_error", () => {
+    const result = executeJudgmentRevokeTool(db, { judgment_id: "", actor: "a", reason: "r" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("validation_error");
+    }
+  });
+
+  test("missing target returns ok: false with not_found", () => {
+    const result = executeJudgmentRevokeTool(db, { judgment_id: "no-such", actor: "a", reason: "r" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("not_found");
+    }
+  });
+
+  test("invalid state returns ok: false with invalid_state", () => {
+    const j = makeCommittedJudgment("tool revoke inv");
+    revokeJudgment(db, { judgment_id: j.id, actor: "a", reason: "r" });
+    const result = executeJudgmentRevokeTool(db, { judgment_id: j.id, actor: "a", reason: "r" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("invalid_state");
+    }
+  });
+
+  test("failed revoke does not append events", () => {
+    const eventsBefore = db.prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_events").get()!.n;
+    executeJudgmentRevokeTool(db, { judgment_id: "bad", actor: "a", reason: "r" });
+    expect(db.prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_events").get()!.n).toBe(eventsBefore);
+  });
+
+  test("failed revoke does not mutate judgment_items", () => {
+    const j = makeCommittedJudgment("no-mutate-rev tool");
+    const rowBefore = db.prepare<{ lifecycle_status: string }, [string]>("SELECT lifecycle_status FROM judgment_items WHERE id = ?").get(j.id)!;
+    executeJudgmentRevokeTool(db, { judgment_id: "bad", actor: "a", reason: "r" });
+    const rowAfter = db.prepare<{ lifecycle_status: string }, [string]>("SELECT lifecycle_status FROM judgment_items WHERE id = ?").get(j.id)!;
+    expect(rowAfter.lifecycle_status).toBe(rowBefore.lifecycle_status);
+  });
+});
+
+describe("executeJudgmentExpireTool — happy path", () => {
+  test("valid expire input returns ok: true", () => {
+    const j = makeCommittedJudgment("tool expire");
+    const result = executeJudgmentExpireTool(db, { judgment_id: j.id, actor: "a", reason: "r" });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.result.lifecycle_status).toBe("expired");
+    }
+  });
+});
+
+describe("executeJudgmentExpireTool — error path", () => {
+  test("invalid expire input returns ok: false with validation_error", () => {
+    const result = executeJudgmentExpireTool(db, { judgment_id: "", actor: "a", reason: "r" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("validation_error");
+    }
+  });
+
+  test("missing target returns ok: false with not_found", () => {
+    const result = executeJudgmentExpireTool(db, { judgment_id: "no-such", actor: "a", reason: "r" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("not_found");
+    }
+  });
+
+  test("invalid state returns ok: false with invalid_state", () => {
+    const j = makeCommittedJudgment("tool expire inv");
+    expireJudgment(db, { judgment_id: j.id, actor: "a", reason: "r" });
+    const result = executeJudgmentExpireTool(db, { judgment_id: j.id, actor: "a", reason: "r" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("invalid_state");
+    }
+  });
+
+  test("failed expire does not append events", () => {
+    const eventsBefore = db.prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_events").get()!.n;
+    executeJudgmentExpireTool(db, { judgment_id: "bad", actor: "a", reason: "r" });
+    expect(db.prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_events").get()!.n).toBe(eventsBefore);
+  });
+});
+
+// ---------------------------------------------------------------
+// Static boundary — judgment tools not registered
+// ---------------------------------------------------------------
+
 describe("static boundary — judgment tools not registered", () => {
   const TOOL_IMPORT_PATTERNS = [
     /['"][^'"]*judgment\/tool/,
@@ -1118,6 +1350,9 @@ describe("static boundary — judgment tools not registered", () => {
     /['"]judgment\.commit['"]/,
     /['"]judgment\.query['"]/,
     /['"]judgment\.explain['"]/,
+    /['"]judgment\.supersede['"]/,
+    /['"]judgment\.revoke['"]/,
+    /['"]judgment\.expire['"]/,
   ];
 
   function checkDir(dirName: string): void {

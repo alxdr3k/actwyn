@@ -2707,3 +2707,631 @@ export function explainJudgment(
     ),
   };
 }
+
+// ---------------------------------------------------------------
+// Phase 1A.7 — Retirement lifecycle (supersede / revoke / expire)
+// ---------------------------------------------------------------
+
+export interface SupersedeInput {
+  old_judgment_id: string;
+  replacement_judgment_id: string;
+  actor: string;
+  reason: string;
+  payload?: Record<string, unknown>;
+}
+
+export interface SupersedeDeps {
+  newEventId?: () => string;
+  newEdgeId?: () => string;
+  nowIso?: () => string;
+  _injectEventInsertError?: Error;
+  _injectEdgeInsertError?: Error;
+}
+
+export interface SupersedeResult {
+  old_judgment_id: string;
+  replacement_judgment_id: string;
+  old_lifecycle_status: "superseded";
+  old_activation_state: "excluded";
+  replacement_lifecycle_status: "active";
+  replacement_activation_state: "eligible";
+  edge_id: string;
+  event_id: string;
+  event_type: "judgment.superseded";
+  superseded_by: string[];
+  supersedes: string[];
+}
+
+export interface RevokeInput {
+  judgment_id: string;
+  actor: string;
+  reason: string;
+  payload?: Record<string, unknown>;
+}
+
+export interface RevokeDeps {
+  newEventId?: () => string;
+  nowIso?: () => string;
+  _injectEventInsertError?: Error;
+}
+
+export interface RevokeResult {
+  id: string;
+  lifecycle_status: "revoked";
+  activation_state: "excluded";
+  approval_state: ApprovalState;
+  retention_state: RetentionState;
+  authority_source: AuthoritySourceP05;
+  updated_at: string;
+  event_id: string;
+  event_type: "judgment.revoked";
+}
+
+export interface ExpireInput {
+  judgment_id: string;
+  actor: string;
+  reason: string;
+  effective_at?: string;
+  payload?: Record<string, unknown>;
+}
+
+export interface ExpireDeps {
+  newEventId?: () => string;
+  nowIso?: () => string;
+  _injectEventInsertError?: Error;
+}
+
+export interface ExpireResult {
+  id: string;
+  lifecycle_status: "expired";
+  activation_state: "excluded";
+  approval_state: ApprovalState;
+  retention_state: RetentionState;
+  authority_source: AuthoritySourceP05;
+  valid_until: string | null;
+  updated_at: string;
+  event_id: string;
+  event_type: "judgment.expired";
+}
+
+// Active state guard used by all three retirement operations.
+function requireActiveEligible(
+  existing: {
+    id: string;
+    lifecycle_status: string;
+    activation_state: string;
+    approval_state: string;
+    retention_state: string;
+  },
+  operation: string,
+): void {
+  if (
+    existing.lifecycle_status !== "active" ||
+    existing.activation_state !== "eligible" ||
+    existing.approval_state !== "approved" ||
+    existing.retention_state !== "normal"
+  ) {
+    throw new JudgmentStateError(
+      `judgment ${existing.id} cannot be ${operation}: ` +
+        `lifecycle=${existing.lifecycle_status}, activation=${existing.activation_state}, ` +
+        `approval=${existing.approval_state}, retention=${existing.retention_state}`,
+      existing.id,
+    );
+  }
+}
+
+function validatePayloadInput(
+  payload: unknown,
+): Record<string, unknown> | undefined {
+  if (payload === undefined) return undefined;
+  const payloadSerialized = serializeOnce(payload, "payload");
+  assertValid(validatePlainJsonObject(payload, "payload"), "payload");
+  const payloadReparsed = JSON.parse(payloadSerialized) as unknown;
+  if (
+    payloadReparsed === null ||
+    Array.isArray(payloadReparsed) ||
+    typeof payloadReparsed !== "object"
+  ) {
+    throw new JudgmentValidationError(
+      "payload must serialize to a plain JSON object",
+      "payload",
+    );
+  }
+  return payloadReparsed as Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------
+// supersedeJudgment
+// ---------------------------------------------------------------
+
+export function supersedeJudgment(
+  db: DbHandle,
+  input: SupersedeInput,
+  deps: SupersedeDeps = {},
+): SupersedeResult {
+  if (input === null || typeof input !== "object") {
+    throw new JudgmentValidationError("input must be a plain object");
+  }
+
+  assertValid(validateNonEmptyString(input.old_judgment_id, "old_judgment_id"), "old_judgment_id");
+  const oldId = input.old_judgment_id.trim();
+
+  assertValid(
+    validateNonEmptyString(input.replacement_judgment_id, "replacement_judgment_id"),
+    "replacement_judgment_id",
+  );
+  const replacementId = input.replacement_judgment_id.trim();
+
+  if (oldId === replacementId) {
+    throw new JudgmentValidationError(
+      "old_judgment_id and replacement_judgment_id must be different",
+      "replacement_judgment_id",
+    );
+  }
+
+  assertValid(validateNonEmptyString(input.actor, "actor"), "actor");
+  const actor = input.actor.trim();
+
+  assertValid(validateNonEmptyString(input.reason, "reason"), "reason");
+  const reason = input.reason.trim();
+
+  const payloadJsonObj = validatePayloadInput(input.payload);
+
+  const makeEventId = deps.newEventId ?? (() => crypto.randomUUID());
+  const makeEdgeId = deps.newEdgeId ?? (() => crypto.randomUUID());
+  const eventId = makeEventId();
+  const edgeId = makeEdgeId();
+
+  return db.tx(() => {
+    const oldRow = db
+      .prepare<
+        {
+          id: string;
+          lifecycle_status: string;
+          activation_state: string;
+          approval_state: string;
+          retention_state: string;
+          authority_source: string;
+          superseded_by_json: string | null;
+        },
+        [string]
+      >(
+        `SELECT id, lifecycle_status, activation_state, approval_state, retention_state,
+                authority_source, superseded_by_json
+         FROM judgment_items WHERE id = ?`,
+      )
+      .get(oldId);
+
+    if (!oldRow) {
+      throw new JudgmentNotFoundError(`judgment ${oldId} not found`, oldId);
+    }
+
+    requireActiveEligible(oldRow, "superseded");
+
+    const replacementRow = db
+      .prepare<
+        {
+          id: string;
+          lifecycle_status: string;
+          activation_state: string;
+          approval_state: string;
+          retention_state: string;
+          authority_source: string;
+          supersedes_json: string | null;
+        },
+        [string]
+      >(
+        `SELECT id, lifecycle_status, activation_state, approval_state, retention_state,
+                authority_source, supersedes_json
+         FROM judgment_items WHERE id = ?`,
+      )
+      .get(replacementId);
+
+    if (!replacementRow) {
+      throw new JudgmentNotFoundError(
+        `judgment ${replacementId} not found`,
+        replacementId,
+      );
+    }
+
+    requireActiveEligible(replacementRow, "used as replacement");
+
+    const owner = `judgment ${oldId}`;
+    const replacementOwner = `judgment ${replacementId}`;
+
+    // Parse and validate existing JSON relation arrays before any writes.
+    const existingSupersededBy = parsePersistedStringArray(
+      oldRow.superseded_by_json,
+      "superseded_by_json",
+      owner,
+    );
+    const existingSupersedes = parsePersistedStringArray(
+      replacementRow.supersedes_json,
+      "supersedes_json",
+      replacementOwner,
+    );
+
+    // Idempotency / duplicate guard: if old already has replacement in superseded_by_json,
+    // fail to avoid duplicate edges and duplicate events.
+    if (existingSupersededBy.includes(replacementId)) {
+      throw new JudgmentStateError(
+        `judgment ${oldId} is already superseded by ${replacementId}`,
+        oldId,
+      );
+    }
+
+    // Also check judgment_edges for an existing supersedes edge.
+    const existingEdge = db
+      .prepare<{ id: string }, [string, string, string]>(
+        `SELECT id FROM judgment_edges
+         WHERE from_judgment_id = ? AND to_judgment_id = ? AND relation = ?`,
+      )
+      .get(replacementId, oldId, "supersedes");
+
+    if (existingEdge) {
+      throw new JudgmentStateError(
+        `supersedes edge from ${replacementId} to ${oldId} already exists`,
+        oldId,
+      );
+    }
+
+    const nowIsoStr = deps.nowIso !== undefined ? deps.nowIso() : new Date().toISOString();
+    if (typeof nowIsoStr !== "string") {
+      throw new JudgmentValidationError("deps.nowIso must return a string");
+    }
+
+    // Update old judgment → superseded/excluded.
+    const newSupersededBy = [...existingSupersededBy, replacementId];
+    const oldUpdateResult = db
+      .prepare(
+        `UPDATE judgment_items
+         SET lifecycle_status   = 'superseded',
+             activation_state   = 'excluded',
+             superseded_by_json = $superseded_by_json,
+             updated_at         = $now
+         WHERE id               = $id
+           AND lifecycle_status  = 'active'
+           AND activation_state  = 'eligible'
+           AND approval_state    = 'approved'
+           AND retention_state   = 'normal'`,
+      )
+      .run({
+        superseded_by_json: JSON.stringify(newSupersededBy),
+        now: nowIsoStr,
+        id: oldId,
+      } as never);
+
+    if ((oldUpdateResult as unknown as { changes: number }).changes === 0) {
+      throw new JudgmentStateError(
+        `judgment ${oldId} was modified concurrently; supersede aborted`,
+        oldId,
+      );
+    }
+
+    // Update replacement judgment → append old id to supersedes_json.
+    const newSupersedes = existingSupersedes.includes(oldId)
+      ? existingSupersedes
+      : [...existingSupersedes, oldId];
+    db.prepare(
+      `UPDATE judgment_items
+       SET supersedes_json = $supersedes_json,
+           updated_at      = $now
+       WHERE id = $id`,
+    ).run({
+      supersedes_json: JSON.stringify(newSupersedes),
+      now: nowIsoStr,
+      id: replacementId,
+    } as never);
+
+    if (deps._injectEdgeInsertError) {
+      throw deps._injectEdgeInsertError;
+    }
+
+    // Insert supersedes edge: replacement → old.
+    db.prepare(
+      `INSERT INTO judgment_edges (id, from_judgment_id, to_judgment_id, relation)
+       VALUES ($id, $from_judgment_id, $to_judgment_id, 'supersedes')`,
+    ).run({
+      id: edgeId,
+      from_judgment_id: replacementId,
+      to_judgment_id: oldId,
+    } as never);
+
+    if (deps._injectEventInsertError) {
+      throw deps._injectEventInsertError;
+    }
+
+    const eventPayload: Record<string, unknown> = {
+      old_judgment_id: oldId,
+      replacement_judgment_id: replacementId,
+      reason,
+      previous_lifecycle_status: "active",
+      new_lifecycle_status: "superseded",
+      previous_activation_state: "eligible",
+      new_activation_state: "excluded",
+      edge_id: edgeId,
+    };
+    if (payloadJsonObj !== undefined) eventPayload.payload = payloadJsonObj;
+
+    db.prepare(
+      `INSERT INTO judgment_events (id, event_type, judgment_id, payload_json, actor)
+       VALUES ($id, 'judgment.superseded', $judgment_id, $payload_json, $actor)`,
+    ).run({
+      id: eventId,
+      judgment_id: oldId,
+      payload_json: JSON.stringify(eventPayload),
+      actor,
+    } as never);
+
+    return {
+      old_judgment_id: oldId,
+      replacement_judgment_id: replacementId,
+      old_lifecycle_status: "superseded",
+      old_activation_state: "excluded",
+      replacement_lifecycle_status: "active",
+      replacement_activation_state: "eligible",
+      edge_id: edgeId,
+      event_id: eventId,
+      event_type: "judgment.superseded",
+      superseded_by: newSupersededBy,
+      supersedes: newSupersedes,
+    };
+  });
+}
+
+// ---------------------------------------------------------------
+// revokeJudgment
+// ---------------------------------------------------------------
+
+export function revokeJudgment(
+  db: DbHandle,
+  input: RevokeInput,
+  deps: RevokeDeps = {},
+): RevokeResult {
+  if (input === null || typeof input !== "object") {
+    throw new JudgmentValidationError("input must be a plain object");
+  }
+
+  assertValid(validateNonEmptyString(input.judgment_id, "judgment_id"), "judgment_id");
+  const judgment_id = input.judgment_id.trim();
+
+  assertValid(validateNonEmptyString(input.actor, "actor"), "actor");
+  const actor = input.actor.trim();
+
+  assertValid(validateNonEmptyString(input.reason, "reason"), "reason");
+  const reason = input.reason.trim();
+
+  const payloadJsonObj = validatePayloadInput(input.payload);
+
+  const makeEventId = deps.newEventId ?? (() => crypto.randomUUID());
+  const eventId = makeEventId();
+
+  return db.tx(() => {
+    const existing = db
+      .prepare<
+        {
+          id: string;
+          lifecycle_status: string;
+          activation_state: string;
+          approval_state: string;
+          retention_state: string;
+          authority_source: string;
+        },
+        [string]
+      >(
+        `SELECT id, lifecycle_status, activation_state, approval_state, retention_state,
+                authority_source
+         FROM judgment_items WHERE id = ?`,
+      )
+      .get(judgment_id);
+
+    if (!existing) {
+      throw new JudgmentNotFoundError(`judgment ${judgment_id} not found`, judgment_id);
+    }
+
+    requireActiveEligible(existing, "revoked");
+
+    const nowIsoStr = deps.nowIso !== undefined ? deps.nowIso() : new Date().toISOString();
+    if (typeof nowIsoStr !== "string") {
+      throw new JudgmentValidationError("deps.nowIso must return a string");
+    }
+
+    const updateResult = db
+      .prepare(
+        `UPDATE judgment_items
+         SET lifecycle_status = 'revoked',
+             activation_state = 'excluded',
+             updated_at       = $now
+         WHERE id               = $id
+           AND lifecycle_status  = 'active'
+           AND activation_state  = 'eligible'
+           AND approval_state    = 'approved'
+           AND retention_state   = 'normal'`,
+      )
+      .run({ now: nowIsoStr, id: judgment_id } as never);
+
+    if ((updateResult as unknown as { changes: number }).changes === 0) {
+      throw new JudgmentStateError(
+        `judgment ${judgment_id} was modified concurrently; revoke aborted`,
+        judgment_id,
+      );
+    }
+
+    if (deps._injectEventInsertError) {
+      throw deps._injectEventInsertError;
+    }
+
+    const eventPayload: Record<string, unknown> = {
+      judgment_id,
+      reason,
+      previous_lifecycle_status: "active",
+      new_lifecycle_status: "revoked",
+      previous_activation_state: "eligible",
+      new_activation_state: "excluded",
+    };
+    if (payloadJsonObj !== undefined) eventPayload.payload = payloadJsonObj;
+
+    db.prepare(
+      `INSERT INTO judgment_events (id, event_type, judgment_id, payload_json, actor)
+       VALUES ($id, 'judgment.revoked', $judgment_id, $payload_json, $actor)`,
+    ).run({
+      id: eventId,
+      judgment_id,
+      payload_json: JSON.stringify(eventPayload),
+      actor,
+    } as never);
+
+    return {
+      id: judgment_id,
+      lifecycle_status: "revoked",
+      activation_state: "excluded",
+      approval_state: existing.approval_state as ApprovalState,
+      retention_state: existing.retention_state as RetentionState,
+      authority_source: existing.authority_source as AuthoritySourceP05,
+      updated_at: nowIsoStr,
+      event_id: eventId,
+      event_type: "judgment.revoked",
+    };
+  });
+}
+
+// ---------------------------------------------------------------
+// expireJudgment
+// ---------------------------------------------------------------
+
+export function expireJudgment(
+  db: DbHandle,
+  input: ExpireInput,
+  deps: ExpireDeps = {},
+): ExpireResult {
+  if (input === null || typeof input !== "object") {
+    throw new JudgmentValidationError("input must be a plain object");
+  }
+
+  assertValid(validateNonEmptyString(input.judgment_id, "judgment_id"), "judgment_id");
+  const judgment_id = input.judgment_id.trim();
+
+  assertValid(validateNonEmptyString(input.actor, "actor"), "actor");
+  const actor = input.actor.trim();
+
+  assertValid(validateNonEmptyString(input.reason, "reason"), "reason");
+  const reason = input.reason.trim();
+
+  let effectiveAt: string | undefined;
+  if (input.effective_at !== undefined) {
+    assertValid(validateNonEmptyString(input.effective_at, "effective_at"), "effective_at");
+    effectiveAt = input.effective_at.trim();
+  }
+
+  const payloadJsonObj = validatePayloadInput(input.payload);
+
+  const makeEventId = deps.newEventId ?? (() => crypto.randomUUID());
+  const eventId = makeEventId();
+
+  return db.tx(() => {
+    const existing = db
+      .prepare<
+        {
+          id: string;
+          lifecycle_status: string;
+          activation_state: string;
+          approval_state: string;
+          retention_state: string;
+          authority_source: string;
+          valid_until: string | null;
+        },
+        [string]
+      >(
+        `SELECT id, lifecycle_status, activation_state, approval_state, retention_state,
+                authority_source, valid_until
+         FROM judgment_items WHERE id = ?`,
+      )
+      .get(judgment_id);
+
+    if (!existing) {
+      throw new JudgmentNotFoundError(`judgment ${judgment_id} not found`, judgment_id);
+    }
+
+    requireActiveEligible(existing, "expired");
+
+    const nowIsoStr = deps.nowIso !== undefined ? deps.nowIso() : new Date().toISOString();
+    if (typeof nowIsoStr !== "string") {
+      throw new JudgmentValidationError("deps.nowIso must return a string");
+    }
+
+    // Determine new valid_until:
+    // - if effective_at supplied → use it
+    // - else if existing valid_until is null → set to nowIso
+    // - else preserve existing valid_until
+    let newValidUntil: string | null;
+    if (effectiveAt !== undefined) {
+      newValidUntil = effectiveAt;
+    } else if (existing.valid_until === null) {
+      newValidUntil = nowIsoStr;
+    } else {
+      newValidUntil = existing.valid_until;
+    }
+
+    const updateResult = db
+      .prepare(
+        `UPDATE judgment_items
+         SET lifecycle_status = 'expired',
+             activation_state = 'excluded',
+             valid_until      = $valid_until,
+             updated_at       = $now
+         WHERE id               = $id
+           AND lifecycle_status  = 'active'
+           AND activation_state  = 'eligible'
+           AND approval_state    = 'approved'
+           AND retention_state   = 'normal'`,
+      )
+      .run({ valid_until: newValidUntil, now: nowIsoStr, id: judgment_id } as never);
+
+    if ((updateResult as unknown as { changes: number }).changes === 0) {
+      throw new JudgmentStateError(
+        `judgment ${judgment_id} was modified concurrently; expire aborted`,
+        judgment_id,
+      );
+    }
+
+    if (deps._injectEventInsertError) {
+      throw deps._injectEventInsertError;
+    }
+
+    const eventPayload: Record<string, unknown> = {
+      judgment_id,
+      reason,
+      effective_at: newValidUntil,
+      previous_lifecycle_status: "active",
+      new_lifecycle_status: "expired",
+      previous_activation_state: "eligible",
+      new_activation_state: "excluded",
+      previous_valid_until: existing.valid_until,
+      new_valid_until: newValidUntil,
+    };
+    if (payloadJsonObj !== undefined) eventPayload.payload = payloadJsonObj;
+
+    db.prepare(
+      `INSERT INTO judgment_events (id, event_type, judgment_id, payload_json, actor)
+       VALUES ($id, 'judgment.expired', $judgment_id, $payload_json, $actor)`,
+    ).run({
+      id: eventId,
+      judgment_id,
+      payload_json: JSON.stringify(eventPayload),
+      actor,
+    } as never);
+
+    return {
+      id: judgment_id,
+      lifecycle_status: "expired",
+      activation_state: "excluded",
+      approval_state: existing.approval_state as ApprovalState,
+      retention_state: existing.retention_state as RetentionState,
+      authority_source: existing.authority_source as AuthoritySourceP05,
+      valid_until: newValidUntil,
+      updated_at: nowIsoStr,
+      event_id: eventId,
+      event_type: "judgment.expired",
+    };
+  });
+}

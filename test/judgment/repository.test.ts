@@ -1,4 +1,4 @@
-// Judgment System Phase 1A.2–1A.5 — proposal/review/source/commit repository integration tests.
+// Judgment System Phase 1A.2–1A.7 — proposal/review/source/commit/lifecycle repository integration tests.
 //
 // Uses a real temp-file SQLite with all migrations applied (pattern from
 // test/db/judgment_schema.test.ts). No mocking of DB internals.
@@ -16,20 +16,26 @@ import {
   JudgmentValidationError,
   approveProposedJudgment,
   commitApprovedJudgment,
+  expireJudgment,
   explainJudgment,
   linkJudgmentEvidence,
   proposeJudgment,
   queryJudgments,
   recordJudgmentSource,
   rejectProposedJudgment,
+  revokeJudgment,
+  supersedeJudgment,
   type ApproveInput,
   type CommitInput,
   type ExplainJudgmentInput,
+  type ExpireInput,
   type EvidenceLinkInput,
   type ProposalInput,
   type QueryJudgmentsInput,
   type RejectInput,
+  type RevokeInput,
   type SourceInput,
+  type SupersedeInput,
 } from "../../src/judgment/repository.ts";
 import { ONTOLOGY_VERSION, SCHEMA_VERSION } from "../../src/judgment/types.ts";
 
@@ -3587,5 +3593,993 @@ describe("explainJudgment — states, payloads, and read-only behavior", () => {
     expect(tablesAfter).toEqual(tablesBefore);
     expect(rowAfter.updated_at).toBe(rowBefore.updated_at);
     expect(countEvents(active.proposed.id)).toBe(eventsBefore);
+  });
+});
+
+// ---------------------------------------------------------------
+// Phase 1A.7 — Retirement lifecycle helpers
+// ---------------------------------------------------------------
+
+function getLifecycleRow(id: string) {
+  return db
+    .prepare<
+      {
+        lifecycle_status: string;
+        activation_state: string;
+        approval_state: string;
+        retention_state: string;
+        authority_source: string;
+        updated_at: string;
+        supersedes_json: string | null;
+        superseded_by_json: string | null;
+        valid_until: string | null;
+      },
+      [string]
+    >(
+      `SELECT lifecycle_status, activation_state, approval_state, retention_state,
+              authority_source, updated_at, supersedes_json, superseded_by_json, valid_until
+       FROM judgment_items WHERE id = ?`,
+    )
+    .get(id);
+}
+
+function getEdgeRow(id: string) {
+  return db
+    .prepare<
+      { id: string; from_judgment_id: string; to_judgment_id: string; relation: string },
+      [string]
+    >(
+      `SELECT id, from_judgment_id, to_judgment_id, relation FROM judgment_edges WHERE id = ?`,
+    )
+    .get(id);
+}
+
+function getEventPayload(eventId: string): Record<string, unknown> {
+  const row = db
+    .prepare<{ payload_json: string }, [string]>(
+      `SELECT payload_json FROM judgment_events WHERE id = ?`,
+    )
+    .get(eventId);
+  return JSON.parse(row!.payload_json) as Record<string, unknown>;
+}
+
+function getEventRow(eventId: string) {
+  return db
+    .prepare<
+      { id: string; event_type: string; judgment_id: string; actor: string },
+      [string]
+    >(
+      `SELECT id, event_type, judgment_id, actor FROM judgment_events WHERE id = ?`,
+    )
+    .get(eventId);
+}
+
+// ---------------------------------------------------------------
+// supersedeJudgment — success
+// ---------------------------------------------------------------
+
+describe("supersedeJudgment — success", () => {
+  test("supersedes an active/eligible/approved/normal judgment", () => {
+    const oldJ = makeCommittedJudgment({ statement: "supersede old" });
+    const newJ = makeCommittedJudgment({ statement: "supersede new" });
+
+    const result = supersedeJudgment(db, {
+      old_judgment_id: oldJ.proposed.id,
+      replacement_judgment_id: newJ.proposed.id,
+      actor: "tester",
+      reason: "replaced by newer",
+    });
+
+    expect(result.old_judgment_id).toBe(oldJ.proposed.id);
+    expect(result.replacement_judgment_id).toBe(newJ.proposed.id);
+    expect(result.old_lifecycle_status).toBe("superseded");
+    expect(result.old_activation_state).toBe("excluded");
+    expect(result.replacement_lifecycle_status).toBe("active");
+    expect(result.replacement_activation_state).toBe("eligible");
+    expect(result.event_type).toBe("judgment.superseded");
+  });
+
+  test("old judgment becomes lifecycle_status=superseded", () => {
+    const old = makeCommittedJudgment({ statement: "old-lc" });
+    const rep = makeCommittedJudgment({ statement: "rep-lc" });
+    supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" });
+    expect(getLifecycleRow(old.proposed.id)!.lifecycle_status).toBe("superseded");
+  });
+
+  test("old judgment becomes activation_state=excluded", () => {
+    const old = makeCommittedJudgment({ statement: "old-ac" });
+    const rep = makeCommittedJudgment({ statement: "rep-ac" });
+    supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" });
+    expect(getLifecycleRow(old.proposed.id)!.activation_state).toBe("excluded");
+  });
+
+  test("old approval_state remains approved", () => {
+    const old = makeCommittedJudgment({ statement: "old-ap" });
+    const rep = makeCommittedJudgment({ statement: "rep-ap" });
+    supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" });
+    expect(getLifecycleRow(old.proposed.id)!.approval_state).toBe("approved");
+  });
+
+  test("old retention_state remains normal", () => {
+    const old = makeCommittedJudgment({ statement: "old-ret" });
+    const rep = makeCommittedJudgment({ statement: "rep-ret" });
+    supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" });
+    expect(getLifecycleRow(old.proposed.id)!.retention_state).toBe("normal");
+  });
+
+  test("replacement judgment remains active/eligible/approved/normal", () => {
+    const old = makeCommittedJudgment({ statement: "old-rep-st" });
+    const rep = makeCommittedJudgment({ statement: "rep-rep-st" });
+    supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" });
+    const repRow = getLifecycleRow(rep.proposed.id)!;
+    expect(repRow.lifecycle_status).toBe("active");
+    expect(repRow.activation_state).toBe("eligible");
+    expect(repRow.approval_state).toBe("approved");
+    expect(repRow.retention_state).toBe("normal");
+  });
+
+  test("old superseded_by_json includes replacement id exactly once", () => {
+    const old = makeCommittedJudgment({ statement: "old-sbj" });
+    const rep = makeCommittedJudgment({ statement: "rep-sbj" });
+    supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" });
+    const row = getLifecycleRow(old.proposed.id)!;
+    const arr = JSON.parse(row.superseded_by_json!) as string[];
+    expect(arr.filter((id) => id === rep.proposed.id)).toHaveLength(1);
+  });
+
+  test("replacement supersedes_json includes old id exactly once", () => {
+    const old = makeCommittedJudgment({ statement: "old-sj" });
+    const rep = makeCommittedJudgment({ statement: "rep-sj" });
+    supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" });
+    const row = getLifecycleRow(rep.proposed.id)!;
+    const arr = JSON.parse(row.supersedes_json!) as string[];
+    expect(arr.filter((id) => id === old.proposed.id)).toHaveLength(1);
+  });
+
+  test("one judgment_edges row is inserted", () => {
+    const old = makeCommittedJudgment({ statement: "edge-count" });
+    const rep = makeCommittedJudgment({ statement: "edge-count-rep" });
+    const edgesBefore = countJudgmentEdges();
+    supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" });
+    expect(countJudgmentEdges()).toBe(edgesBefore + 1);
+  });
+
+  test("edge relation is supersedes", () => {
+    const old = makeCommittedJudgment({ statement: "edge-rel" });
+    const rep = makeCommittedJudgment({ statement: "edge-rel-rep" });
+    const result = supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" });
+    const edge = getEdgeRow(result.edge_id)!;
+    expect(edge.relation).toBe("supersedes");
+  });
+
+  test("edge direction is replacement → old", () => {
+    const old = makeCommittedJudgment({ statement: "edge-dir" });
+    const rep = makeCommittedJudgment({ statement: "edge-dir-rep" });
+    const result = supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" });
+    const edge = getEdgeRow(result.edge_id)!;
+    expect(edge.from_judgment_id).toBe(rep.proposed.id);
+    expect(edge.to_judgment_id).toBe(old.proposed.id);
+  });
+
+  test("one judgment.superseded event is appended", () => {
+    const old = makeCommittedJudgment({ statement: "evt-sup" });
+    const rep = makeCommittedJudgment({ statement: "evt-sup-rep" });
+    const eventsBefore = countEvents(old.proposed.id);
+    const result = supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" });
+    expect(countEvents(old.proposed.id)).toBe(eventsBefore + 1);
+    const evtRow = getEventRow(result.event_id)!;
+    expect(evtRow.event_type).toBe("judgment.superseded");
+    expect(evtRow.judgment_id).toBe(old.proposed.id);
+  });
+
+  test("event payload_json is valid JSON", () => {
+    const old = makeCommittedJudgment({ statement: "evt-json" });
+    const rep = makeCommittedJudgment({ statement: "evt-json-rep" });
+    const result = supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" });
+    expect(() => getEventPayload(result.event_id)).not.toThrow();
+  });
+
+  test("event payload includes required fields", () => {
+    const old = makeCommittedJudgment({ statement: "evt-fields" });
+    const rep = makeCommittedJudgment({ statement: "evt-fields-rep" });
+    const result = supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "tester", reason: "better info" });
+    const payload = getEventPayload(result.event_id);
+    expect(payload.old_judgment_id).toBe(old.proposed.id);
+    expect(payload.replacement_judgment_id).toBe(rep.proposed.id);
+    expect(payload.reason).toBe("better info");
+    expect(payload.previous_lifecycle_status).toBe("active");
+    expect(payload.new_lifecycle_status).toBe("superseded");
+    expect(payload.previous_activation_state).toBe("eligible");
+    expect(payload.new_activation_state).toBe("excluded");
+    expect(payload.edge_id).toBe(result.edge_id);
+  });
+
+  test("actor and reason are trimmed", () => {
+    const old = makeCommittedJudgment({ statement: "trim-sup" });
+    const rep = makeCommittedJudgment({ statement: "trim-sup-rep" });
+    const result = supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "  actor  ", reason: "  reason  " });
+    const evtRow = getEventRow(result.event_id)!;
+    expect(evtRow.actor).toBe("actor");
+    const payload = getEventPayload(result.event_id);
+    expect(payload.reason).toBe("reason");
+  });
+
+  test("payload object is included in event when supplied", () => {
+    const old = makeCommittedJudgment({ statement: "payload-sup" });
+    const rep = makeCommittedJudgment({ statement: "payload-sup-rep" });
+    const result = supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r", payload: { note: "extra" } });
+    const payload = getEventPayload(result.event_id);
+    expect((payload.payload as Record<string, unknown>).note).toBe("extra");
+  });
+});
+
+// ---------------------------------------------------------------
+// supersedeJudgment — invalid state / error cases
+// ---------------------------------------------------------------
+
+describe("supersedeJudgment — invalid state / error cases", () => {
+  test("duplicate supersede call fails with invalid_state and appends no event", () => {
+    const old = makeCommittedJudgment({ statement: "dup-sup" });
+    const rep = makeCommittedJudgment({ statement: "dup-sup-rep" });
+    supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" });
+    const eventsBefore = countEvents(old.proposed.id);
+    expect(() =>
+      supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" }),
+    ).toThrow(JudgmentStateError);
+    expect(countEvents(old.proposed.id)).toBe(eventsBefore);
+  });
+
+  test("old_judgment_id = replacement_judgment_id is rejected before DB write", () => {
+    const j = makeCommittedJudgment({ statement: "same-id" });
+    const edgesBefore = countJudgmentEdges();
+    const eventsBefore = countEvents();
+    expect(() =>
+      supersedeJudgment(db, { old_judgment_id: j.proposed.id, replacement_judgment_id: j.proposed.id, actor: "a", reason: "r" }),
+    ).toThrow(JudgmentValidationError);
+    expect(countJudgmentEdges()).toBe(edgesBefore);
+    expect(countEvents()).toBe(eventsBefore);
+  });
+
+  test("missing old judgment returns JudgmentNotFoundError", () => {
+    const rep = makeCommittedJudgment({ statement: "rep-not-found" });
+    expect(() =>
+      supersedeJudgment(db, { old_judgment_id: "no-such-id", replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" }),
+    ).toThrow(JudgmentNotFoundError);
+  });
+
+  test("missing replacement judgment returns JudgmentNotFoundError", () => {
+    const old = makeCommittedJudgment({ statement: "old-rep-not-found" });
+    expect(() =>
+      supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: "no-such-id", actor: "a", reason: "r" }),
+    ).toThrow(JudgmentNotFoundError);
+  });
+
+  test("old proposed/history_only judgment fails invalid_state", () => {
+    const proposed = proposeJudgment(db, { ...validInput, statement: "old-proposed" });
+    const rep = makeCommittedJudgment({ statement: "rep-for-proposed" });
+    expect(() =>
+      supersedeJudgment(db, { old_judgment_id: proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("old rejected judgment fails invalid_state", () => {
+    const p = proposeJudgment(db, { ...validInput, statement: "rej-old" });
+    rejectProposedJudgment(db, { judgment_id: p.id, reviewer: "rev", reason: "no" });
+    const rep = makeCommittedJudgment({ statement: "rep-for-rej" });
+    expect(() =>
+      supersedeJudgment(db, { old_judgment_id: p.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("old already superseded judgment fails invalid_state", () => {
+    const old = makeCommittedJudgment({ statement: "old-already-sup" });
+    const rep = makeCommittedJudgment({ statement: "rep-for-already-sup" });
+    const rep2 = makeCommittedJudgment({ statement: "rep2-for-already-sup" });
+    supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" });
+    expect(() =>
+      supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep2.proposed.id, actor: "a", reason: "r" }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("old revoked judgment fails invalid_state", () => {
+    const old = makeCommittedJudgment({ statement: "old-revoked-sup" });
+    const rep = makeCommittedJudgment({ statement: "rep-for-revoked-sup" });
+    revokeJudgment(db, { judgment_id: old.proposed.id, actor: "a", reason: "r" });
+    expect(() =>
+      supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("old expired judgment fails invalid_state", () => {
+    const old = makeCommittedJudgment({ statement: "old-expired-sup" });
+    const rep = makeCommittedJudgment({ statement: "rep-for-expired-sup" });
+    expireJudgment(db, { judgment_id: old.proposed.id, actor: "a", reason: "r" });
+    expect(() =>
+      supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("replacement proposed/history_only judgment fails invalid_state", () => {
+    const old = makeCommittedJudgment({ statement: "old-for-proposed-rep" });
+    const rep = proposeJudgment(db, { ...validInput, statement: "proposed-rep" });
+    expect(() =>
+      supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.id, actor: "a", reason: "r" }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("replacement rejected judgment fails invalid_state", () => {
+    const old = makeCommittedJudgment({ statement: "old-for-rej-rep" });
+    const rep = proposeJudgment(db, { ...validInput, statement: "rej-rep" });
+    rejectProposedJudgment(db, { judgment_id: rep.id, reviewer: "rev", reason: "no" });
+    expect(() =>
+      supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.id, actor: "a", reason: "r" }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("replacement revoked judgment fails invalid_state", () => {
+    const old = makeCommittedJudgment({ statement: "old-for-revoked-rep" });
+    const rep = makeCommittedJudgment({ statement: "revoked-rep" });
+    revokeJudgment(db, { judgment_id: rep.proposed.id, actor: "a", reason: "r" });
+    expect(() =>
+      supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("replacement superseded judgment fails invalid_state", () => {
+    const old = makeCommittedJudgment({ statement: "old-for-sup-rep" });
+    const rep = makeCommittedJudgment({ statement: "sup-rep" });
+    const rep2 = makeCommittedJudgment({ statement: "sup-rep2" });
+    supersedeJudgment(db, { old_judgment_id: rep.proposed.id, replacement_judgment_id: rep2.proposed.id, actor: "a", reason: "r" });
+    expect(() =>
+      supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("replacement expired judgment fails invalid_state", () => {
+    const old = makeCommittedJudgment({ statement: "old-for-exp-rep" });
+    const rep = makeCommittedJudgment({ statement: "exp-rep" });
+    expireJudgment(db, { judgment_id: rep.proposed.id, actor: "a", reason: "r" });
+    expect(() =>
+      supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("malformed old superseded_by_json fails before update", () => {
+    const old = makeCommittedJudgment({ statement: "malformed-sbj" });
+    const rep = makeCommittedJudgment({ statement: "rep-malformed-sbj" });
+    db.prepare(`UPDATE judgment_items SET superseded_by_json = '[1, 2]' WHERE id = ?`).run(old.proposed.id);
+    expect(() =>
+      supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" }),
+    ).toThrow(JudgmentValidationError);
+  });
+
+  test("malformed replacement supersedes_json fails before update", () => {
+    const old = makeCommittedJudgment({ statement: "malformed-sj" });
+    const rep = makeCommittedJudgment({ statement: "rep-malformed-sj" });
+    db.prepare(`UPDATE judgment_items SET supersedes_json = '{"not":"array"}' WHERE id = ?`).run(rep.proposed.id);
+    expect(() =>
+      supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" }),
+    ).toThrow(JudgmentValidationError);
+  });
+});
+
+// ---------------------------------------------------------------
+// supersedeJudgment — transaction rollback
+// ---------------------------------------------------------------
+
+describe("supersedeJudgment — transaction rollback", () => {
+  test("event insert failure rolls back old status, replacement arrays, and edge insert", () => {
+    const old = makeCommittedJudgment({ statement: "rollback-evt" });
+    const rep = makeCommittedJudgment({ statement: "rollback-evt-rep" });
+    const edgesBefore = countJudgmentEdges();
+    const eventsBefore = countEvents();
+    const oldRowBefore = getLifecycleRow(old.proposed.id)!;
+    const repRowBefore = getLifecycleRow(rep.proposed.id)!;
+
+    const err = new Error("injected event failure");
+    expect(() =>
+      supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" }, { _injectEventInsertError: err }),
+    ).toThrow(err);
+
+    expect(countJudgmentEdges()).toBe(edgesBefore);
+    expect(countEvents()).toBe(eventsBefore);
+    const oldRowAfter = getLifecycleRow(old.proposed.id)!;
+    const repRowAfter = getLifecycleRow(rep.proposed.id)!;
+    expect(oldRowAfter.lifecycle_status).toBe(oldRowBefore.lifecycle_status);
+    expect(oldRowAfter.activation_state).toBe(oldRowBefore.activation_state);
+    expect(repRowAfter.supersedes_json).toBe(repRowBefore.supersedes_json);
+  });
+
+  test("edge insert failure rolls back status and array updates", () => {
+    const old = makeCommittedJudgment({ statement: "rollback-edge" });
+    const rep = makeCommittedJudgment({ statement: "rollback-edge-rep" });
+    const edgesBefore = countJudgmentEdges();
+    const oldRowBefore = getLifecycleRow(old.proposed.id)!;
+
+    const err = new Error("injected edge failure");
+    expect(() =>
+      supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" }, { _injectEdgeInsertError: err }),
+    ).toThrow(err);
+
+    expect(countJudgmentEdges()).toBe(edgesBefore);
+    const oldRowAfter = getLifecycleRow(old.proposed.id)!;
+    expect(oldRowAfter.lifecycle_status).toBe(oldRowBefore.lifecycle_status);
+  });
+});
+
+// ---------------------------------------------------------------
+// revokeJudgment — success
+// ---------------------------------------------------------------
+
+describe("revokeJudgment — success", () => {
+  test("revokes an active/eligible/approved/normal judgment", () => {
+    const j = makeCommittedJudgment({ statement: "revoke-success" });
+    const result = revokeJudgment(db, { judgment_id: j.proposed.id, actor: "admin", reason: "no longer valid" });
+    expect(result.id).toBe(j.proposed.id);
+    expect(result.lifecycle_status).toBe("revoked");
+    expect(result.activation_state).toBe("excluded");
+    expect(result.event_type).toBe("judgment.revoked");
+  });
+
+  test("lifecycle_status becomes revoked", () => {
+    const j = makeCommittedJudgment({ statement: "revoke-lc" });
+    revokeJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" });
+    expect(getLifecycleRow(j.proposed.id)!.lifecycle_status).toBe("revoked");
+  });
+
+  test("activation_state becomes excluded", () => {
+    const j = makeCommittedJudgment({ statement: "revoke-ac" });
+    revokeJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" });
+    expect(getLifecycleRow(j.proposed.id)!.activation_state).toBe("excluded");
+  });
+
+  test("approval_state remains approved", () => {
+    const j = makeCommittedJudgment({ statement: "revoke-ap" });
+    revokeJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" });
+    expect(getLifecycleRow(j.proposed.id)!.approval_state).toBe("approved");
+  });
+
+  test("retention_state remains normal", () => {
+    const j = makeCommittedJudgment({ statement: "revoke-ret" });
+    revokeJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" });
+    expect(getLifecycleRow(j.proposed.id)!.retention_state).toBe("normal");
+  });
+
+  test("authority_source remains unchanged", () => {
+    const j = makeCommittedJudgment({ statement: "revoke-auth" });
+    const before = getLifecycleRow(j.proposed.id)!.authority_source;
+    revokeJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" });
+    expect(getLifecycleRow(j.proposed.id)!.authority_source).toBe(before);
+  });
+
+  test("updated_at changes", () => {
+    const j = makeCommittedJudgment({ statement: "revoke-ts" });
+    const before = getLifecycleRow(j.proposed.id)!.updated_at;
+    const result = revokeJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r", }, { nowIso: () => "2099-01-01T00:00:00.000Z" });
+    expect(result.updated_at).toBe("2099-01-01T00:00:00.000Z");
+    expect(result.updated_at).not.toBe(before);
+  });
+
+  test("one judgment.revoked event is appended", () => {
+    const j = makeCommittedJudgment({ statement: "revoke-evt" });
+    const before = countEvents(j.proposed.id);
+    const result = revokeJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" });
+    expect(countEvents(j.proposed.id)).toBe(before + 1);
+    expect(getEventRow(result.event_id)!.event_type).toBe("judgment.revoked");
+  });
+
+  test("event payload_json is valid JSON", () => {
+    const j = makeCommittedJudgment({ statement: "revoke-json" });
+    const result = revokeJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" });
+    expect(() => getEventPayload(result.event_id)).not.toThrow();
+  });
+
+  test("event payload includes required fields", () => {
+    const j = makeCommittedJudgment({ statement: "revoke-fields" });
+    const result = revokeJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "because invalid" });
+    const payload = getEventPayload(result.event_id);
+    expect(payload.judgment_id).toBe(j.proposed.id);
+    expect(payload.reason).toBe("because invalid");
+    expect(payload.previous_lifecycle_status).toBe("active");
+    expect(payload.new_lifecycle_status).toBe("revoked");
+    expect(payload.previous_activation_state).toBe("eligible");
+    expect(payload.new_activation_state).toBe("excluded");
+  });
+
+  test("actor and reason are trimmed", () => {
+    const j = makeCommittedJudgment({ statement: "revoke-trim" });
+    const result = revokeJudgment(db, { judgment_id: j.proposed.id, actor: "  admin  ", reason: "  bad info  " });
+    expect(getEventRow(result.event_id)!.actor).toBe("admin");
+    expect((getEventPayload(result.event_id)).reason).toBe("bad info");
+  });
+
+  test("payload object is included in event when supplied", () => {
+    const j = makeCommittedJudgment({ statement: "revoke-payload" });
+    const result = revokeJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r", payload: { detail: "flagged" } });
+    const payload = getEventPayload(result.event_id);
+    expect((payload.payload as Record<string, unknown>).detail).toBe("flagged");
+  });
+});
+
+// ---------------------------------------------------------------
+// revokeJudgment — invalid state / error cases
+// ---------------------------------------------------------------
+
+describe("revokeJudgment — invalid state / error cases", () => {
+  test("missing judgment returns JudgmentNotFoundError", () => {
+    expect(() => revokeJudgment(db, { judgment_id: "nope", actor: "a", reason: "r" })).toThrow(JudgmentNotFoundError);
+  });
+
+  test("proposed/history_only judgment fails invalid_state", () => {
+    const p = proposeJudgment(db, { ...validInput, statement: "revoke-proposed" });
+    expect(() => revokeJudgment(db, { judgment_id: p.id, actor: "a", reason: "r" })).toThrow(JudgmentStateError);
+  });
+
+  test("rejected judgment fails invalid_state", () => {
+    const p = proposeJudgment(db, { ...validInput, statement: "revoke-rejected" });
+    rejectProposedJudgment(db, { judgment_id: p.id, reviewer: "rev", reason: "no" });
+    expect(() => revokeJudgment(db, { judgment_id: p.id, actor: "a", reason: "r" })).toThrow(JudgmentStateError);
+  });
+
+  test("already revoked judgment fails invalid_state", () => {
+    const j = makeCommittedJudgment({ statement: "revoke-dup" });
+    revokeJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" });
+    expect(() => revokeJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" })).toThrow(JudgmentStateError);
+  });
+
+  test("superseded judgment fails invalid_state", () => {
+    const old = makeCommittedJudgment({ statement: "revoke-sup" });
+    const rep = makeCommittedJudgment({ statement: "revoke-sup-rep" });
+    supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" });
+    expect(() => revokeJudgment(db, { judgment_id: old.proposed.id, actor: "a", reason: "r" })).toThrow(JudgmentStateError);
+  });
+
+  test("expired judgment fails invalid_state", () => {
+    const j = makeCommittedJudgment({ statement: "revoke-exp" });
+    expireJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" });
+    expect(() => revokeJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" })).toThrow(JudgmentStateError);
+  });
+});
+
+// ---------------------------------------------------------------
+// revokeJudgment — transaction rollback
+// ---------------------------------------------------------------
+
+describe("revokeJudgment — transaction rollback", () => {
+  test("event insert failure rolls back status update", () => {
+    const j = makeCommittedJudgment({ statement: "revoke-rollback" });
+    const rowBefore = getLifecycleRow(j.proposed.id)!;
+    const eventsBefore = countEvents(j.proposed.id);
+    const err = new Error("inject");
+    expect(() =>
+      revokeJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" }, { _injectEventInsertError: err }),
+    ).toThrow(err);
+    const rowAfter = getLifecycleRow(j.proposed.id)!;
+    expect(rowAfter.lifecycle_status).toBe(rowBefore.lifecycle_status);
+    expect(rowAfter.activation_state).toBe(rowBefore.activation_state);
+    expect(countEvents(j.proposed.id)).toBe(eventsBefore);
+  });
+});
+
+// ---------------------------------------------------------------
+// expireJudgment — success
+// ---------------------------------------------------------------
+
+describe("expireJudgment — success", () => {
+  test("expires an active/eligible/approved/normal judgment", () => {
+    const j = makeCommittedJudgment({ statement: "expire-success" });
+    const result = expireJudgment(db, { judgment_id: j.proposed.id, actor: "system", reason: "validity window over" });
+    expect(result.id).toBe(j.proposed.id);
+    expect(result.lifecycle_status).toBe("expired");
+    expect(result.activation_state).toBe("excluded");
+    expect(result.event_type).toBe("judgment.expired");
+  });
+
+  test("lifecycle_status becomes expired", () => {
+    const j = makeCommittedJudgment({ statement: "expire-lc" });
+    expireJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" });
+    expect(getLifecycleRow(j.proposed.id)!.lifecycle_status).toBe("expired");
+  });
+
+  test("activation_state becomes excluded", () => {
+    const j = makeCommittedJudgment({ statement: "expire-ac" });
+    expireJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" });
+    expect(getLifecycleRow(j.proposed.id)!.activation_state).toBe("excluded");
+  });
+
+  test("approval_state remains approved", () => {
+    const j = makeCommittedJudgment({ statement: "expire-ap" });
+    expireJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" });
+    expect(getLifecycleRow(j.proposed.id)!.approval_state).toBe("approved");
+  });
+
+  test("retention_state remains normal", () => {
+    const j = makeCommittedJudgment({ statement: "expire-ret" });
+    expireJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" });
+    expect(getLifecycleRow(j.proposed.id)!.retention_state).toBe("normal");
+  });
+
+  test("authority_source remains unchanged", () => {
+    const j = makeCommittedJudgment({ statement: "expire-auth" });
+    const before = getLifecycleRow(j.proposed.id)!.authority_source;
+    expireJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" });
+    expect(getLifecycleRow(j.proposed.id)!.authority_source).toBe(before);
+  });
+
+  test("updated_at changes", () => {
+    const j = makeCommittedJudgment({ statement: "expire-ts" });
+    const before = getLifecycleRow(j.proposed.id)!.updated_at;
+    const result = expireJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" }, { nowIso: () => "2099-02-01T00:00:00.000Z" });
+    expect(result.updated_at).toBe("2099-02-01T00:00:00.000Z");
+    expect(result.updated_at).not.toBe(before);
+  });
+
+  test("valid_until is set to supplied effective_at when provided", () => {
+    const j = makeCommittedJudgment({ statement: "expire-ea" });
+    const result = expireJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r", effective_at: "2030-01-01T00:00:00.000Z" });
+    expect(result.valid_until).toBe("2030-01-01T00:00:00.000Z");
+    expect(getLifecycleRow(j.proposed.id)!.valid_until).toBe("2030-01-01T00:00:00.000Z");
+  });
+
+  test("valid_until is set to nowIso when absent and existing valid_until is null", () => {
+    const j = makeCommittedJudgment({ statement: "expire-now" });
+    const now = "2030-06-01T00:00:00.000Z";
+    const result = expireJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" }, { nowIso: () => now });
+    expect(result.valid_until).toBe(now);
+  });
+
+  test("existing valid_until is preserved when effective_at is omitted", () => {
+    const j = makeCommittedJudgment({ statement: "expire-preserve" });
+    db.prepare(`UPDATE judgment_items SET valid_until = '2025-12-31T00:00:00.000Z' WHERE id = ?`).run(j.proposed.id);
+    const result = expireJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" });
+    expect(result.valid_until).toBe("2025-12-31T00:00:00.000Z");
+  });
+
+  test("one judgment.expired event is appended", () => {
+    const j = makeCommittedJudgment({ statement: "expire-evt" });
+    const before = countEvents(j.proposed.id);
+    const result = expireJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" });
+    expect(countEvents(j.proposed.id)).toBe(before + 1);
+    expect(getEventRow(result.event_id)!.event_type).toBe("judgment.expired");
+  });
+
+  test("event payload_json is valid JSON", () => {
+    const j = makeCommittedJudgment({ statement: "expire-json" });
+    const result = expireJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" });
+    expect(() => getEventPayload(result.event_id)).not.toThrow();
+  });
+
+  test("event payload includes required fields", () => {
+    const j = makeCommittedJudgment({ statement: "expire-fields" });
+    const now = "2030-07-01T00:00:00.000Z";
+    const result = expireJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "validity expired" }, { nowIso: () => now });
+    const payload = getEventPayload(result.event_id);
+    expect(payload.judgment_id).toBe(j.proposed.id);
+    expect(payload.reason).toBe("validity expired");
+    expect(payload.effective_at).toBe(now);
+    expect(payload.previous_lifecycle_status).toBe("active");
+    expect(payload.new_lifecycle_status).toBe("expired");
+    expect(payload.previous_activation_state).toBe("eligible");
+    expect(payload.new_activation_state).toBe("excluded");
+    expect(payload.previous_valid_until).toBeNull();
+    expect(payload.new_valid_until).toBe(now);
+  });
+
+  test("actor and reason are trimmed", () => {
+    const j = makeCommittedJudgment({ statement: "expire-trim" });
+    const result = expireJudgment(db, { judgment_id: j.proposed.id, actor: "  sys  ", reason: "  window over  " });
+    expect(getEventRow(result.event_id)!.actor).toBe("sys");
+    expect((getEventPayload(result.event_id)).reason).toBe("window over");
+  });
+
+  test("payload object is included in event when supplied", () => {
+    const j = makeCommittedJudgment({ statement: "expire-payload" });
+    const result = expireJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r", payload: { context: "annual review" } });
+    const payload = getEventPayload(result.event_id);
+    expect((payload.payload as Record<string, unknown>).context).toBe("annual review");
+  });
+});
+
+// ---------------------------------------------------------------
+// expireJudgment — invalid state / error cases
+// ---------------------------------------------------------------
+
+describe("expireJudgment — invalid state / error cases", () => {
+  test("missing judgment returns JudgmentNotFoundError", () => {
+    expect(() => expireJudgment(db, { judgment_id: "nope", actor: "a", reason: "r" })).toThrow(JudgmentNotFoundError);
+  });
+
+  test("proposed/history_only judgment fails invalid_state", () => {
+    const p = proposeJudgment(db, { ...validInput, statement: "expire-proposed" });
+    expect(() => expireJudgment(db, { judgment_id: p.id, actor: "a", reason: "r" })).toThrow(JudgmentStateError);
+  });
+
+  test("rejected judgment fails invalid_state", () => {
+    const p = proposeJudgment(db, { ...validInput, statement: "expire-rejected" });
+    rejectProposedJudgment(db, { judgment_id: p.id, reviewer: "rev", reason: "no" });
+    expect(() => expireJudgment(db, { judgment_id: p.id, actor: "a", reason: "r" })).toThrow(JudgmentStateError);
+  });
+
+  test("revoked judgment fails invalid_state", () => {
+    const j = makeCommittedJudgment({ statement: "expire-revoked" });
+    revokeJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" });
+    expect(() => expireJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" })).toThrow(JudgmentStateError);
+  });
+
+  test("superseded judgment fails invalid_state", () => {
+    const old = makeCommittedJudgment({ statement: "expire-sup" });
+    const rep = makeCommittedJudgment({ statement: "expire-sup-rep" });
+    supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" });
+    expect(() => expireJudgment(db, { judgment_id: old.proposed.id, actor: "a", reason: "r" })).toThrow(JudgmentStateError);
+  });
+
+  test("already expired judgment fails invalid_state", () => {
+    const j = makeCommittedJudgment({ statement: "expire-dup" });
+    expireJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" });
+    expect(() => expireJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" })).toThrow(JudgmentStateError);
+  });
+});
+
+// ---------------------------------------------------------------
+// expireJudgment — transaction rollback
+// ---------------------------------------------------------------
+
+describe("expireJudgment — transaction rollback", () => {
+  test("event insert failure rolls back status and valid_until update", () => {
+    const j = makeCommittedJudgment({ statement: "expire-rollback" });
+    const rowBefore = getLifecycleRow(j.proposed.id)!;
+    const eventsBefore = countEvents(j.proposed.id);
+    const err = new Error("inject");
+    expect(() =>
+      expireJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" }, { _injectEventInsertError: err }),
+    ).toThrow(err);
+    const rowAfter = getLifecycleRow(j.proposed.id)!;
+    expect(rowAfter.lifecycle_status).toBe(rowBefore.lifecycle_status);
+    expect(rowAfter.valid_until).toBe(rowBefore.valid_until);
+    expect(countEvents(j.proposed.id)).toBe(eventsBefore);
+  });
+});
+
+// ---------------------------------------------------------------
+// Phase 1A.7 — archived/deleted retention_state guards
+// ---------------------------------------------------------------
+
+describe("supersedeJudgment — archived/deleted retention guard", () => {
+  test("old archived judgment fails invalid_state", () => {
+    const old = makeCommittedJudgment({ statement: "old-archived-sup" });
+    const rep = makeCommittedJudgment({ statement: "rep-for-archived-sup" });
+    forceState(old.proposed.id, { retention_state: "archived" });
+    expect(() =>
+      supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("old deleted judgment fails invalid_state", () => {
+    const old = makeCommittedJudgment({ statement: "old-deleted-sup" });
+    const rep = makeCommittedJudgment({ statement: "rep-for-deleted-sup" });
+    forceState(old.proposed.id, { retention_state: "deleted" });
+    expect(() =>
+      supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" }),
+    ).toThrow(JudgmentStateError);
+  });
+});
+
+describe("revokeJudgment — archived/deleted retention guard", () => {
+  test("archived judgment fails invalid_state", () => {
+    const j = makeCommittedJudgment({ statement: "revoke-archived" });
+    forceState(j.proposed.id, { retention_state: "archived" });
+    expect(() => revokeJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" })).toThrow(JudgmentStateError);
+  });
+
+  test("deleted judgment fails invalid_state", () => {
+    const j = makeCommittedJudgment({ statement: "revoke-deleted" });
+    forceState(j.proposed.id, { retention_state: "deleted" });
+    expect(() => revokeJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" })).toThrow(JudgmentStateError);
+  });
+});
+
+describe("expireJudgment — archived/deleted retention guard", () => {
+  test("archived judgment fails invalid_state", () => {
+    const j = makeCommittedJudgment({ statement: "expire-archived" });
+    forceState(j.proposed.id, { retention_state: "archived" });
+    expect(() => expireJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" })).toThrow(JudgmentStateError);
+  });
+
+  test("deleted judgment fails invalid_state", () => {
+    const j = makeCommittedJudgment({ statement: "expire-deleted" });
+    forceState(j.proposed.id, { retention_state: "deleted" });
+    expect(() => expireJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" })).toThrow(JudgmentStateError);
+  });
+});
+
+// ---------------------------------------------------------------
+// Phase 1A.7 — lifecycle validation rejection tests
+// ---------------------------------------------------------------
+
+describe("supersedeJudgment — validation rejections", () => {
+  function assertRejected(input: SupersedeInput) {
+    const edgesBefore = countJudgmentEdges();
+    const eventsBefore = countEvents();
+    expect(() => supersedeJudgment(db, input)).toThrow(JudgmentValidationError);
+    expect(countJudgmentEdges()).toBe(edgesBefore);
+    expect(countEvents()).toBe(eventsBefore);
+  }
+
+  const base: SupersedeInput = {
+    old_judgment_id: "old-id",
+    replacement_judgment_id: "rep-id",
+    actor: "actor",
+    reason: "reason",
+  };
+
+  test("empty old_judgment_id rejected before DB write", () => assertRejected({ ...base, old_judgment_id: "" }));
+  test("whitespace old_judgment_id rejected before DB write", () => assertRejected({ ...base, old_judgment_id: "  " }));
+  test("empty replacement_judgment_id rejected before DB write", () => assertRejected({ ...base, replacement_judgment_id: "" }));
+  test("whitespace replacement_judgment_id rejected before DB write", () => assertRejected({ ...base, replacement_judgment_id: "   " }));
+  test("empty actor rejected before DB write", () => assertRejected({ ...base, actor: "" }));
+  test("whitespace-only actor rejected before DB write", () => assertRejected({ ...base, actor: "   " }));
+  test("empty reason rejected before DB write", () => assertRejected({ ...base, reason: "" }));
+  test("whitespace-only reason rejected before DB write", () => assertRejected({ ...base, reason: "   " }));
+  test("payload null rejected before DB write", () => assertRejected({ ...base, payload: null as unknown as Record<string, unknown> }));
+  test("payload array rejected before DB write", () => assertRejected({ ...base, payload: [] as unknown as Record<string, unknown> }));
+  test("payload primitive rejected before DB write", () => assertRejected({ ...base, payload: "string" as unknown as Record<string, unknown> }));
+  test("payload class instance rejected before DB write", () => assertRejected({ ...base, payload: new Date() as unknown as Record<string, unknown> }));
+  test("unserializable payload rejected before DB write", () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    assertRejected({ ...base, payload: circular });
+  });
+});
+
+describe("revokeJudgment — validation rejections", () => {
+  function assertRejected(input: RevokeInput) {
+    const eventsBefore = countEvents();
+    expect(() => revokeJudgment(db, input)).toThrow(JudgmentValidationError);
+    expect(countEvents()).toBe(eventsBefore);
+  }
+
+  const base: RevokeInput = { judgment_id: "some-id", actor: "actor", reason: "reason" };
+
+  test("empty judgment_id rejected before DB write", () => assertRejected({ ...base, judgment_id: "" }));
+  test("whitespace judgment_id rejected before DB write", () => assertRejected({ ...base, judgment_id: "  " }));
+  test("empty actor rejected before DB write", () => assertRejected({ ...base, actor: "" }));
+  test("whitespace-only actor rejected before DB write", () => assertRejected({ ...base, actor: "   " }));
+  test("empty reason rejected before DB write", () => assertRejected({ ...base, reason: "" }));
+  test("whitespace-only reason rejected before DB write", () => assertRejected({ ...base, reason: "   " }));
+  test("payload null rejected before DB write", () => assertRejected({ ...base, payload: null as unknown as Record<string, unknown> }));
+  test("payload array rejected before DB write", () => assertRejected({ ...base, payload: [] as unknown as Record<string, unknown> }));
+  test("payload primitive rejected before DB write", () => assertRejected({ ...base, payload: 42 as unknown as Record<string, unknown> }));
+  test("payload class instance rejected before DB write", () => assertRejected({ ...base, payload: new Date() as unknown as Record<string, unknown> }));
+  test("unserializable payload rejected before DB write", () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    assertRejected({ ...base, payload: circular });
+  });
+});
+
+describe("expireJudgment — validation rejections", () => {
+  function assertRejected(input: ExpireInput) {
+    const eventsBefore = countEvents();
+    expect(() => expireJudgment(db, input)).toThrow(JudgmentValidationError);
+    expect(countEvents()).toBe(eventsBefore);
+  }
+
+  const base: ExpireInput = { judgment_id: "some-id", actor: "actor", reason: "reason" };
+
+  test("empty judgment_id rejected before DB write", () => assertRejected({ ...base, judgment_id: "" }));
+  test("whitespace judgment_id rejected before DB write", () => assertRejected({ ...base, judgment_id: "  " }));
+  test("empty actor rejected before DB write", () => assertRejected({ ...base, actor: "" }));
+  test("whitespace-only actor rejected before DB write", () => assertRejected({ ...base, actor: "   " }));
+  test("empty reason rejected before DB write", () => assertRejected({ ...base, reason: "" }));
+  test("whitespace-only reason rejected before DB write", () => assertRejected({ ...base, reason: "   " }));
+  test("empty effective_at rejected before DB write", () => assertRejected({ ...base, effective_at: "" }));
+  test("whitespace effective_at rejected before DB write", () => assertRejected({ ...base, effective_at: "  " }));
+  test("payload null rejected before DB write", () => assertRejected({ ...base, payload: null as unknown as Record<string, unknown> }));
+  test("payload array rejected before DB write", () => assertRejected({ ...base, payload: [] as unknown as Record<string, unknown> }));
+  test("payload primitive rejected before DB write", () => assertRejected({ ...base, payload: true as unknown as Record<string, unknown> }));
+  test("payload class instance rejected before DB write", () => assertRejected({ ...base, payload: new Date() as unknown as Record<string, unknown> }));
+  test("unserializable payload rejected before DB write", () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    assertRejected({ ...base, payload: circular });
+  });
+});
+
+// ---------------------------------------------------------------
+// Phase 1A.7 — query/explain integration after retirement
+// ---------------------------------------------------------------
+
+describe("Phase 1A.7 — query/explain integration after retirement", () => {
+  test("default query after supersede does not return superseded old judgment", () => {
+    const old = makeCommittedJudgment({ statement: "superseded-hidden" });
+    const rep = makeCommittedJudgment({ statement: "superseded-replacement" });
+    supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" });
+    const result = queryJudgments(db);
+    const ids = result.items.map((i) => i.id);
+    expect(ids).not.toContain(old.proposed.id);
+    expect(ids).toContain(rep.proposed.id);
+  });
+
+  test("default query after revoke does not return revoked judgment", () => {
+    const j = makeCommittedJudgment({ statement: "revoked-hidden" });
+    revokeJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" });
+    const result = queryJudgments(db);
+    expect(result.items.map((i) => i.id)).not.toContain(j.proposed.id);
+  });
+
+  test("default query after expire does not return expired judgment", () => {
+    const j = makeCommittedJudgment({ statement: "expired-hidden" });
+    expireJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" });
+    const result = queryJudgments(db);
+    expect(result.items.map((i) => i.id)).not.toContain(j.proposed.id);
+  });
+
+  test("include_history query can return superseded/revoked/expired rows", () => {
+    const old = makeCommittedJudgment({ statement: "history-sup" });
+    const rep = makeCommittedJudgment({ statement: "history-rep" });
+    supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" });
+    const jRev = makeCommittedJudgment({ statement: "history-rev" });
+    revokeJudgment(db, { judgment_id: jRev.proposed.id, actor: "a", reason: "r" });
+    const jExp = makeCommittedJudgment({ statement: "history-exp" });
+    expireJudgment(db, { judgment_id: jExp.proposed.id, actor: "a", reason: "r" });
+
+    const result = queryJudgments(db, { include_history: true, limit: 100 });
+    const ids = result.items.map((i) => i.id);
+    expect(ids).toContain(old.proposed.id);
+    expect(ids).toContain(jRev.proposed.id);
+    expect(ids).toContain(jExp.proposed.id);
+  });
+
+  test("explain on superseded old judgment includes superseded_by data", () => {
+    const old = makeCommittedJudgment({ statement: "explain-old-sup" });
+    const rep = makeCommittedJudgment({ statement: "explain-rep-sup" });
+    supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" });
+    const expl = explainJudgment(db, { judgment_id: old.proposed.id });
+    expect(expl.judgment.lifecycle_status).toBe("superseded");
+    expect(expl.superseded_by).toContain(rep.proposed.id);
+  });
+
+  test("explain on replacement judgment includes supersedes data", () => {
+    const old = makeCommittedJudgment({ statement: "explain-old-sup2" });
+    const rep = makeCommittedJudgment({ statement: "explain-rep-sup2" });
+    supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" });
+    const expl = explainJudgment(db, { judgment_id: rep.proposed.id });
+    expect(expl.supersedes).toContain(old.proposed.id);
+  });
+
+  test("explain on revoked judgment works", () => {
+    const j = makeCommittedJudgment({ statement: "explain-revoked" });
+    revokeJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" });
+    const expl = explainJudgment(db, { judgment_id: j.proposed.id });
+    expect(expl.judgment.lifecycle_status).toBe("revoked");
+  });
+
+  test("explain on expired judgment works", () => {
+    const j = makeCommittedJudgment({ statement: "explain-expired" });
+    expireJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" });
+    const expl = explainJudgment(db, { judgment_id: j.proposed.id });
+    expect(expl.judgment.lifecycle_status).toBe("expired");
+  });
+
+  test("explain includes judgment.superseded event when include_events=true", () => {
+    const old = makeCommittedJudgment({ statement: "explain-evt-sup" });
+    const rep = makeCommittedJudgment({ statement: "explain-evt-rep" });
+    supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" });
+    const expl = explainJudgment(db, { judgment_id: old.proposed.id, include_events: true });
+    expect(expl.events.some((e) => e.event_type === "judgment.superseded")).toBe(true);
+  });
+
+  test("explain includes judgment.revoked event when include_events=true", () => {
+    const j = makeCommittedJudgment({ statement: "explain-evt-rev" });
+    revokeJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" });
+    const expl = explainJudgment(db, { judgment_id: j.proposed.id, include_events: true });
+    expect(expl.events.some((e) => e.event_type === "judgment.revoked")).toBe(true);
+  });
+
+  test("explain includes judgment.expired event when include_events=true", () => {
+    const j = makeCommittedJudgment({ statement: "explain-evt-exp" });
+    expireJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" });
+    const expl = explainJudgment(db, { judgment_id: j.proposed.id, include_events: true });
+    expect(expl.events.some((e) => e.event_type === "judgment.expired")).toBe(true);
   });
 });

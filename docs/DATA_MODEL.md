@@ -170,7 +170,7 @@ Attaches meaning to an artifact.
 - `relation_type ∈ { evidence, attachment, generated_output, reference, source }`.
 - CHECK requires `memory_summary_id` or `turn_id` to be non-null.
 
-### `judgment_*` (Phase 1A — schema + proposal/review/source/evidence/commit writers + query/explain read surfaces)
+### `judgment_*` (Phase 1A — schema + proposal/review/source/evidence/commit/retirement writers + query/explain read surfaces)
 
 Migration 004 (`migrations/004_judgment_skeleton.sql`) added the
 following tables and an FTS5 virtual table per ADR-0009 ..
@@ -178,9 +178,9 @@ ADR-0013 and `docs/JUDGMENT_SYSTEM.md`.
 
 `src/judgment/repository.ts` is the **sole writer** for
 `judgment_items`, `judgment_sources`, `judgment_evidence_links`,
-and `judgment_events`. It also owns the local read-only
-`queryJudgments` / `explainJudgment` surfaces. It supports eight
-operations:
+`judgment_edges`, and `judgment_events`. It also owns the local
+read-only `queryJudgments` / `explainJudgment` surfaces. It supports
+eleven operations:
 
 - **Proposal-only insert** (`proposeJudgment`) — creates rows with
   `lifecycle_status=proposed` / `approval_state=pending` /
@@ -216,6 +216,25 @@ operations:
   unregistered operation. Active/eligible rows are not read by
   runtime context — no Context Compiler or provider integration
   exists yet.**
+- **Supersede** (`supersedeJudgment`) — marks an existing
+  `active/eligible/approved/normal` judgment as superseded by another
+  `active/eligible/approved/normal` judgment. Sets old judgment to
+  `lifecycle_status=superseded` / `activation_state=excluded`. Updates
+  `superseded_by_json` on the old judgment and `supersedes_json` on
+  the replacement. Inserts one `judgment_edges` row with
+  `relation=supersedes` (direction: replacement → old). Appends one
+  `judgment.superseded` event. **Local and unregistered.** Does not
+  make either judgment context-visible.
+- **Revoke** (`revokeJudgment`) — removes an
+  `active/eligible/approved/normal` judgment from the active set by
+  setting `lifecycle_status=revoked` / `activation_state=excluded`.
+  Appends one `judgment.revoked` event. **Local and unregistered.**
+- **Expire** (`expireJudgment`) — removes an
+  `active/eligible/approved/normal` judgment from the active set by
+  setting `lifecycle_status=expired` / `activation_state=excluded`.
+  Optionally sets `valid_until` to the supplied `effective_at` (or
+  to `now` if absent and `valid_until` was null). Appends one
+  `judgment.expired` event. **Local and unregistered.**
 - **Query** (`queryJudgments`) — read-only local query surface over
   `judgment_items`, optionally using FTS5 on `statement` and
   optionally returning compact evidence/source metadata. By default
@@ -232,21 +251,21 @@ operations:
 The `src/judgment/tool.ts` typed-tool contracts (`judgment.propose`,
 `judgment.approve`, `judgment.reject`, `judgment.record_source`,
 `judgment.link_evidence`, `judgment.commit`, `judgment.query`,
-`judgment.explain`) wrap the repository but are not registered in
+`judgment.explain`, `judgment.supersede`, `judgment.revoke`,
+`judgment.expire`) wrap the repository but are **not registered** in
 any runtime module.
 
-Commit requires approval and at least one evidence link. It sets
-`lifecycle_status=active` / `activation_state=eligible` /
-`authority_source=user_confirmed`. Active/eligible rows exist in DB
-after commit but are not read by runtime context. Query/explain can
-read those rows locally, but no Context Compiler exists yet, no
-provider prompt integration exists yet, and no Telegram command
-exists for any judgment tool.
+Commit requires approval and at least one evidence link. After commit,
+`active/eligible` rows exist in DB but are **not** read by runtime
+context. Supersede, revoke, and expire remove judgments from the
+`active/eligible` set by setting `activation_state=excluded`; none of
+these operations make judgments context-visible. No Context Compiler
+exists yet, no provider prompt integration exists yet, and no Telegram
+command exists for any judgment tool.
 
-No supersede, revoke, or expire write path exists. No Control Gate
-or Context Compiler reads from these tables. Future runtime writers
-must route through `src/judgment/repository.ts` (or a successor) per
-the single-writer policy.
+No Control Gate or Context Compiler reads from these tables. Future
+runtime writers must route through `src/judgment/repository.ts` (or a
+successor) per the single-writer policy.
 
 #### `judgment_sources`
 
@@ -347,9 +366,13 @@ reasoning.
 | `judgment_items` (reject transition)  | `src/judgment/repository.ts` (`rejectProposedJudgment`) — sets `approval_state=rejected` / `lifecycle_status=rejected` / `activation_state=excluded`. |
 | `judgment_items` (evidence arrays)    | `src/judgment/repository.ts` (`linkJudgmentEvidence`) — updates `source_ids_json` / `evidence_ids_json` denormalized arrays only. No activation. |
 | `judgment_items` (commit transition)  | `src/judgment/repository.ts` (`commitApprovedJudgment`) — sets `lifecycle_status=active` / `activation_state=eligible` / `authority_source=user_confirmed`, syncs denormalized arrays. Local unregistered. Active/eligible rows not read by runtime context. |
+| `judgment_items` (supersede transition) | `src/judgment/repository.ts` (`supersedeJudgment`) — sets `lifecycle_status=superseded` / `activation_state=excluded` on old; updates `supersedes_json` / `superseded_by_json` arrays on both. Local unregistered. |
+| `judgment_items` (revoke transition)  | `src/judgment/repository.ts` (`revokeJudgment`) — sets `lifecycle_status=revoked` / `activation_state=excluded`. Local unregistered. |
+| `judgment_items` (expire transition)  | `src/judgment/repository.ts` (`expireJudgment`) — sets `lifecycle_status=expired` / `activation_state=excluded`, optionally sets `valid_until`. Local unregistered. |
 | `judgment_sources` (insert)           | `src/judgment/repository.ts` (`recordJudgmentSource`) — local unregistered writer. No runtime path. |
 | `judgment_evidence_links` (insert)    | `src/judgment/repository.ts` (`linkJudgmentEvidence`) — local unregistered writer. No runtime path. |
-| `judgment_events` (insert)            | `src/judgment/repository.ts` — `judgment.proposed`, `judgment.approved`, `judgment.rejected`, `judgment.source.recorded`, `judgment.evidence.linked`, `judgment.committed` events only. |
+| `judgment_edges` (insert)             | `src/judgment/repository.ts` (`supersedeJudgment`) — inserts one edge with `relation=supersedes` (from=replacement, to=old). Local unregistered. |
+| `judgment_events` (insert)            | `src/judgment/repository.ts` — `judgment.proposed`, `judgment.approved`, `judgment.rejected`, `judgment.source.recorded`, `judgment.evidence.linked`, `judgment.committed`, `judgment.superseded`, `judgment.revoked`, `judgment.expired` events only. |
 
 Read-surface note: `src/judgment/repository.ts` also owns the local
 unregistered read-only `queryJudgments` and `explainJudgment`

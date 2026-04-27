@@ -155,8 +155,9 @@ promotes a `session` attachment to `long_term`.
 Phase 1A.1 (schema skeleton + types + validators), Phase 1A.2
 (proposal-only write surface), Phase 1A.3 (proposal review
 local surface), Phase 1A.4 (source/evidence-link local surface),
-Phase 1A.5 (commit/activation local surface), and Phase 1A.6
-(query/explain local read surfaces) have landed on
+Phase 1A.5 (commit/activation local surface), Phase 1A.6
+(query/explain local read surfaces), and Phase 1A.7 (retirement
+lifecycle local surfaces — supersede/revoke/expire) have landed on
 `main`. **Runtime request handling is unchanged.** The implemented
 runtime stages above — Telegram inbound, `provider_run`,
 `summary_generation`, `storage_sync`, `notification_retry`, and
@@ -250,25 +251,51 @@ still uses the existing `src/context/builder.ts` +
   `executeJudgmentExplainTool`) — local unregistered typed-tool
   contracts.
 
+**Phase 1A.7** — retirement lifecycle local surfaces:
+
+- `src/judgment/repository.ts` (`supersedeJudgment`) — transitions
+  an `active/eligible/approved/normal` judgment to
+  `lifecycle_status=superseded` / `activation_state=excluded`.
+  Also updates `supersedes_json` / `superseded_by_json` arrays and
+  inserts one `judgment_edges` row (`relation=supersedes`, direction
+  replacement→old). Appends a `judgment.superseded` event.
+- `src/judgment/repository.ts` (`revokeJudgment`) — transitions an
+  `active/eligible/approved/normal` judgment to
+  `lifecycle_status=revoked` / `activation_state=excluded`. Appends
+  a `judgment.revoked` event.
+- `src/judgment/repository.ts` (`expireJudgment`) — transitions an
+  `active/eligible/approved/normal` judgment to
+  `lifecycle_status=expired` / `activation_state=excluded`.
+  Optionally sets `valid_until`. Appends a `judgment.expired` event.
+- `src/judgment/tool.ts` (`JUDGMENT_SUPERSEDE_TOOL`,
+  `executeJudgmentSupersedeTool`, `JUDGMENT_REVOKE_TOOL`,
+  `executeJudgmentRevokeTool`, `JUDGMENT_EXPIRE_TOOL`,
+  `executeJudgmentExpireTool`) — local unregistered typed-tool
+  contracts.
+
 The proposal, review, source-recording, evidence-linking, commit,
-query, and explain surfaces can be exercised by tests or direct
-local code. They are
+query, explain, supersede, revoke, and expire surfaces can be
+exercised by tests or direct local code. They are
 **not** exposed to providers, Telegram, commands, worker dispatch,
 or context building:
 
 - `judgment.propose`, `judgment.approve`, `judgment.reject`,
   `judgment.record_source`, `judgment.link_evidence`,
-  `judgment.commit`, `judgment.query`, `judgment.explain` are not
-  registered in `src/main.ts` or any runtime module.
+  `judgment.commit`, `judgment.query`, `judgment.explain`,
+  `judgment.supersede`, `judgment.revoke`, `judgment.expire` are
+  not registered in `src/main.ts` or any runtime module.
 - `src/providers/*`, `src/context/*`, `src/queue/worker.ts`,
   `src/memory/*`, `src/telegram/*`, and `src/commands/*` do not
   import from `src/judgment/`.
 - Query/explain are read-only. They do not mutate `judgment_items`,
   `judgment_sources`, `judgment_evidence_links`, `judgment_edges`,
   or `judgment_events`, and they do not append telemetry events.
-- Active/eligible rows remain outside runtime context. No Context
-  Compiler, provider prompt integration, memory-promotion path,
-  worker dispatch hook, or Telegram command uses query/explain.
+- Supersede/revoke/expire are write-only lifecycle transitions. They
+  do not make judgment rows context-visible.
+- Active/eligible rows and retired rows (superseded/revoked/expired)
+  remain outside runtime context. No Context Compiler, provider
+  prompt integration, memory-promotion path, worker dispatch hook,
+  or Telegram command uses any judgment tool.
 
 Schema version remains **4**.
 
@@ -284,11 +311,14 @@ rows from provider output: **not implemented**.
 
 - A partial persistence substrate exists: schema, FTS5 index,
   proposal + review writers, source recording, evidence linking,
-  commit/activation, local query/explain read surfaces, and
+  commit/activation, retirement lifecycle (supersede/revoke/expire),
+  local query/explain read surfaces, and
   `judgment.proposed` / `judgment.approved` /
   `judgment.rejected` / `judgment.source.recorded` /
-  `judgment.evidence.linked` / `judgment.committed` events.
-- Not implemented: `supersede`, `revoke`, `expire`.
+  `judgment.evidence.linked` / `judgment.committed` /
+  `judgment.superseded` / `judgment.revoked` / `judgment.expired`
+  events.
+- Not implemented: automatic extraction, context integration.
   `judgment_edges` has no runtime writer. Active/eligible judgment
   rows exist in DB (after commit) and can be read locally through
   query/explain, but are not read by runtime context — no Context

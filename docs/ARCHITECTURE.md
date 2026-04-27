@@ -22,7 +22,7 @@
 | Redaction at the persistence boundary             | implemented |
 | Memory summaries with provenance + confidence     | implemented |
 | Telegram attachment two-phase capture             | implemented |
-| DB-native AI-first Judgment System (Phase 1A+)    | schema skeleton + proposal/review/source/evidence/commit repositories + local query/explain read surfaces + unregistered tool contracts (not runtime-wired) |
+| DB-native AI-first Judgment System (Phase 1A+)    | schema skeleton + proposal/review/source/evidence/commit/retirement repositories + local query/explain read surfaces + unregistered tool contracts (not runtime-wired) |
 | Vector / graph derived projections                | planned     |
 | second-brain repo as canonical runtime memory     | not planned (history/seed only) |
 | Obsidian / Markdown active write path             | not planned |
@@ -100,6 +100,29 @@ they query or explain committed or historical judgment rows,
 but they do **not** mutate any `judgment_*` table, append
 `judgment_events`, or make judgments context-visible. Active /
 eligible rows remain outside runtime request handling.
+
+Phase 1A.7 has added the **retirement lifecycle local surfaces**:
+`src/judgment/repository.ts` now also exports `supersedeJudgment`,
+`revokeJudgment`, and `expireJudgment`, and `src/judgment/tool.ts`
+now also exports `JUDGMENT_SUPERSEDE_TOOL` / `JUDGMENT_REVOKE_TOOL` /
+`JUDGMENT_EXPIRE_TOOL` and the corresponding `execute*` functions.
+
+- **supersede**: marks an existing `active/eligible/approved/normal`
+  judgment as superseded by another `active/eligible/approved/normal`
+  judgment. Transitions old judgment to `lifecycle_status=superseded` /
+  `activation_state=excluded`; updates `supersedes_json` /
+  `superseded_by_json` arrays; inserts one `judgment_edges` row with
+  `relation=supersedes`; appends one `judgment.superseded` event.
+- **revoke**: transitions an `active/eligible/approved/normal` judgment
+  to `lifecycle_status=revoked` / `activation_state=excluded`; appends
+  one `judgment.revoked` event.
+- **expire**: transitions an `active/eligible/approved/normal` judgment
+  to `lifecycle_status=expired` / `activation_state=excluded`;
+  optionally sets `valid_until`; appends one `judgment.expired` event.
+
+None of these retirement operations make judgments context-visible.
+None register tools, call LLMs, or trigger background processing.
+Runtime context still does not read any judgment rows.
 
 No Control Gate, no Context Compiler, no context/provider runtime
 hookup, and no memory-promotion path exists yet — those remain
@@ -255,7 +278,7 @@ exists only as local unregistered DB operations:
 
 The DB-native AI-first Judgment System direction (ADR-0009 …
 ADR-0013, `docs/JUDGMENT_SYSTEM.md`) defines the following
-components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4 / 1A.5 / 1A.6):
+components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4 / 1A.5 / 1A.6 / 1A.7):
 
 - **Schema skeleton** — `judgment_sources`, `judgment_items`,
   `judgment_evidence_links`, `judgment_edges`, `judgment_events`,
@@ -286,15 +309,20 @@ components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4 / 1A.5 / 1A.6):
   (`queryJudgments`, `explainJudgment`). Read-only local query and
   audit/explain surfaces over judgment rows, evidence, sources, and
   lifecycle events. They do not mutate tables or append events.
+- **Retirement lifecycle surfaces** — `src/judgment/repository.ts`
+  (`supersedeJudgment`, `revokeJudgment`, `expireJudgment`). Local
+  unregistered write operations that transition `active/eligible`
+  judgments to non-active/excluded states. `supersedeJudgment` can
+  write `judgment_edges`. None make judgments context-visible.
+  Runtime context still does not read any judgment rows.
 - **Unregistered typed-tool contracts** — `src/judgment/tool.ts`
   (`judgment.propose`, `judgment.approve`, `judgment.reject`,
   `judgment.record_source`, `judgment.link_evidence`,
-  `judgment.commit`, `judgment.query`, `judgment.explain`).
+  `judgment.commit`, `judgment.query`, `judgment.explain`,
+  `judgment.supersede`, `judgment.revoke`, `judgment.expire`).
   Not imported from any runtime module.
 
-`judgment_edges` has no runtime writer yet.
-
-**Not implemented** (beyond Phase 1A.6):
+**Not implemented** (beyond Phase 1A.7):
 
 - `Control Gate` evaluators and the `control_gate_events` /
   `control_plane_events` ledger (table name open per
@@ -307,8 +335,7 @@ components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4 / 1A.5 / 1A.6):
 - `current_operating_view` projection (DEC-036) — **not
   implemented**.
 - Vector and graph derived projections — **not implemented**.
-- Further typed tools (`supersede` / `revoke` / `expire` /
-  `update_current_state`) and Critique Lens
+- Further typed tools (`update_current_state`) and Critique Lens
   v0.1 integration (ADR-0013) — **not implemented**.
 - Provider / context / memory-promotion runtime integration —
   **not implemented**. The judgment tables are not read or written
@@ -317,10 +344,11 @@ components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4 / 1A.5 / 1A.6):
   are wired into any of these modules.
 
 These are listed so AI coding agents do not mistake design
-documents for implemented behavior. Phase 1A.1 through Phase 1A.6
-have landed. Local commit/activation plus local query/explain
-exist. **Supersede, revoke, expire, runtime context integration,
-and Control Gate work remain future scope.** See `docs/RUNTIME.md` and
+documents for implemented behavior. Phase 1A.1 through Phase 1A.7
+have landed. Local commit/activation, local query/explain, and
+local retirement lifecycle (supersede/revoke/expire) exist.
+**Runtime context integration, Control Gate, and Context Compiler
+work remain future scope.** See `docs/RUNTIME.md` and
 `docs/DATA_MODEL.md` for how the implemented slice sits next to
 the runtime, and `docs/JUDGMENT_SYSTEM.md` §Implementation
 Readiness for the broader Phase 1A scope.

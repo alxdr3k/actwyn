@@ -1,4 +1,4 @@
-// Personal Agent — Judgment System Phase 1A.2–1A.5 typed-tool contracts.
+// Personal Agent — Judgment System Phase 1A.2–1A.7 typed-tool contracts.
 //
 // Exports narrow, unregistered tool contracts:
 //   JUDGMENT_PROPOSE_TOOL        — name + description constant
@@ -17,6 +17,12 @@
 //   executeJudgmentQueryTool(db, input)         → QueryToolResult
 //   JUDGMENT_EXPLAIN_TOOL        — name + description constant  (Phase 1A.6)
 //   executeJudgmentExplainTool(db, input)       → ExplainToolResult
+//   JUDGMENT_SUPERSEDE_TOOL      — name + description constant  (Phase 1A.7)
+//   executeJudgmentSupersedeTool(db, input, deps?) → SupersedeToolResult
+//   JUDGMENT_REVOKE_TOOL         — name + description constant  (Phase 1A.7)
+//   executeJudgmentRevokeTool(db, input, deps?) → RevokeToolResult
+//   JUDGMENT_EXPIRE_TOOL         — name + description constant  (Phase 1A.7)
+//   executeJudgmentExpireTool(db, input, deps?) → ExpireToolResult
 //
 // These tools are NOT registered anywhere. They must not be imported from
 // src/main.ts, src/providers/*, src/context/*, src/queue/worker.ts,
@@ -34,17 +40,23 @@ import {
   JudgmentValidationError,
   approveProposedJudgment,
   commitApprovedJudgment,
+  expireJudgment,
   linkJudgmentEvidence,
   proposeJudgment,
   queryJudgments,
   recordJudgmentSource,
   rejectProposedJudgment,
+  revokeJudgment,
+  supersedeJudgment,
   type ApproveInput,
   type CommitDeps,
   type CommitInput,
   type CommittedJudgment,
   type EvidenceLinkDeps,
   type EvidenceLinkInput,
+  type ExpireDeps,
+  type ExpireInput,
+  type ExpireResult,
   type LinkedEvidence,
   type ProposalDeps,
   type ProposalInput,
@@ -55,8 +67,14 @@ import {
   type RejectInput,
   type ReviewDeps,
   type ReviewedJudgment,
+  type RevokeDeps,
+  type RevokeInput,
+  type RevokeResult,
   type SourceDeps,
   type SourceInput,
+  type SupersedeDeps,
+  type SupersedeInput,
+  type SupersedeResult,
   type ExplainJudgmentInput,
   type JudgmentExplanation,
 } from "~/judgment/repository.ts";
@@ -109,6 +127,24 @@ export const JUDGMENT_EXPLAIN_TOOL = {
   name: "judgment.explain" as const,
   description:
     "explains one local judgment by returning its evidence, sources, and lifecycle events",
+} as const;
+
+export const JUDGMENT_SUPERSEDE_TOOL = {
+  name: "judgment.supersede" as const,
+  description:
+    "marks one active judgment as superseded by another active judgment, without wiring runtime context",
+} as const;
+
+export const JUDGMENT_REVOKE_TOOL = {
+  name: "judgment.revoke" as const,
+  description:
+    "revokes an active judgment and excludes it from future active projections",
+} as const;
+
+export const JUDGMENT_EXPIRE_TOOL = {
+  name: "judgment.expire" as const,
+  description:
+    "expires an active judgment and excludes it from future active projections",
 } as const;
 
 // ---------------------------------------------------------------
@@ -214,6 +250,31 @@ export type ExplainToolSuccess = {
 
 export type ExplainToolResult = ExplainToolSuccess | ReviewToolError;
 
+// ---------------------------------------------------------------
+// Lifecycle tool result types (Phase 1A.7)
+// ---------------------------------------------------------------
+
+export type SupersedeToolSuccess = {
+  readonly ok: true;
+  readonly result: SupersedeResult;
+};
+
+export type SupersedeToolResult = SupersedeToolSuccess | ReviewToolError;
+
+export type RevokeToolSuccess = {
+  readonly ok: true;
+  readonly result: RevokeResult;
+};
+
+export type RevokeToolResult = RevokeToolSuccess | ReviewToolError;
+
+export type ExpireToolSuccess = {
+  readonly ok: true;
+  readonly result: ExpireResult;
+};
+
+export type ExpireToolResult = ExpireToolSuccess | ReviewToolError;
+
 // Re-export input/deps types so callers import from tool.ts only.
 export type {
   ProposalInput,
@@ -235,6 +296,15 @@ export type {
   QueryJudgmentsResult,
   ExplainJudgmentInput,
   JudgmentExplanation,
+  SupersedeInput,
+  SupersedeDeps,
+  SupersedeResult,
+  RevokeInput,
+  RevokeDeps,
+  RevokeResult,
+  ExpireInput,
+  ExpireDeps,
+  ExpireResult,
 };
 
 // ---------------------------------------------------------------
@@ -412,6 +482,57 @@ export function executeJudgmentExplainTool(
   try {
     const explanation = explainJudgment(db, input);
     return { ok: true, explanation };
+  } catch (e) {
+    return mapReviewError(e);
+  }
+}
+
+// ---------------------------------------------------------------
+// Supersede executor (Phase 1A.7)
+// ---------------------------------------------------------------
+
+export function executeJudgmentSupersedeTool(
+  db: DbHandle,
+  input: SupersedeInput,
+  deps?: SupersedeDeps,
+): SupersedeToolResult {
+  try {
+    const result = supersedeJudgment(db, input, deps);
+    return { ok: true, result };
+  } catch (e) {
+    return mapReviewError(e);
+  }
+}
+
+// ---------------------------------------------------------------
+// Revoke executor (Phase 1A.7)
+// ---------------------------------------------------------------
+
+export function executeJudgmentRevokeTool(
+  db: DbHandle,
+  input: RevokeInput,
+  deps?: RevokeDeps,
+): RevokeToolResult {
+  try {
+    const result = revokeJudgment(db, input, deps);
+    return { ok: true, result };
+  } catch (e) {
+    return mapReviewError(e);
+  }
+}
+
+// ---------------------------------------------------------------
+// Expire executor (Phase 1A.7)
+// ---------------------------------------------------------------
+
+export function executeJudgmentExpireTool(
+  db: DbHandle,
+  input: ExpireInput,
+  deps?: ExpireDeps,
+): ExpireToolResult {
+  try {
+    const result = expireJudgment(db, input, deps);
+    return { ok: true, result };
   } catch (e) {
     return mapReviewError(e);
   }
