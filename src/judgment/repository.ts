@@ -2198,6 +2198,10 @@ function loadEvidenceBundle(
   const seenLinkIds = new Set<string>();
 
   for (const evidenceId of hints.evidenceIds ?? []) {
+    // Deduplicate: evidence_ids_json should not contain duplicate IDs, but if
+    // it does (data corruption) we emit each unique link only once — consistent
+    // with batchLoadEvidenceBundles which also deduplicates via seenOrderedLinkIds.
+    if (seenLinkIds.has(evidenceId)) continue;
     const link = linkRowMap.get(evidenceId);
     if (!link) {
       throw new JudgmentValidationError(
