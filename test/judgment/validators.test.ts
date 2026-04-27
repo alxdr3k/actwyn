@@ -4,6 +4,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   validateBoolean,
+  validateBoundedNonEmptyString,
   isActivationStateP05,
   isApprovalState,
   isAuthoritySourceP05,
@@ -338,6 +339,45 @@ describe("validateNonEmptyString", () => {
     const r = validateNonEmptyString("", "judgment_id");
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain("judgment_id");
+  });
+});
+
+describe("validateBoundedNonEmptyString", () => {
+  test("accepts a non-empty string within the cap", () => {
+    expect(validateBoundedNonEmptyString("hello", "q", 10).ok).toBe(true);
+  });
+
+  test("accepts a string at exactly the cap (inclusive boundary)", () => {
+    const atCap = "x".repeat(10);
+    expect(validateBoundedNonEmptyString(atCap, "q", 10).ok).toBe(true);
+  });
+
+  test("rejects a string one character over the cap", () => {
+    const overCap = "x".repeat(11);
+    const r = validateBoundedNonEmptyString(overCap, "q", 10);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toContain("q");
+      expect(r.reason).toContain("10");
+    }
+  });
+
+  test("rejects whitespace-only inputs even when within the cap", () => {
+    expect(validateBoundedNonEmptyString("   ", "q", 10).ok).toBe(false);
+  });
+
+  test("rejects an over-cap input even if its trim would fit", () => {
+    // Caller could try to smuggle a long allocation by padding with
+    // whitespace. The cap is enforced on raw length, not trimmed length.
+    const padded = " ".repeat(20) + "hi" + " ".repeat(20);
+    expect(validateBoundedNonEmptyString(padded, "q", 10).ok).toBe(false);
+  });
+
+  test("rejects non-string inputs", () => {
+    expect(validateBoundedNonEmptyString(42, "q", 10).ok).toBe(false);
+    expect(validateBoundedNonEmptyString(null, "q", 10).ok).toBe(false);
+    expect(validateBoundedNonEmptyString(undefined, "q", 10).ok).toBe(false);
+    expect(validateBoundedNonEmptyString({}, "q", 10).ok).toBe(false);
   });
 });
 

@@ -374,6 +374,39 @@ export function validateOptionalNonEmptyString(
 }
 
 /**
+ * Like `validateNonEmptyString`, but also rejects strings whose length
+ * exceeds `maxLength`. The cap is checked **before** trimming so that a
+ * caller cannot smuggle an unbounded string by padding it with whitespace
+ * (the trimmed result would be short, but the parser/allocator pressure
+ * is on the raw input).
+ *
+ * Used for free-text search inputs that flow into FTS5 phrase queries —
+ * SQLite FTS5 has soft and implementation-defined upper bounds on token
+ * stream size, and very long phrases can pressure the parser and the
+ * BM25 ranker. The caller should pick a cap that matches the search use
+ * case (a couple of search terms, not paragraphs).
+ */
+export function validateBoundedNonEmptyString(
+  value: unknown,
+  fieldName: string,
+  maxLength: number,
+): ValidationResult {
+  if (typeof value !== "string") {
+    return { ok: false, reason: `${fieldName} must be a string` };
+  }
+  if (value.length > maxLength) {
+    return {
+      ok: false,
+      reason: `${fieldName} must be at most ${maxLength} characters`,
+    };
+  }
+  if (value.trim().length === 0) {
+    return { ok: false, reason: `${fieldName} must be non-empty after trim` };
+  }
+  return { ok: true };
+}
+
+/**
  * `v` must be a JSON-serializable object or array, and must still be an
  * object or array **after** serialization. This catches class instances such
  * as `new Date()` (which serializes to a string scalar) and objects that
