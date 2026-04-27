@@ -1888,6 +1888,35 @@ function normalizeEnumFilterSet(
   return undefined;
 }
 
+// Exhaustive key sets for strict-mode input validation.
+// Any unknown key is immediately rejected with JudgmentValidationError so
+// callers cannot pass stale or mistyped fields and silently get default
+// behavior (e.g. { filter: "active" } would be silently ignored without this).
+const QUERY_ALLOWED_KEYS: ReadonlySet<string> = new Set([
+  "kind", "kinds",
+  "lifecycle_status", "lifecycle_statuses",
+  "approval_state", "approval_states",
+  "activation_state", "activation_states",
+  "retention_state", "retention_states",
+  "authority_source", "authority_sources",
+  "confidence", "confidences",
+  "procedure_subtype",
+  "statement_match",
+  "scope_contains",
+  "include_history",
+  "include_evidence",
+  "limit",
+  "offset",
+  "order_by",
+]);
+
+const EXPLAIN_ALLOWED_KEYS: ReadonlySet<string> = new Set([
+  "judgment_id",
+  "include_events",
+  "include_sources",
+  "include_payloads",
+]);
+
 function normalizeQueryInput(input: QueryJudgmentsInput | undefined): NormalizedQueryInput {
   if (input === undefined) {
     return {
@@ -1910,6 +1939,15 @@ function normalizeQueryInput(input: QueryJudgmentsInput | undefined): Normalized
   }
 
   assertValid(validatePlainObjectInput(input, "input"), "input");
+
+  for (const key of Object.keys(input)) {
+    if (!QUERY_ALLOWED_KEYS.has(key)) {
+      throw new JudgmentValidationError(
+        `queryJudgments: unknown field '${key}'`,
+        key,
+      );
+    }
+  }
 
   if (input.include_history !== undefined) {
     assertValid(validateBoolean(input.include_history, "include_history"), "include_history");
@@ -2160,6 +2198,10 @@ function loadEvidenceBundle(
   const seenLinkIds = new Set<string>();
 
   for (const evidenceId of hints.evidenceIds ?? []) {
+    // Deduplicate: evidence_ids_json should not contain duplicate IDs, but if
+    // it does (data corruption) we emit each unique link only once — consistent
+    // with batchLoadEvidenceBundles which also deduplicates via seenOrderedLinkIds.
+    if (seenLinkIds.has(evidenceId)) continue;
     const link = linkRowMap.get(evidenceId);
     if (!link) {
       throw new JudgmentValidationError(
@@ -2249,6 +2291,183 @@ function loadEvidenceBundle(
   });
 
   return { evidence_links: evidenceLinks, sources, why };
+}
+
+// Batch-load compact evidence + source metadata for a page of query results.
+// Two queries total regardless of page size:
+//   1. judgment_evidence_links WHERE judgment_id IN (...)
+//   2. judgment_sources WHERE id IN (... unique source ids ...)
+// This replaces the per-item O(N) loadEvidenceBundle calls that
+// include_evidence=true previously issued for each queried judgment.
+function batchLoadEvidenceBundles(
+  db: DbHandle,
+  items: QueriedJudgment[],
+): (QueriedJudgment & {
+  evidence_count: number;
+  source_count: number;
+  sources: JudgmentQuerySourceSummary[];
+  evidence_links: JudgmentQueryEvidenceLinkSummary[];
+})[] {
+  if (items.length === 0) return [];
+
+  // Batch 1 — evidence links
+  const judgmentIds = items.map((item) => item.id);
+  const linkBindings: Record<string, unknown> = {};
+  const linkPlaceholders = judgmentIds.map((id, i) => {
+    linkBindings[`jid${i}`] = id;
+    return `$jid${i}`;
+  });
+  const linkRows = db
+    .prepare<JudgmentEvidenceLinkRow>(
+      `SELECT id, judgment_id, source_id, relation, span_locator,
+              quote_excerpt, rationale, created_at
+       FROM judgment_evidence_links
+       WHERE judgment_id IN (${linkPlaceholders.join(", ")})
+       ORDER BY judgment_id ASC, created_at ASC, id ASC`,
+    )
+    .all(linkBindings as never);
+
+  // Group links by judgment_id, collect unique source IDs
+  const linksByJudgment = new Map<string, JudgmentEvidenceLinkRow[]>();
+  const allSourceIds = new Set<string>();
+  for (const link of linkRows) {
+    const existing = linksByJudgment.get(link.judgment_id) ?? [];
+    existing.push(link);
+    linksByJudgment.set(link.judgment_id, existing);
+    allSourceIds.add(link.source_id);
+  }
+
+  // Batch 2 — sources (only if there are any)
+  const sourceMap = new Map<string, JudgmentSourceRow>();
+  if (allSourceIds.size > 0) {
+    const srcIds = [...allSourceIds];
+    const srcBindings: Record<string, unknown> = {};
+    const srcPlaceholders = srcIds.map((id, i) => {
+      srcBindings[`sid${i}`] = id;
+      return `$sid${i}`;
+    });
+    const sourceRows = db
+      .prepare<JudgmentSourceRow>(
+        `SELECT id, kind, locator, content_hash, trust_level, redacted, captured_at
+         FROM judgment_sources
+         WHERE id IN (${srcPlaceholders.join(", ")})`,
+      )
+      .all(srcBindings as never);
+    for (const src of sourceRows) {
+      sourceMap.set(src.id, src);
+    }
+  }
+
+  // Assemble per-item compact bundles
+  return items.map((item) => {
+    const links = linksByJudgment.get(item.id) ?? [];
+
+    // Denormalized consistency checks — mirrors loadEvidenceBundle behavior so
+    // queryJudgments(include_evidence=true) and explainJudgment throw the same
+    // errors for the same corrupted rows rather than silently diverging.
+    //
+    // 1. Every ID in evidence_ids_json must map to an actual link row.
+    const linkById = new Map(links.map((l) => [l.id, l]));
+    for (const evidenceId of item.evidence_ids) {
+      if (!linkById.has(evidenceId)) {
+        throw new JudgmentValidationError(
+          `judgment ${item.id} evidence_ids_json references missing evidence link ${evidenceId}`,
+          "evidence_ids_json",
+        );
+      }
+    }
+
+    // 2. Every source in source_ids_json must be referenced by at least one link.
+    const linkedSourceIds = new Set(links.map((l) => l.source_id));
+    for (const sourceId of item.source_ids) {
+      if (!linkedSourceIds.has(sourceId)) {
+        throw new JudgmentValidationError(
+          `judgment ${item.id} source_ids_json references unlinked source ${sourceId}`,
+          "source_ids_json",
+        );
+      }
+    }
+
+    // Apply denormalized evidence_ids ordering — mirrors loadEvidenceBundle hint
+    // ordering so queryJudgments(include_evidence=true) and explainJudgment
+    // return links/sources in the same order for the same judgment.
+    const orderedLinks: JudgmentEvidenceLinkRow[] = [];
+    const seenOrderedLinkIds = new Set<string>();
+    // 1. Honor evidence_ids_json order first.
+    for (const evidenceId of item.evidence_ids) {
+      const link = linkById.get(evidenceId);
+      // Existence already validated above; skip duplicates in the denormalized array.
+      if (link && !seenOrderedLinkIds.has(evidenceId)) {
+        orderedLinks.push(link);
+        seenOrderedLinkIds.add(evidenceId);
+      }
+    }
+    // 2. Append any links not yet referenced by evidence_ids_json (DB-ordered fallback).
+    for (const link of links) {
+      if (!seenOrderedLinkIds.has(link.id)) {
+        orderedLinks.push(link);
+        seenOrderedLinkIds.add(link.id);
+      }
+    }
+
+    // Apply denormalized source_ids ordering — same strategy.
+    const seenSourceIds = new Set<string>();
+    const sources: JudgmentQuerySourceSummary[] = [];
+    // 1. source_ids_json order first.
+    for (const sourceId of item.source_ids) {
+      if (seenSourceIds.has(sourceId)) continue;
+      seenSourceIds.add(sourceId);
+      const src = sourceMap.get(sourceId);
+      if (!src) {
+        throw new JudgmentValidationError(
+          `judgment ${item.id} references missing source ${sourceId}`,
+          "source_id",
+        );
+      }
+      assertValid(validateTrustLevel(src.trust_level), "trust_level");
+      sources.push({
+        id: src.id,
+        kind: src.kind,
+        locator: src.locator,
+        trust_level: src.trust_level as TrustLevel,
+        redacted: src.redacted === 1,
+      });
+    }
+    // 2. Append any sources from links not yet in source_ids_json.
+    for (const link of orderedLinks) {
+      if (seenSourceIds.has(link.source_id)) continue;
+      seenSourceIds.add(link.source_id);
+      const src = sourceMap.get(link.source_id);
+      if (!src) {
+        throw new JudgmentValidationError(
+          `judgment ${item.id} references missing source ${link.source_id}`,
+          "source_id",
+        );
+      }
+      assertValid(validateTrustLevel(src.trust_level), "trust_level");
+      sources.push({
+        id: src.id,
+        kind: src.kind,
+        locator: src.locator,
+        trust_level: src.trust_level as TrustLevel,
+        redacted: src.redacted === 1,
+      });
+    }
+    const evidenceLinks: JudgmentQueryEvidenceLinkSummary[] = orderedLinks.map((l) => ({
+      id: l.id,
+      source_id: l.source_id,
+      relation: l.relation,
+      span_locator: l.span_locator,
+      quote_excerpt: l.quote_excerpt,
+    }));
+    return {
+      ...item,
+      evidence_count: orderedLinks.length,
+      source_count: sources.length,
+      sources,
+      evidence_links: evidenceLinks,
+    };
+  });
 }
 
 function loadEvents(
@@ -2358,44 +2577,38 @@ export function queryJudgments(
   }
 
   const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
-  const sql = `${JUDGMENT_QUERY_SELECT} ${whereClause} ${buildOrderByClause(normalized.order_by)}`;
-  const rows = db.prepare<JudgmentReadRow>(sql).all(bindings as never);
+  const orderClause = buildOrderByClause(normalized.order_by);
 
-  const filtered = rows
-    .map((row) => mapRowToQueriedJudgment(row))
-    .filter((item) => matchesScopeContains(item.scope, normalized.scope_contains));
+  let sliced: QueriedJudgment[];
+  let has_more: boolean;
 
-  const sliced = filtered.slice(
-    normalized.offset,
-    normalized.offset + normalized.limit,
-  );
+  if (normalized.scope_contains === undefined) {
+    // Fast path: no in-memory filtering needed.
+    // Push LIMIT/OFFSET into SQL so SQLite returns only the rows the
+    // caller actually wants — no unbounded in-memory scan.
+    // Fetch limit+1 rows so we can determine has_more without a
+    // separate COUNT(*) query.
+    const limitSql = `LIMIT ${bind(normalized.limit + 1)} OFFSET ${bind(normalized.offset)}`;
+    const sql = `${JUDGMENT_QUERY_SELECT} ${whereClause} ${orderClause} ${limitSql}`;
+    const rows = db.prepare<JudgmentReadRow>(sql).all(bindings as never);
+    has_more = rows.length > normalized.limit;
+    sliced = rows.slice(0, normalized.limit).map(mapRowToQueriedJudgment);
+  } else {
+    // Slow path: scope_contains requires in-memory JSON containment
+    // filtering after the SQL fetch, so LIMIT/OFFSET cannot be pushed
+    // down. Callers should narrow the result set with other SQL-level
+    // filters (kind, lifecycle_status, etc.) to keep the fetch bounded.
+    const sql = `${JUDGMENT_QUERY_SELECT} ${whereClause} ${orderClause}`;
+    const rows = db.prepare<JudgmentReadRow>(sql).all(bindings as never);
+    const filtered = rows
+      .map((row) => mapRowToQueriedJudgment(row))
+      .filter((item) => matchesScopeContains(item.scope, normalized.scope_contains));
+    has_more = filtered.length > normalized.offset + normalized.limit;
+    sliced = filtered.slice(normalized.offset, normalized.offset + normalized.limit);
+  }
 
   const items = normalized.include_evidence
-    ? sliced.map((item) => {
-        const bundle = loadEvidenceBundle(db, item.id, {
-          sourceIds: item.source_ids,
-          evidenceIds: item.evidence_ids,
-        });
-        return {
-          ...item,
-          evidence_count: bundle.evidence_links.length,
-          source_count: bundle.sources.length,
-          sources: bundle.sources.map((source) => ({
-            id: source.id,
-            kind: source.kind,
-            locator: source.locator,
-            trust_level: source.trust_level,
-            redacted: source.redacted,
-          })),
-          evidence_links: bundle.evidence_links.map((link) => ({
-            id: link.id,
-            source_id: link.source_id,
-            relation: link.relation,
-            span_locator: link.span_locator,
-            quote_excerpt: link.quote_excerpt,
-          })),
-        };
-      })
+    ? batchLoadEvidenceBundles(db, sliced)
     : sliced;
 
   return {
@@ -2403,7 +2616,7 @@ export function queryJudgments(
     limit: normalized.limit,
     offset: normalized.offset,
     returned: items.length,
-    has_more: filtered.length > normalized.offset + normalized.limit,
+    has_more,
   };
 }
 
@@ -2412,6 +2625,16 @@ export function explainJudgment(
   input: ExplainJudgmentInput,
 ): JudgmentExplanation {
   assertValid(validatePlainObjectInput(input, "input"), "input");
+
+  for (const key of Object.keys(input)) {
+    if (!EXPLAIN_ALLOWED_KEYS.has(key)) {
+      throw new JudgmentValidationError(
+        `explainJudgment: unknown field '${key}'`,
+        key,
+      );
+    }
+  }
+
   assertValid(validateNonEmptyString(input.judgment_id, "judgment_id"), "judgment_id");
 
   if (input.include_events !== undefined) {
