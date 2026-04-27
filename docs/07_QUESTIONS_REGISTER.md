@@ -1320,6 +1320,90 @@ committed for a later milestone.
 - **History**: 2026-04-26 (DEC-037 §scope clarification으로 follow-up
   분리).
 
+### Q-064 — `mayPromoteToLongTerm` gate를 의미별로 split할까?
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: `docs/design/salvage-audit-2026-04.md` §7에서 surfaced.
+  현재 [`src/memory/provenance.ts`](../src/memory/provenance.ts)의
+  `mayPromoteToLongTerm(provenance, item_type)` gate는 두 질문을
+  conflate한다 — (1) "이 row가 `memory_items`에 들어가도 되는가?"
+  (2) "이 row가 behavior baseline / durable judgment가 되어도
+  되는가?". 현 구현은 `preference`만 `user_stated` /
+  `user_confirmed`로 제한하고, 나머지(`fact` / `decision` /
+  `open_task` / `caution`)는 모든 provenance를 통과시킨다 — Q-027의
+  코드 측 대응 지점.
+- **Required follow-up items**:
+  1. Q-027 결정 후 gate 의미 분리 — 후보:
+     `mayPersistAsMemoryItem` / `mayBecomeBehaviorBaseline` /
+     `mayProposeJudgment` (또는 ADR-0012의 epistemic_origin과 일치
+     하는 명명).
+  2. Call site 마이그레이션 — `src/memory/items.ts`,
+     `src/memory/summary.ts`의 `promoteItems` path.
+  3. 테스트 fixture 갱신 — `test/memory/summary.test.ts`,
+     `test/memory/provenance.test.ts`의 expectation.
+- **Recommendation**: Q-027 결정 직후 단독 PR
+  (`refactor(memory): split provenance gate semantics`)로 처리.
+  salvage audit §6 step 7에 대응.
+- **Trigger**: Q-027 resolved.
+- **History**: 2026-04-27 (salvage audit §7 candidate를 정식 Q로
+  promotion).
+
+### Q-065 — `memory_base_path` JSONL/MD sidecar policy
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: `docs/design/salvage-audit-2026-04.md` §5.3 / §7에서
+  surfaced. [`src/queue/worker.ts`](../src/queue/worker.ts) L1269-L1282
+  가 `${memory_base_path}/sessions/<session_id>.jsonl` (append-only
+  per-session log) 와 `${memory_base_path}/personal/YYYY-MM-DD.md`
+  (rolled-up daily) 를 작성한다 (AC-MEM-001). DB-native judgment
+  방향 (ADR-0009/0011/0012)에서 이 sidecar의 역할이 불분명: archive
+  only / behavior baseline contributor / 제거 중 어느 것인가? 결정에
+  따라 worker 정리 범위 (audit §6 step 10) 와 AC-MEM-001 acceptance
+  criterion이 영향 받는다.
+- **Required follow-up items**:
+  1. 역할 결정 — 후보 비교:
+     - **archive only**: DB가 source of truth, sidecar는 외부 도구
+       (Obsidian-like) export용. read path는 사용 안 함.
+     - **behavior baseline contributor**: Compiler가 sidecar도 read
+       후보로 본다. → DB와의 정합성 / drift detection 필요.
+     - **remove**: DB-native만 유지, sidecar writer 삭제. AC-MEM-001
+       재정의 또는 retire.
+  2. ADR 또는 DEC 등재 — 결정 후 `docs/08_DECISION_REGISTER.md` 또는
+     보조 ADR.
+  3. Worker 정리 PR — audit §6 step 10
+     (`chore(memory): jsonl/md sidecar policy`).
+- **Recommendation**: Compiler 작업 (audit §6 step 4-5) 과 독립이며
+  이른 결정 권장. P1 진입 전에 ADR 또는 DEC로 박제.
+- **Trigger**: P1 kickoff 또는 sidecar 동작이 Compiler 설계에
+  영향을 줄 때.
+- **History**: 2026-04-27 (salvage audit §5.3 / §7 candidate를 정식
+  Q로 promotion).
+
+### Q-066 — `src/context/builder.ts` 삭제 timing
+
+- **Status**: open.
+- **Owner**: project lead.
+- **Context**: `docs/design/salvage-audit-2026-04.md` §6 step 9 / §7
+  에서 surfaced. Audit headline에서 `src/context/builder.ts`만
+  REPLACE로 분류됨 (Stage 4 Context Compiler가 ownership을 가져감).
+  남은 결정: Compiler PR과 같은 PR에서 `builder.ts`를 즉시 삭제할
+  것인가, 아니면 한 release soak period 동안 `possibly stale`로
+  marker 후 삭제할 것인가.
+- **Required follow-up items**:
+  1. 옵션 비교 — 즉시 삭제 (clean cut, regression 시 git revert
+     필요) vs soak (rollback 용이, 단기 dead code 노출).
+  2. soak 채택 시 — `possibly stale` marker 형식 결정 (top-of-file
+     comment / ARCHITECTURE.md 표 / lint warning).
+  3. 삭제 PR 시점 결정 — Compiler merge + N release.
+- **Recommendation**: Compiler design PR review 시점에 결정. soak
+  period가 채택된다면 audit §6 step 9에 명시된 `chore(context):
+  drop legacy builder` 를 별도 PR로.
+- **Trigger**: Stage 4 Context Compiler 설계 PR 작성 시점.
+- **History**: 2026-04-27 (salvage audit §6 step 9 / §7 candidate를
+  정식 Q로 promotion).
+
 ---
 
 ## Deferred
