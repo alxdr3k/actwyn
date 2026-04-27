@@ -1112,7 +1112,8 @@ export function linkJudgmentEvidence(
     db.prepare(
       `UPDATE judgment_items
        SET source_ids_json   = $source_ids_json,
-           evidence_ids_json = $evidence_ids_json
+           evidence_ids_json = $evidence_ids_json,
+           updated_at        = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = $id`,
     ).run({
       source_ids_json: JSON.stringify(nextSourceIds),

@@ -1619,6 +1619,33 @@ describe("linkJudgmentEvidence — state guards", () => {
       linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id }),
     ).toThrow(JudgmentStateError);
   });
+
+  test("revoked judgment fails with JudgmentStateError", () => {
+    const j = proposeJudgment(db, validInput);
+    forceState(j.id, { lifecycle_status: "revoked", approval_state: "not_required" });
+    const s = makeSource();
+    expect(() =>
+      linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("superseded judgment fails with JudgmentStateError", () => {
+    const j = proposeJudgment(db, validInput);
+    forceState(j.id, { lifecycle_status: "superseded", approval_state: "not_required" });
+    const s = makeSource();
+    expect(() =>
+      linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("expired judgment fails with JudgmentStateError", () => {
+    const j = proposeJudgment(db, validInput);
+    forceState(j.id, { lifecycle_status: "expired", approval_state: "not_required" });
+    const s = makeSource();
+    expect(() =>
+      linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id }),
+    ).toThrow(JudgmentStateError);
+  });
 });
 
 describe("linkJudgmentEvidence — trimming", () => {
@@ -1925,6 +1952,15 @@ describe("linkJudgmentEvidence — judgment state invariants", () => {
     linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id });
     const row = getFullItem(j.id)!;
     expect(row.approval_state).toBe("pending");
+  });
+
+  test("evidence linking bumps updated_at on judgment_items", () => {
+    const j = makeProposedJudgment();
+    const before = getFullItem(j.id)!.updated_at;
+    const s = makeSource();
+    linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id });
+    const after = getFullItem(j.id)!.updated_at;
+    expect(after >= before).toBe(true);
   });
 });
 
