@@ -2,11 +2,12 @@
 # Wait for codex review on the current PR.
 #
 # Polls three feedback sources (issue comments, review submissions with body,
-# inline review comments) and exits when any new activity appears, or when the
-# configured actor adds the pass reaction on the PR itself.
+# inline review comments) and a pass reaction on the PR. Exits as soon as the
+# pass reaction (newer than baseline) is observed, or when any new feedback is
+# present, or on timeout.
 #
 # Exit codes:
-#   0 → pass reaction (e.g. 👍) is present on the PR from the configured actor
+#   0 → configured actor added the pass reaction (newer than baseline)
 #   1 → at least one new comment/review since baseline (all printed to stdout)
 #   2 → timeout reached
 #   3 → PR could not be detected
@@ -17,11 +18,12 @@
 # Env:
 #   CODEX_POLL_INTERVAL  seconds between polls (default 30)
 #   CODEX_POLL_TIMEOUT   total wait limit in seconds (default 3600)
-#   CODEX_BASELINE       ISO timestamp; activity at/before this is ignored
-#                        (default: timestamp of HEAD commit, so anything
-#                         posted after the most recent push is surfaced)
-#   CODEX_PASS_ACTOR     bot login prefix that signals pass via reaction
-#                        (default: chatgpt-codex-connector)
+#   CODEX_BASELINE       ISO timestamp; activity at/before this is ignored.
+#                        Default: the moment this script starts (so anything
+#                        posted after that wins). Override per push:
+#                        `CODEX_BASELINE=<just-before-push-ts>`.
+#   CODEX_PASS_ACTOR     exact GitHub login that signals pass via reaction
+#                        (default: chatgpt-codex-connector[bot])
 #   CODEX_PASS_REACTION  GitHub reaction content (default: +1, i.e. 👍)
 
 set -euo pipefail
@@ -34,29 +36,26 @@ fi
 
 interval="${CODEX_POLL_INTERVAL:-30}"
 timeout="${CODEX_POLL_TIMEOUT:-3600}"
-pass_actor="${CODEX_PASS_ACTOR:-chatgpt-codex-connector}"
+pass_actor="${CODEX_PASS_ACTOR:-chatgpt-codex-connector[bot]}"
 pass_reaction="${CODEX_PASS_REACTION:-+1}"
+baseline="${CODEX_BASELINE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 
 repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 
-to_utc_iso() {
-  local epoch="$1"
-  date -u -r "$epoch" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-    || date -u -d "@$epoch" +%Y-%m-%dT%H:%M:%SZ
-}
+echo "→ polling PR $repo#$pr (interval=${interval}s, timeout=${timeout}s, baseline=$baseline, pass_actor=$pass_actor)" >&2
 
-if [ -n "${CODEX_BASELINE:-}" ]; then
-  baseline="$CODEX_BASELINE"
-else
-  head_epoch=$(git log -1 --format=%ct HEAD 2>/dev/null || true)
-  if [ -n "$head_epoch" ]; then
-    baseline=$(to_utc_iso "$head_epoch")
-  else
-    baseline=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+# Fetch a paginated list endpoint as a single JSON array.
+# Echoes the JSON on success, prints WARN to stderr and returns 1 on failure
+# (caller decides whether to retry in the next poll round).
+fetch_list() {
+  local label="$1"; shift
+  local out
+  if ! out=$(gh api --paginate --slurp "$@" 2>&1); then
+    echo "WARN: $label fetch failed (retrying next poll): $out" >&2
+    return 1
   fi
-fi
-
-echo "→ polling PR $repo#$pr (interval=${interval}s, timeout=${timeout}s, baseline=$baseline)" >&2
+  printf '%s' "$out"
+}
 
 started=$(date +%s)
 while :; do
@@ -66,33 +65,38 @@ while :; do
     exit 2
   fi
 
-  new_items=$(
-    {
-      gh api --paginate "repos/$repo/issues/$pr/comments" \
-        -q ".[] | select(.created_at > \"$baseline\") | {kind:\"issue_comment\", at:.created_at, login:.user.login, body:.body}" 2>/dev/null || true
-      gh api --paginate "repos/$repo/pulls/$pr/reviews" \
-        -q ".[] | select((.submitted_at // \"\") > \"$baseline\") | select((.body // \"\") != \"\") | {kind:\"review\", at:.submitted_at, login:.user.login, body:.body}" 2>/dev/null || true
-      gh api --paginate "repos/$repo/pulls/$pr/comments" \
-        -q ".[] | select(.created_at > \"$baseline\") | {kind:\"review_comment\", at:.created_at, login:.user.login, path:.path, line:(.line // .original_line), body:.body}" 2>/dev/null || true
-    } | jq -s 'sort_by(.at)'
-  )
-
-  count=$(printf '%s' "$new_items" | jq 'length')
-  if [ "$count" != "0" ]; then
-    printf '%s' "$new_items" | jq -r '.[] |
-      if .kind == "review_comment" then
-        "=== [\(.kind)] \(.login) @ \(.at) — \(.path):\(.line) ===\n\(.body)\n"
-      else
-        "=== [\(.kind)] \(.login) @ \(.at) ===\n\(.body)\n"
-      end'
-    exit 1
+  # 1) Pass reaction wins over a same-cycle comment. Filter by baseline so a
+  #    👍 left in an earlier review cycle does not falsely pass after new push.
+  if reactions=$(fetch_list "reactions" "repos/$repo/issues/$pr/reactions"); then
+    pass=$(printf '%s' "$reactions" | jq --arg actor "$pass_actor" --arg react "$pass_reaction" --arg base "$baseline" '
+      [.[][] | select(.user.login == $actor) | select(.content == $react) | select(.created_at > $base)] | length')
+    if [ "$pass" != "0" ]; then
+      echo "PASSED (reaction $pass_reaction from $pass_actor)" >&2
+      exit 0
+    fi
   fi
 
-  pass=$(gh api --paginate "repos/$repo/issues/$pr/reactions" \
-    -q "[.[] | select(.user.login | startswith(\"$pass_actor\")) | select(.content == \"$pass_reaction\")] | length" 2>/dev/null || echo 0)
-  if [ "${pass:-0}" != "0" ]; then
-    echo "PASSED (reaction $pass_reaction from $pass_actor)" >&2
-    exit 0
+  # 2) Gather any new feedback since baseline from all three sources.
+  if ic=$(fetch_list "issue_comments" "repos/$repo/issues/$pr/comments") \
+     && rv=$(fetch_list "reviews"        "repos/$repo/pulls/$pr/reviews") \
+     && rc=$(fetch_list "review_comments" "repos/$repo/pulls/$pr/comments"); then
+    new_items=$(jq -n --arg base "$baseline" \
+      --argjson ic "$ic" --argjson rv "$rv" --argjson rc "$rc" '
+      ($ic | [.[][] | select(.created_at > $base) | {kind:"issue_comment", at:.created_at, login:.user.login, body:.body}])
+      + ($rv | [.[][] | select((.submitted_at // "") > $base) | select((.body // "") != "") | {kind:"review", at:.submitted_at, login:.user.login, body:.body}])
+      + ($rc | [.[][] | select(.created_at > $base) | {kind:"review_comment", at:.created_at, login:.user.login, path:.path, line:(.line // .original_line), body:.body}])
+      | sort_by(.at)')
+
+    count=$(printf '%s' "$new_items" | jq 'length')
+    if [ "$count" != "0" ]; then
+      printf '%s' "$new_items" | jq -r '.[] |
+        if .kind == "review_comment" then
+          "=== [\(.kind)] \(.login) @ \(.at) — \(.path):\(.line) ===\n\(.body)\n"
+        else
+          "=== [\(.kind)] \(.login) @ \(.at) ===\n\(.body)\n"
+        end'
+      exit 1
+    fi
   fi
 
   sleep "$interval"
