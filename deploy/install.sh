@@ -48,7 +48,6 @@ S3_REGION=
 S3_ACCESS_KEY_ID=
 S3_SECRET_ACCESS_KEY=
 NODE_ENV=production
-LOG_LEVEL=info
 ACTWYN_CONFIG_PATH=/opt/actwyn/config/runtime.json
 EOF
   chown root:"$SERVICE_USER" "$ENV_DIR/env"
