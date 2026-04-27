@@ -192,11 +192,16 @@ Cross-cutting, control-plane:
 - **Critique Lens v0.1** is manual L2 / L3 invocation only in
   Phase 1A (DEC-031, ADR-0013).
 
-Until Phase 1A migrations and code ship, agents must treat the
-above as **documentation only**:
+Phase 1A.1 (schema skeleton + types + validators) and Phase 1A.2
+(proposal-only repository + unregistered tool contract) have
+landed on `main`. **None of the 6 pipeline stages above run in
+the current runtime.** The judgment tables exist in the DB but are
+not read or written by any runtime path. Agents must treat the
+above stages as **not yet wired**:
 
-- Do not implement these steps.
-- Do not invoke or seed the planned tables in tests.
+- Do not implement these pipeline stages.
+- Do not invoke or seed the planned tables in tests beyond the
+  existing Phase 1A.2 proposal repository tests.
 - Do not change the implemented runtime above to anticipate them.
 
 ## Failure / debug path (current)

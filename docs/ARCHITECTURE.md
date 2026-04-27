@@ -111,7 +111,9 @@ Detailed module / state-machine diagrams live in `docs/02_HLD.md`.
   `/var/lib/actwyn/actwyn.db` on prod).
 - **Architecture decisions** — `docs/adr/*` (ADR-0001 … ADR-0013
   accepted on `main`; ADR-0009 … ADR-0013 cover the Judgment System
-  direction but are not yet implemented).
+  direction; Phase 1A.1 schema/types/validators and Phase 1A.2
+  proposal repository/tool contract are partially implemented —
+  Phase 1A.3+ runtime wiring is not yet implemented).
 - **Tactical decisions and open questions** —
   `docs/08_DECISION_REGISTER.md`, `docs/07_QUESTIONS_REGISTER.md`
   (DEC-037 records the documentation lifecycle policy this set of
@@ -157,59 +159,73 @@ A short summary; the full file map lives in `docs/CODE_MAP.md`.
   `running` jobs (force `interrupted`, requeue if `safe_retry`, kill
   orphan PIDs); offset fast-forward; one-shot `storage_sync` for
   `failed` / `delete_failed` rows only.
+- `src/judgment/*` — Phase 1A types, validators, proposal-only
+  repository, and unregistered `judgment.propose` tool contract.
+  Not wired into any runtime module; see §Phase 1A below.
 
-## Planned but not implemented
+## Phase 1A current slice and planned architecture
 
-As of this PR (Phase 1A.1), the Judgment System schema skeleton
-(5 tables + FTS5 virtual table in
-`migrations/004_judgment_skeleton.sql`) and the
-`src/judgment/types.ts` / `src/judgment/validators.ts`
-types-and-validators module exist in tree. They are intentionally
-runtime-inert: no runtime writer, typed tool, Control Gate, or
-context-compiler wiring uses them yet.
+Phase 1A.1 landed the **judgment schema skeleton** (5 tables + FTS5
+virtual table in `migrations/004_judgment_skeleton.sql`) plus
+`src/judgment/types.ts` and `src/judgment/validators.ts`.
+
+Phase 1A.2 landed the **proposal-only write surface**:
+`src/judgment/repository.ts` (`proposeJudgment`) and the local
+**unregistered typed-tool contract** `src/judgment/tool.ts`
+(`judgment.propose`). The repository writes only rows with
+`lifecycle_status = proposed` / `approval_state = pending` /
+`activation_state = history_only`. No approval, activation,
+supersede, revoke, or expire write path exists. The tool is not
+registered in any runtime module.
 
 The DB-native AI-first Judgment System direction (ADR-0009 …
 ADR-0013, `docs/JUDGMENT_SYSTEM.md`) defines the following
-components. The pieces below remain **not implemented**:
+components. **Implemented** (Phase 1A.1 / 1A.2):
 
-- The Phase 1A schema skeleton (`judgment_sources`,
-  `judgment_items`, `judgment_evidence_links`, `judgment_edges`,
-  `judgment_events`) **is now implemented** as schema-only in
-  migration 004; nothing under `src/` currently writes to it.
+- **Schema skeleton** — `judgment_sources`, `judgment_items`,
+  `judgment_evidence_links`, `judgment_edges`, `judgment_events`,
+  `judgment_items_fts` in migration 004.
+- **Proposal-only repository** — `src/judgment/repository.ts`
+  (`proposeJudgment`). Writes `judgment_items` and
+  `judgment_events` only. Forces `lifecycle_status=proposed` /
+  `approval_state=pending` / `activation_state=history_only`.
+  `judgment_sources`, `judgment_evidence_links`, and
+  `judgment_edges` have no runtime writer yet.
+- **Unregistered typed-tool contract** — `src/judgment/tool.ts`
+  (`judgment.propose`). Not imported from any runtime module.
+
+**Not implemented** (Phase 1A.3+ and beyond):
+
 - `Control Gate` evaluators and the `control_gate_events` /
-  `control_plane_events` ledger (the table name choice between the
-  two is itself open per `docs/JUDGMENT_SYSTEM.md` §Implementation
-  Readiness) — **not implemented**.
+  `control_plane_events` ledger (table name open per
+  `docs/JUDGMENT_SYSTEM.md` §Implementation Readiness) — **not
+  implemented**.
 - `Tension` telemetry and the `tensions` table — **not
   implemented**.
 - `ReflectionTriageEvent` and the `reflection_triage_events` ledger
   — **not implemented**.
-- `current_operating_view` projection (DEC-036; supersedes the
-  earlier "current truth" framing) — **not implemented**.
-- Vector and graph derived projections (FTS5 first; vector / graph
-  deferred per ADR-0009) — **not implemented**.
-- `judgment.propose` **unregistered local contract** —
-  **implemented** in `src/judgment/tool.ts` (Phase 1A.2), but not
-  registered in any runtime surface. Further typed tools (`commit` /
-  `supersede` / `revoke` / `query` / `explain` / `link_evidence` /
-  `update_current_state`) and Critique Lens v0.1 integration
-  (ADR-0013) — **not implemented**.
-- **Proposal-only repository** `src/judgment/repository.ts` —
-  **implemented** (Phase 1A.2). Creates `proposed` / `pending` /
-  `history_only` rows only. No approval, activation, supersede, or
-  revoke write path exists yet.
+- `current_operating_view` projection (DEC-036) — **not
+  implemented**.
+- Vector and graph derived projections — **not implemented**.
+- Further typed tools (`commit` / `supersede` / `revoke` /
+  `query` / `explain` / `link_evidence` / `update_current_state`)
+  and Critique Lens v0.1 integration (ADR-0013) — **not
+  implemented**.
 - Provider / context / memory-promotion runtime integration —
   **not implemented**. The judgment tables are not read or written
   by `src/providers/*`, `src/context/*`, `src/queue/worker.ts`,
   `src/memory/*`, or `src/telegram/*`. The `judgment.propose` tool
   is not wired into any of these modules.
 
-These are listed here so AI coding agents do not mistake design
-documents for implemented behavior. Beyond Phase 1A.1's schema +
-types + validators landing, **Phase 1A implementation work
-remains future scope** — see `docs/RUNTIME.md` and
-`docs/DATA_MODEL.md` for how the schema sits next to the
-implemented runtime, and `docs/JUDGMENT_SYSTEM.md` §Implementation
+These are listed so AI coding agents do not mistake design
+documents for implemented behavior. Phase 1A.1 (schema + types +
+validators) and Phase 1A.2 (proposal repository + unregistered
+tool contract) have landed. **Phase 1A.3+ runtime wiring** —
+provider integration, context compiler, Control Gate, approval /
+activation workflows, memory promotion, Telegram, and commands —
+**remains future scope**. See `docs/RUNTIME.md` and
+`docs/DATA_MODEL.md` for how the implemented slice sits next to
+the runtime, and `docs/JUDGMENT_SYSTEM.md` §Implementation
 Readiness for the broader Phase 1A scope.
 
 ## Existing implementation re-classification (2026-04 salvage audit)

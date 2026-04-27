@@ -719,6 +719,12 @@ committed for a later milestone.
     separate `memory_items` and `judgment_items` per ADR-0009
     분리 commitment. Long-term unify/migrate/separate question
     remains open and tracked here.
+  - 2026-04-27 Phase 1A.2 implementation: `src/judgment/repository.ts`
+    (proposal-only writer for `judgment_items` + `judgment_events`)
+    and `src/judgment/tool.ts` (unregistered `judgment.propose`
+    contract) landed. `memory_items` and `judgment_items` remain
+    separate schemas. Question stays open; broader migration /
+    unification policy unresolved.
 
 ### Q-028 — `JudgmentItem.kind` v1 enum 범위는 어디까지인가?
 
