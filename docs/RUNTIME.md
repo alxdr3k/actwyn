@@ -150,59 +150,93 @@ promotes a `session` attachment to `long_term`.
 | Missing required env             | `loadConfig()` throws `ConfigError` and the process exits 1 before opening the DB.     |
 | Unauthorized inbound             | `telegram_updates.status=skipped`, `skip_reason` recorded, no job created.             |
 
-## Planned Judgment System flow (not implemented)
-
-These steps are **planned** under the DB-native AI-first Judgment
-System direction (ADR-0009 … ADR-0013, `docs/JUDGMENT_SYSTEM.md`
-§6-stage pipeline). The architectural commitment is on `main`;
-**none of these steps run in code today**. The numbering here
-follows the 6-stage pipeline in `docs/JUDGMENT_SYSTEM.md`.
-
-1. **Event Ledger (Stage 1)** — append-only, redacted,
-   source-preserving record of inbound turns, files, provider
-   outputs, metrics. Builds on the existing `telegram_updates` /
-   `turns` ledgers.
-2. **Extraction / Proposal (Stage 2)** — AI proposes candidate
-   `JudgmentItem` rows; not yet truth.
-3. **Judgment Store (Stage 3)** — source-grounded, typed, scoped,
-   temporal, supersedable judgments persisted in `judgment_*`
-   tables.
-4. **Projections** — `current_operating_view` (DEC-036), FTS5
-   index, and (deferred) vector / graph projections feed retrieval.
-   Projections are derived; the DB remains canonical.
-5. **Context Compiler (Stage 4)** — assemble per-task
-   `current_operating_view` + constraints + evidence + negatives
-   under a token budget. Replaces the current
-   `src/context/builder.ts` + `src/context/packer.ts` shape for
-   judgment-driven prompts.
-6. **Agent Runtime (Stage 5)** — same Claude subprocess wiring as
-   today, but prompt inputs come from the compiled judgment view.
-7. **Feedback / Reflection (Stage 6)** — execution result and
-   failure feed back into the ledger and `judgment_events`.
-   Reflection produces `reflection_triage_events`.
-
-Cross-cutting, control-plane:
-
-- **Control Gate** decisions land in `control_gate_events` /
-  `control_plane_events` (table name itself is open per
-  `docs/JUDGMENT_SYSTEM.md` §Implementation Readiness).
-- **`Tension`** telemetry is recorded when contradictions or
-  missing authority sources are detected (ADR-0013 §Tension
-  Generalization).
-- **Critique Lens v0.1** is manual L2 / L3 invocation only in
-  Phase 1A (DEC-031, ADR-0013).
+## Judgment System: current state and runtime boundary
 
 Phase 1A.1 (schema skeleton + types + validators) and Phase 1A.2
-(proposal-only repository + unregistered tool contract) have
-landed on `main`. **None of the 6 pipeline stages above run in
-the current runtime.** The judgment tables exist in the DB but are
-not read or written by any runtime path. Agents must treat the
-above stages as **not yet wired**:
+(proposal-only write surface) have landed on `main`. **Runtime
+request handling is unchanged.** The implemented runtime stages
+above — Telegram inbound, `provider_run`, `summary_generation`,
+`storage_sync`, `notification_retry`, and outbound delivery — do
+not call `judgment.propose`. Provider context still uses the
+existing `src/context/builder.ts` + `src/context/packer.ts`
+memory implementation.
 
-- Do not implement these pipeline stages.
-- Do not invoke or seed the planned tables in tests beyond the
-  existing Phase 1A.2 proposal repository tests.
-- Do not change the implemented runtime above to anticipate them.
+### What is implemented
+
+**Phase 1A.1** — judgment schema skeleton:
+
+- `migrations/004_judgment_skeleton.sql` — 5 tables + FTS5
+  virtual table: `judgment_sources`, `judgment_items`,
+  `judgment_evidence_links`, `judgment_edges`, `judgment_events`,
+  `judgment_items_fts`.
+- `src/judgment/types.ts` — typed enumerations and interfaces.
+- `src/judgment/validators.ts` — input validators.
+
+**Phase 1A.2** — proposal-only write surface:
+
+- `src/judgment/repository.ts` (`proposeJudgment`) — writes
+  `judgment_items` and `judgment_events` in a single transaction,
+  forced to `lifecycle_status=proposed` / `approval_state=pending`
+  / `activation_state=history_only`. Appends `judgment.proposed`
+  events.
+- `src/judgment/tool.ts` (`JUDGMENT_PROPOSE_TOOL`,
+  `executeJudgmentProposeTool`) — local unregistered typed-tool
+  contract.
+
+The proposal surface can be exercised by tests or direct local
+code. It is **not** exposed to providers, Telegram, commands,
+worker dispatch, or context building:
+
+- `judgment.propose` is not registered in `src/main.ts` or any
+  runtime module.
+- `src/providers/*`, `src/context/*`, `src/queue/worker.ts`,
+  `src/memory/*`, `src/telegram/*`, and `src/commands/*` do not
+  import from `src/judgment/`.
+
+Schema version remains **4**.
+
+### What is not implemented
+
+The following are not implemented. Do not wire any of these until
+a task explicitly authorizes a further Judgment runtime slice.
+
+**Stage 2** — automatic AI extraction of candidate `JudgmentItem`
+rows from provider output: **not implemented**.
+
+**Stage 3** — Judgment Store lifecycle:
+
+- A partial persistence substrate exists: schema, FTS5 index,
+  proposal-only writer, and `judgment.proposed` events.
+- Not implemented: approval workflow, activation workflow,
+  rejection, `commit`, `supersede`, `revoke`, `expire`, `query`,
+  `explain`, and evidence-linking workflow. `judgment_sources`,
+  `judgment_evidence_links`, and `judgment_edges` have no runtime
+  writer.
+
+**Stage 4** — Context Compiler: `current_operating_view`
+projection (DEC-036) and the Stage 4 Context Compiler that would
+replace `src/context/builder.ts` + `src/context/packer.ts` are
+**not implemented**.
+
+**Stage 5** — judgment-driven agent runtime: **not implemented**.
+
+**Stage 6** — feedback / reflection loop: **not implemented**.
+
+**Cross-cutting control-plane** (all unimplemented):
+
+- Control Gate evaluators and `control_gate_events` /
+  `control_plane_events` ledger.
+- `Tension` telemetry and the `tensions` table.
+- `ReflectionTriageEvent` and `reflection_triage_events`.
+- Vector and graph derived projections.
+- Memory promotion integration.
+- Telegram command integration for judgment operations.
+
+The 6-stage pipeline in `docs/JUDGMENT_SYSTEM.md` remains the
+architectural authority for the Judgment System direction
+(ADR-0009 … ADR-0013, DEC-037). Until a task explicitly
+authorizes a further Judgment runtime slice, do not wire the
+existing proposal surface into any runtime path.
 
 ## Failure / debug path (current)
 
