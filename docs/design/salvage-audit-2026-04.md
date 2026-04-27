@@ -310,10 +310,10 @@ These are surfaced for `docs/07_QUESTIONS_REGISTER.md` follow-up.
 | Question | Note |
 |----------|------|
 | Q-027 (already open) | `memory_items` ↔ `judgment_items` 통합 / 분리 / 단계적 — the gating decision for steps 4-6 above. |
-| (new candidate) | Should `mayPromoteToLongTerm` be split into `mayPersistAsMemoryItem` / `mayBecomeBehaviorBaseline` / `mayProposeJudgment`? Code-side counterpart of Q-027. |
+| Q-064 (promoted 2026-04-27) | Should `mayPromoteToLongTerm` be split into `mayPersistAsMemoryItem` / `mayBecomeBehaviorBaseline` / `mayProposeJudgment`? Code-side counterpart of Q-027. |
 | `control_gate_events` vs `control_plane_events` table name | Already noted in JUDGMENT_SYSTEM.md §Implementation Readiness. |
-| (new candidate) | `memory_base_path` JSONL / MD sidecar policy — archive only, behavior baseline contributor, or removed? Affects step 10 above and AC-MEM-001. |
-| (new candidate) | At step 9, should `src/context/builder.ts` be deleted in the same PR as Compiler, or marked `possibly stale` first and removed only after one release of soak time? |
+| Q-065 (promoted 2026-04-27) | `memory_base_path` JSONL / MD sidecar policy — archive only, behavior baseline contributor, or removed? Affects step 10 above and AC-MEM-001. |
+| Q-066 (promoted 2026-04-27) | At step 9, should `src/context/builder.ts` be deleted in the same PR as Compiler, or marked `possibly stale` first and removed only after one release of soak time? |
 
 ## 8. Audit history
 
