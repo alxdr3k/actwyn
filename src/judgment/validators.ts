@@ -200,7 +200,10 @@ export function validateEpistemicOrigin(v: unknown): ValidationResult {
 
 /**
  * `scope` at the application layer must be a plain object — not null,
- * not an array, not a primitive — and must be JSON-serializable.
+ * not an array, not a primitive, and not a class instance (e.g. Date,
+ * Map, Set). Class instances serialize differently to JSON (Date becomes
+ * a string scalar, Map becomes {}) which would corrupt the stored shape
+ * and make `judgment.scope` differ from what was persisted.
  * Unlike `validateScopeJson`, this takes the live object directly.
  */
 export function validateScopeObject(v: unknown): ValidationResult {
@@ -212,6 +215,11 @@ export function validateScopeObject(v: unknown): ValidationResult {
   }
   if (typeof v !== "object") {
     return { ok: false, reason: `scope must be a plain object, got ${typeof v}` };
+  }
+  // Reject class instances: only plain objects ({} or Object.create(null)) allowed.
+  const proto = Object.getPrototypeOf(v) as unknown;
+  if (proto !== Object.prototype && proto !== null) {
+    return { ok: false, reason: "scope must be a plain object, not a class instance" };
   }
   try {
     JSON.stringify(v);

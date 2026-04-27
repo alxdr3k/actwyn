@@ -184,6 +184,23 @@ export function proposeJudgment(
     assertValid(validateJsonValue(input.review_trigger), "review_trigger");
   }
 
+  // Guard optional string fields against runtime misuse (e.g. untyped tool input).
+  // Without this check, a non-string would cause a TypeError inside db.tx(), which
+  // would bypass JudgmentValidationError and surface as an unhandled throw from
+  // executeJudgmentProposeTool instead of the documented { ok: false, error } shape.
+  for (const [field, val] of [
+    ["observed_at", input.observed_at],
+    ["valid_from", input.valid_from],
+    ["valid_until", input.valid_until],
+    ["revisit_at", input.revisit_at],
+    ["last_verified_at", input.last_verified_at],
+    ["volatility", input.volatility],
+  ] as Array<[string, unknown]>) {
+    if (val !== undefined && typeof val !== "string") {
+      throw new JudgmentValidationError(`${field} must be a string`, field);
+    }
+  }
+
   // --- Prepare serialized values ---
   const makeId = deps.newId ?? (() => crypto.randomUUID());
   const id = makeId();

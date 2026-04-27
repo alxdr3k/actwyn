@@ -317,6 +317,19 @@ describe("proposeJudgment — validation rejections", () => {
     circular["self"] = circular;
     assertRejectedBeforeInsert({ ...validInput, scope: circular });
   });
+
+  test("scope = Date instance is rejected (class instances not allowed as plain objects)", () => {
+    // Date serializes to a string scalar — would corrupt scope_json shape if allowed.
+    assertRejectedBeforeInsert({ ...validInput, scope: new Date() as unknown as Record<string, unknown> });
+  });
+
+  test("optional timestamp field as non-string is rejected before DB insert", () => {
+    // Ensures non-string observed_at causes JudgmentValidationError, not a raw TypeError
+    // from the SQLite binding (which would bypass the documented error shape in tool.ts).
+    assertRejectedBeforeInsert({ ...validInput, observed_at: {} as unknown as string });
+    assertRejectedBeforeInsert({ ...validInput, valid_from: 42 as unknown as string });
+    assertRejectedBeforeInsert({ ...validInput, volatility: [] as unknown as string });
+  });
 });
 
 // ---------------------------------------------------------------

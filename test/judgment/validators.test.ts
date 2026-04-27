@@ -197,6 +197,10 @@ describe("validateScopeObject", () => {
     expect(validateScopeObject({ project: "actwyn" }).ok).toBe(true);
   });
 
+  test("accepts Object.create(null)", () => {
+    expect(validateScopeObject(Object.create(null)).ok).toBe(true);
+  });
+
   test("rejects null", () => {
     expect(validateScopeObject(null).ok).toBe(false);
   });
@@ -210,6 +214,15 @@ describe("validateScopeObject", () => {
     expect(validateScopeObject("string").ok).toBe(false);
     expect(validateScopeObject(42).ok).toBe(false);
     expect(validateScopeObject(true).ok).toBe(false);
+  });
+
+  test("rejects Date instance (class instance, not plain object)", () => {
+    // new Date() serializes to a string scalar, not an object — would corrupt scope_json shape.
+    expect(validateScopeObject(new Date()).ok).toBe(false);
+  });
+
+  test("rejects Map instance", () => {
+    expect(validateScopeObject(new Map()).ok).toBe(false);
   });
 
   test("rejects circular / unserializable object", () => {

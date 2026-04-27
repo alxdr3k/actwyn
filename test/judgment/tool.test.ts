@@ -136,6 +136,32 @@ describe("executeJudgmentProposeTool — error path", () => {
       .get()!.n;
     expect(after).toBe(before);
   });
+
+  test("non-string timestamp field returns ok: false (not a raw TypeError)", () => {
+    // Before the timestamp-validation fix, passing observed_at: {} caused a TypeError
+    // inside db.tx() which bypassed JudgmentValidationError and surfaced as an unhandled
+    // throw. After the fix, executeJudgmentProposeTool must return { ok: false, ... }.
+    const result = executeJudgmentProposeTool(
+      db,
+      { ...validInput, observed_at: {} as unknown as string },
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("validation_error");
+      expect(result.error.field).toBe("observed_at");
+    }
+  });
+
+  test("Date scope returns ok: false (not stored as scalar string)", () => {
+    const result = executeJudgmentProposeTool(
+      db,
+      { ...validInput, scope: new Date() as unknown as Record<string, unknown> },
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("validation_error");
+    }
+  });
 });
 
 // ---------------------------------------------------------------
