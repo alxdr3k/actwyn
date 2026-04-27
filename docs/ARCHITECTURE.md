@@ -189,7 +189,7 @@ Detailed module / state-machine diagrams live in `docs/02_HLD.md`.
   `/var/lib/actwyn/actwyn.db` on prod).
 - **Architecture decisions** — `docs/adr/*` (ADR-0001 … ADR-0013
   accepted on `main`; ADR-0009 … ADR-0013 cover the Judgment System
-  direction; Phase 1A.1 through Phase 1A.6 are implemented — full
+  direction; Phase 1A.1 through Phase 1A.7 are implemented — full
   Judgment System runtime is not implemented; runtime wiring remains
   future work).
 - **Tactical decisions and open questions** —
@@ -238,13 +238,15 @@ A short summary; the full file map lives in `docs/CODE_MAP.md`.
   orphan PIDs); offset fast-forward; one-shot `storage_sync` for
   `failed` / `delete_failed` rows only.
 - `src/judgment/*` — Phase 1A types, validators, proposal + proposal
-  review + source/evidence-link + commit/activation + query/explain
-  repository surfaces, and
-  unregistered `judgment.propose` / `judgment.approve` /
+  review + source/evidence-link + commit/activation + query/explain +
+  retirement lifecycle (supersede/revoke/expire) repository surfaces,
+  and unregistered `judgment.propose` / `judgment.approve` /
   `judgment.reject` / `judgment.record_source` /
   `judgment.link_evidence` / `judgment.commit` /
-  `judgment.query` / `judgment.explain` tool contracts.
-  Not wired into any runtime module; see §Phase 1A below.
+  `judgment.query` / `judgment.explain` /
+  `judgment.supersede` / `judgment.revoke` / `judgment.expire`
+  tool contracts. Not wired into any runtime module; see §Phase 1A
+  below.
 
 ## Phase 1A current slice and planned architecture
 

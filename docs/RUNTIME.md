@@ -319,11 +319,13 @@ rows from provider output: **not implemented**.
   `judgment.superseded` / `judgment.revoked` / `judgment.expired`
   events.
 - Not implemented: automatic extraction, context integration.
-  `judgment_edges` has no runtime writer. Active/eligible judgment
-  rows exist in DB (after commit) and can be read locally through
-  query/explain, but are not read by runtime context — no Context
-  Compiler or provider read path exists yet. All judgment tools
-  remain local and unregistered.
+  `judgment_edges` has no runtime-wired writer (local
+  `supersedeJudgment` writes it, but no runtime path reads or
+  writes `judgment_edges`). Active/eligible judgment rows exist in DB
+  (after commit) and can be read locally through query/explain, but
+  are not read by runtime context — no Context Compiler or provider
+  read path exists yet. All judgment tools remain local and
+  unregistered.
 
 **Stage 4** — Context Compiler: `current_operating_view`
 projection (DEC-036) and the Stage 4 Context Compiler that would
@@ -348,8 +350,9 @@ The 6-stage pipeline in `docs/JUDGMENT_SYSTEM.md` remains the
 architectural authority for the Judgment System direction
 (ADR-0009 … ADR-0013, DEC-037). Until a task explicitly
 authorizes a further Judgment runtime slice, do not wire the
-existing proposal, review, source-recording, evidence-linking,
-or commit surfaces into any runtime path.
+existing proposal, review, source-recording, evidence-linking, commit,
+query, explain, supersede, revoke, or expire surfaces into any runtime
+path.
 
 ## Failure / debug path (current)
 

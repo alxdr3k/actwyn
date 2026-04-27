@@ -419,7 +419,7 @@ to keep in mind:
 - A schema change is an architecture-level event for the affected
   table. If the table is new or its semantics change, add an ADR.
 
-## Judgment System schema (Phase 1A.6 — commit/activation + query/explain landed; runtime not wired)
+## Judgment System schema (Phase 1A.7 — retirement lifecycle landed; runtime not wired)
 
 The DB-native AI-first Judgment System direction defines a separate
 schema family. As of migration 004, **the five `judgment_*` tables
@@ -438,40 +438,51 @@ denormalized arrays on `judgment_items`). Phase 1A.5 added
 denormalized arrays, and appends a `judgment.committed` event.
 Phase 1A.6 added `queryJudgments` and `explainJudgment` as local
 read-only surfaces over judgment rows, evidence, sources, and events.
+Phase 1A.7 added `supersedeJudgment`, `revokeJudgment`, and
+`expireJudgment` as local write surfaces that retire `active/eligible`
+judgments into excluded states. `supersedeJudgment` inserts one
+`judgment_edges` row with `relation=supersedes`. None of these
+retirement operations make judgments context-visible.
 The tool contracts in `src/judgment/tool.ts` (`judgment.propose`,
 `judgment.approve`, `judgment.reject`, `judgment.record_source`,
 `judgment.link_evidence`, `judgment.commit`, `judgment.query`,
-`judgment.explain`) are not registered in any runtime module.
+`judgment.explain`, `judgment.supersede`, `judgment.revoke`,
+`judgment.expire`) are not registered in any runtime module.
 Query/explain are read-only: they do not append events and do not
-make judgments context-visible. No runtime context use, runtime
-extraction, Control Gate, or provider integration is wired. Names
-and constraints come from the Phase 0/0.5 design records that landed
-on `main` as ADR-0009 … ADR-0013 plus `docs/JUDGMENT_SYSTEM.md`
-(per DEC-037, that spec is a historical architectural record, not
-implementation authority).
+make judgments context-visible. Supersede/revoke/expire are local
+write transitions only and do not make rows context-visible.
+No runtime context use, runtime extraction, Control Gate, or provider
+integration is wired. Names and constraints come from the Phase 0/0.5
+design records that landed on `main` as ADR-0009 … ADR-0013 plus
+`docs/JUDGMENT_SYSTEM.md` (per DEC-037, that spec is a historical
+architectural record, not implementation authority).
 
 | Table                                        | Purpose                                                              | Status (2026-04-27)                                                          |
 | -------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | `judgment_sources`                           | Source of a judgment fragment (turn, attachment, external).          | schema implemented in migration 004; local unregistered writer: `src/judgment/repository.ts` via `recordJudgmentSource` (Phase 1A.4). Not runtime-wired. |
-| `judgment_items`                             | Atomic judgment rows (the Judgment System analogue of memory_items). | schema implemented in migration 004; writer: `src/judgment/repository.ts` for propose/approve/reject (Phase 1A.2/1A.3); `linkJudgmentEvidence` updates denormalized arrays (Phase 1A.4); `commitApprovedJudgment` sets lifecycle=active/activation=eligible/authority=user_confirmed (Phase 1A.5); `queryJudgments` / `explainJudgment` read rows locally without mutation (Phase 1A.6). Active/eligible rows exist in DB after commit; not read by runtime context. |
+| `judgment_items`                             | Atomic judgment rows (the Judgment System analogue of memory_items). | schema implemented in migration 004; writer: `src/judgment/repository.ts` for propose/approve/reject (Phase 1A.2/1A.3); `linkJudgmentEvidence` updates denormalized arrays (Phase 1A.4); `commitApprovedJudgment` sets lifecycle=active/activation=eligible/authority=user_confirmed (Phase 1A.5); `queryJudgments` / `explainJudgment` read rows locally without mutation (Phase 1A.6); `supersedeJudgment` / `revokeJudgment` / `expireJudgment` set activation=excluded on retirement (Phase 1A.7). Active/eligible and retired rows exist in DB; not read by runtime context. |
 | `judgment_evidence_links`                    | Links between judgments and supporting evidence rows.                | schema implemented in migration 004; local unregistered writer: `src/judgment/repository.ts` via `linkJudgmentEvidence` (Phase 1A.4). Not runtime-wired. |
-| `judgment_edges`                             | Typed relations between judgments (supports, contradicts, refines).  | schema implemented in migration 004; no runtime writer.                       |
-| `judgment_events`                            | Append-only event log for judgment lifecycle changes.                | schema implemented in migration 004; writer: `src/judgment/repository.ts` for `judgment.proposed` / `judgment.approved` / `judgment.rejected` / `judgment.source.recorded` / `judgment.evidence.linked` / `judgment.committed` events (Phase 1A.2/1A.3/1A.4/1A.5). |
+| `judgment_edges`                             | Typed relations between judgments (supports, contradicts, refines).  | schema implemented in migration 004; local writer: `src/judgment/repository.ts` via `supersedeJudgment` (Phase 1A.7); no runtime-wired writer. |
+| `judgment_events`                            | Append-only event log for judgment lifecycle changes.                | schema implemented in migration 004; writer: `src/judgment/repository.ts` for `judgment.proposed` / `judgment.approved` / `judgment.rejected` / `judgment.source.recorded` / `judgment.evidence.linked` / `judgment.committed` / `judgment.superseded` / `judgment.revoked` / `judgment.expired` events (Phase 1A.2/1A.3/1A.4/1A.5/1A.7). |
 | `judgment_items_fts`                         | FTS5 external-content index over `judgment_items.statement`.          | schema implemented in migration 004; sync triggers tested; populated by repository inserts. |
 | `control_gate_events` / `control_plane_events` | Control Gate decisions per query (table name itself is open per Phase 1A scope). | **planned** (`docs/JUDGMENT_SYSTEM.md` §Implementation Readiness; ADR-0012). |
 | `tensions`                                   | Telemetry for unresolved tension between judgments / sources.        | **planned** (`docs/JUDGMENT_SYSTEM.md` §Critique Lens + Tension Generalization; ADR-0013). |
 | `reflection_triage_events`                   | Reflection / triage outcomes feeding back into judgments.            | **planned** (`docs/JUDGMENT_SYSTEM.md` §Metacognitive Critique Loop; ADR-0012, ADR-0013). |
 
 For the implemented rows: `src/judgment/repository.ts` writes
-`judgment_items`, `judgment_sources`, `judgment_evidence_links`, and
-`judgment_events`. Phase 1A.2/1A.3 added proposal and review
-transitions. Phase 1A.4 added source recording and evidence linking.
-Phase 1A.5 added commit/activation. Phase 1A.6 added local read-only
-query/explain. Active/eligible rows can exist in DB after
-`commitApprovedJudgment`, and query/explain can read them locally,
-but they are not read by runtime context — no Context Compiler or
-provider integration exists. Query/explain do not append events. No
-Control Gate reads these tables. Do not migrate `memory_summaries` /
+`judgment_items`, `judgment_sources`, `judgment_evidence_links`,
+`judgment_edges`, and `judgment_events`. Phase 1A.2/1A.3 added
+proposal and review transitions. Phase 1A.4 added source recording
+and evidence linking. Phase 1A.5 added commit/activation. Phase 1A.6
+added local read-only query/explain. Phase 1A.7 added local retirement
+lifecycle (supersede/revoke/expire); `supersedeJudgment` is the only
+writer for `judgment_edges`. Active/eligible rows can exist in DB after
+`commitApprovedJudgment`, and query/explain can read them locally;
+retired rows (superseded/revoked/expired) also exist in DB. None of
+these rows are read by runtime context — no Context Compiler or
+provider integration exists. Query/explain do not append events.
+Supersede/revoke/expire do not make rows context-visible. No Control
+Gate reads these tables. Do not migrate `memory_summaries` /
 `memory_items` data into them — Q-027 stays open and ADR-0009 commits
 to the "분리" starting point.
 
