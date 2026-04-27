@@ -42,6 +42,7 @@ import {
 
 import {
   validateBoolean,
+  validateBoundedNonEmptyString,
   isProcedureSubtype,
   validateConfidenceLabel,
   validateEpistemicOrigin,
@@ -64,6 +65,17 @@ import {
   validateTrustLevel,
   type ValidationResult,
 } from "~/judgment/validators.ts";
+
+// ---------------------------------------------------------------
+// Phase 1A.6 — `statement_match` length cap.
+//
+// FTS5 phrase queries are bound parameters (no SQL injection), but a
+// caller can still pressure the FTS tokenizer / BM25 ranker / SQLite
+// allocator with extremely long inputs. 512 characters comfortably
+// accommodates a few search terms in any language while keeping the
+// per-query cost bounded.
+// ---------------------------------------------------------------
+const JUDGMENT_STATEMENT_MATCH_MAX_LENGTH = 512;
 
 // ---------------------------------------------------------------
 // Validation error
@@ -1800,17 +1812,25 @@ export interface JudgmentExplanation {
   superseded_by: string[];
 }
 
+// Internal normalized representation. Each filter is required-but-nullable
+// (`T | undefined`) rather than `?: T` because `normalizeQueryInput` builds
+// the object as a single literal and `exactOptionalPropertyTypes: true`
+// rejects assigning `undefined` to a `?:` field. Treating absence as an
+// explicit `undefined` is closer to how this struct is consumed: the
+// SQL builder always reads every field and emits a clause only when the
+// value is defined, so making the slot mandatory helps reviewers see at
+// a glance which fields the builder must consider.
 interface NormalizedQueryInput {
-  kinds?: string[];
-  lifecycle_statuses?: string[];
-  approval_states?: string[];
-  activation_states?: string[];
-  retention_states?: string[];
-  authority_sources?: string[];
-  confidences?: string[];
-  procedure_subtype?: string;
-  statement_match?: string;
-  scope_contains?: JsonObject;
+  kinds: string[] | undefined;
+  lifecycle_statuses: string[] | undefined;
+  approval_states: string[] | undefined;
+  activation_states: string[] | undefined;
+  retention_states: string[] | undefined;
+  authority_sources: string[] | undefined;
+  confidences: string[] | undefined;
+  procedure_subtype: string | undefined;
+  statement_match: string | undefined;
+  scope_contains: JsonObject | undefined;
   include_history: boolean;
   include_evidence: boolean;
   limit: number;
@@ -1871,6 +1891,16 @@ function normalizeEnumFilterSet(
 function normalizeQueryInput(input: QueryJudgmentsInput | undefined): NormalizedQueryInput {
   if (input === undefined) {
     return {
+      kinds: undefined,
+      lifecycle_statuses: undefined,
+      approval_states: undefined,
+      activation_states: undefined,
+      retention_states: undefined,
+      authority_sources: undefined,
+      confidences: undefined,
+      procedure_subtype: undefined,
+      statement_match: undefined,
+      scope_contains: undefined,
       include_history: false,
       include_evidence: false,
       limit: 20,
@@ -1902,8 +1932,15 @@ function normalizeQueryInput(input: QueryJudgmentsInput | undefined): Normalized
 
   let statementMatch: string | undefined;
   if (input.statement_match !== undefined) {
-    assertValid(validateNonEmptyString(input.statement_match, "statement_match"), "statement_match");
-    statementMatch = input.statement_match.trim();
+    assertValid(
+      validateBoundedNonEmptyString(
+        input.statement_match,
+        "statement_match",
+        JUDGMENT_STATEMENT_MATCH_MAX_LENGTH,
+      ),
+      "statement_match",
+    );
+    statementMatch = (input.statement_match as string).trim();
   }
 
   let scopeContains: JsonObject | undefined;

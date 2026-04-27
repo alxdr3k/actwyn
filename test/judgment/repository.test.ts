@@ -3168,12 +3168,34 @@ describe("queryJudgments — filters and validation", () => {
     expect(() =>
       queryJudgments(db, { kind: "banana" } as QueryJudgmentsInput),
     ).toThrow(JudgmentValidationError);
+
+    // Every singular/plural enum filter pair must reject simultaneous use.
+    // The implementation routes them through a generic helper, but we lock
+    // in regression coverage for each pair so a future refactor that
+    // accidentally exempts one filter cannot pass the suite.
+    const duplicatePairs: ReadonlyArray<Partial<QueryJudgmentsInput>> = [
+      { kind: "fact", kinds: ["decision"] },
+      { lifecycle_status: "active", lifecycle_statuses: ["proposed"] },
+      { approval_state: "approved", approval_states: ["pending"] },
+      { activation_state: "eligible", activation_states: ["history_only"] },
+      { retention_state: "normal", retention_states: ["archived"] },
+      { authority_source: "user_confirmed", authority_sources: ["none"] },
+      { confidence: "high", confidences: ["medium"] },
+    ];
+    for (const dup of duplicatePairs) {
+      expect(() => queryJudgments(db, dup)).toThrow(JudgmentValidationError);
+    }
+  });
+
+  test("statement_match enforces a length cap to bound FTS work", () => {
+    const longInput = "a".repeat(513);
     expect(() =>
-      queryJudgments(db, {
-        kind: "fact",
-        kinds: ["decision"],
-      }),
+      queryJudgments(db, { statement_match: longInput }),
     ).toThrow(JudgmentValidationError);
+
+    // 512-char input is still accepted (boundary is inclusive).
+    const atLimit = "x ".repeat(256).slice(0, 512);
+    expect(() => queryJudgments(db, { statement_match: atLimit })).not.toThrow();
   });
 
   test("statement_match uses FTS, does not inject, and handles dangerous syntax deterministically", () => {
@@ -3283,7 +3305,7 @@ describe("queryJudgments — filters and validation", () => {
     expect(result.items[0]!.scope).toEqual({ project: "actwyn", order: 2 });
     expect(Array.isArray(result.items[0]!.source_ids)).toBe(true);
     expect(Array.isArray(result.items[0]!.evidence_ids)).toBe(true);
-    expect("fts_rowid" in (result.items[0] as Record<string, unknown>)).toBe(false);
+    expect("fts_rowid" in (result.items[0]! as unknown as Record<string, unknown>)).toBe(false);
   });
 
   test("include_evidence=true includes compact evidence metadata and include_evidence=false omits it", () => {
@@ -3341,8 +3363,8 @@ describe("queryJudgments — filters and validation", () => {
       statement_match: "evidence rich row",
     });
     expect(withoutEvidence.items).toHaveLength(1);
-    expect("sources" in (withoutEvidence.items[0] as Record<string, unknown>)).toBe(false);
-    expect("evidence_links" in (withoutEvidence.items[0] as Record<string, unknown>)).toBe(false);
+    expect("sources" in (withoutEvidence.items[0]! as unknown as Record<string, unknown>)).toBe(false);
+    expect("evidence_links" in (withoutEvidence.items[0]! as unknown as Record<string, unknown>)).toBe(false);
   });
 });
 

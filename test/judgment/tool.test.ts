@@ -1122,12 +1122,18 @@ describe("static boundary — judgment tools not registered", () => {
 
   function checkDir(dirName: string): void {
     const dir = join(SRC_DIR, dirName);
-    let files: string[];
-    try {
-      files = readdirSync(dir).filter((f) => f.endsWith(".ts"));
-    } catch {
-      return; // directory may not exist in all environments
-    }
+    // Fail-loud: a missing directory or an empty directory means the
+    // boundary check is silently doing nothing. The judgment system
+    // explicitly enumerates these runtime directories (providers,
+    // context, memory, telegram, commands, queue/worker.ts, main.ts)
+    // as forbidden import sites. Any of them disappearing or being
+    // renamed must surface as a test failure so we re-evaluate the
+    // boundary, not as a green test.
+    const files = readdirSync(dir).filter((f) => f.endsWith(".ts"));
+    expect(
+      files.length,
+      `src/${dirName}/ must contain at least one .ts file for the boundary check to be meaningful`,
+    ).toBeGreaterThan(0);
     for (const file of files) {
       const content = readFileSync(join(dir, file), "utf-8");
       for (const pattern of TOOL_IMPORT_PATTERNS) {
