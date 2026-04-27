@@ -278,4 +278,17 @@ describe("validateJsonValue", () => {
     circ["self"] = circ;
     expect(validateJsonValue(circ).ok).toBe(false);
   });
+
+  test("rejects Date instance (serializes to string scalar, not object)", () => {
+    // new Date() → JSON.stringify → '"2024-..."' → JSON.parse → string scalar
+    expect(validateJsonValue(new Date()).ok).toBe(false);
+  });
+
+  test("rejects object whose toJSON() returns a scalar", () => {
+    // Objects with toJSON returning a primitive corrupt the stored column shape.
+    const scalarJson = {
+      toJSON() { return "scalar"; },
+    };
+    expect(validateJsonValue(scalarJson).ok).toBe(false);
+  });
 });

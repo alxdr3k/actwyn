@@ -252,20 +252,33 @@ export function validateStringArray(
 }
 
 /**
- * `v` must be a JSON-serializable object or array.
- * Used for metacognitive fields (`would_change_if`, `missing_evidence`,
- * `review_trigger`).
+ * `v` must be a JSON-serializable object or array, and must still be an
+ * object or array **after** serialization. This catches class instances such
+ * as `new Date()` (which serializes to a string scalar) and objects that
+ * override `toJSON()` to return a primitive — both would corrupt the stored
+ * column if accepted and then persisted.
  */
 export function validateJsonValue(v: unknown): ValidationResult {
   if (v === null || typeof v !== "object") {
     return { ok: false, reason: "value must be a JSON object or array" };
   }
+  let serialized: string;
   try {
-    JSON.stringify(v);
+    serialized = JSON.stringify(v);
   } catch (e) {
     return {
       ok: false,
       reason: `value cannot be serialized to JSON: ${(e as Error).message}`,
+    };
+  }
+  // Re-parse to verify the top-level shape is still an object or array.
+  // Class instances like Date serialize to a string scalar; objects with
+  // toJSON() returning a scalar would also fail here.
+  const reparsed = JSON.parse(serialized) as unknown;
+  if (reparsed === null || typeof reparsed !== "object") {
+    return {
+      ok: false,
+      reason: "value must serialize to a JSON object or array, not a scalar",
     };
   }
   return { ok: true };

@@ -323,6 +323,16 @@ describe("proposeJudgment — validation rejections", () => {
     assertRejectedBeforeInsert({ ...validInput, scope: new Date() as unknown as Record<string, unknown> });
   });
 
+  test("would_change_if = Date instance is rejected before DB insert", () => {
+    // Date serializes to a string scalar — would corrupt would_change_if_json shape.
+    assertRejectedBeforeInsert({ ...validInput, would_change_if: new Date() });
+  });
+
+  test("missing_evidence with toJSON() returning scalar is rejected before DB insert", () => {
+    const scalarJson = { toJSON() { return "scalar"; } };
+    assertRejectedBeforeInsert({ ...validInput, missing_evidence: scalarJson });
+  });
+
   test("optional timestamp field as non-string is rejected before DB insert", () => {
     // Ensures non-string observed_at causes JudgmentValidationError, not a raw TypeError
     // from the SQLite binding (which would bypass the documented error shape in tool.ts).
