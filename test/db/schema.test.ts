@@ -57,34 +57,36 @@ function hasTable(h: DbHandle, name: string): boolean {
 // ---------------------------------------------------------------
 
 describe("migrator — discovery + application", () => {
-  test("discovers 001_init + 002_artifacts + 003_notification_payload_text in order", () => {
+  test("discovers 001_init + 002_artifacts + 003_notification_payload_text + 004_judgment_skeleton in order", () => {
     const files = discoverMigrations(MIGRATIONS_DIR);
-    expect(files.map((f) => f.version)).toEqual([1, 2, 3]);
+    expect(files.map((f) => f.version)).toEqual([1, 2, 3, 4]);
     expect(files[0]!.slug).toBe("init");
     expect(files[1]!.slug).toBe("artifacts");
     expect(files[2]!.slug).toBe("notification_payload_text");
+    expect(files[3]!.slug).toBe("judgment_skeleton");
   });
 
-  test("fresh DB: applied = [1, 2, 3], skipped = []", () => {
+  test("fresh DB: applied = [1, 2, 3, 4], skipped = []", () => {
     const result = migrate(db, MIGRATIONS_DIR);
-    expect(result.applied).toEqual([1, 2, 3]);
+    expect(result.applied).toEqual([1, 2, 3, 4]);
     expect(result.skipped).toEqual([]);
-    expect(result.total).toBe(3);
+    expect(result.total).toBe(4);
   });
 
   test("re-running is a no-op", () => {
     migrate(db, MIGRATIONS_DIR);
     const second = migrate(db, MIGRATIONS_DIR);
     expect(second.applied).toEqual([]);
-    expect(second.skipped).toEqual([1, 2, 3]);
+    expect(second.skipped).toEqual([1, 2, 3, 4]);
   });
 
-  test("appliedVersions records 001, 002, and 003", () => {
+  test("appliedVersions records 001, 002, 003, and 004", () => {
     migrate(db, MIGRATIONS_DIR);
     const set = appliedVersions(db);
     expect(set.has(1)).toBe(true);
     expect(set.has(2)).toBe(true);
     expect(set.has(3)).toBe(true);
+    expect(set.has(4)).toBe(true);
   });
 });
 
@@ -126,6 +128,12 @@ describe("schema — Appendix D tables exist after migrate", () => {
     "memory_artifact_links",
     "allowed_users",
     "settings",
+    "judgment_sources",
+    "judgment_items",
+    "judgment_evidence_links",
+    "judgment_edges",
+    "judgment_events",
+    "judgment_items_fts",
   ];
 
   beforeEach(() => {
@@ -283,6 +291,60 @@ describe("schema — representative column coverage", () => {
       "confidence",
       "created_at",
     ],
+    judgment_sources: [
+      "id",
+      "kind",
+      "locator",
+      "trust_level",
+      "redacted",
+      "captured_at",
+    ],
+    judgment_items: [
+      "fts_rowid",
+      "id",
+      "kind",
+      "scope_json",
+      "statement",
+      "epistemic_origin",
+      "authority_source",
+      "approval_state",
+      "lifecycle_status",
+      "activation_state",
+      "retention_state",
+      "confidence",
+      "importance",
+      "decay_policy",
+      "ontology_version",
+      "schema_version",
+      "procedure_subtype",
+      "created_at",
+      "updated_at",
+    ],
+    judgment_evidence_links: [
+      "id",
+      "judgment_id",
+      "source_id",
+      "relation",
+      "span_locator",
+      "quote_excerpt",
+      "rationale",
+      "created_at",
+    ],
+    judgment_edges: [
+      "id",
+      "from_judgment_id",
+      "to_judgment_id",
+      "relation",
+      "created_at",
+    ],
+    judgment_events: [
+      "id",
+      "event_type",
+      "judgment_id",
+      "payload_json",
+      "actor",
+      "created_at",
+    ],
   };
 
   for (const [table, cols] of Object.entries(CASES)) {
@@ -315,10 +377,72 @@ describe("schema — required indices exist", () => {
     "idx_storage_objects_retention",
     "idx_turns_session_created",
     "idx_memory_items_session_status",
+    "idx_judgment_items_kind",
+    "idx_judgment_items_lifecycle_status",
+    "idx_judgment_items_activation_state",
+    "idx_judgment_items_retention_state",
+    "idx_judgment_items_authority_source",
+    "idx_judgment_items_approval_state",
+    "idx_judgment_items_created_at",
+    "idx_judgment_items_updated_at",
+    "idx_judgment_items_revisit_at",
+    "idx_judgment_sources_kind",
+    "idx_judgment_evidence_links_judgment",
+    "idx_judgment_evidence_links_source",
+    "idx_judgment_edges_from",
+    "idx_judgment_edges_to",
+    "idx_judgment_events_judgment",
+    "idx_judgment_events_created_at",
   ];
   for (const ix of INDICES) {
     test(`index ${ix} exists`, () => {
       expect(hasIndex(db, ix)).toBe(true);
     });
   }
+});
+
+// ---------------------------------------------------------------
+// judgment_items — id / fts_rowid invariants (review feedback)
+// ---------------------------------------------------------------
+
+describe("schema — judgment_items column invariants", () => {
+  beforeEach(() => {
+    migrate(db, MIGRATIONS_DIR);
+  });
+
+  test("fts_rowid is INTEGER PRIMARY KEY (rowid alias)", () => {
+    const cols = columns(db, "judgment_items");
+    const ftsRowid = cols.find((c) => c.name === "fts_rowid");
+    expect(ftsRowid).toBeDefined();
+    expect(ftsRowid!.type.toUpperCase()).toBe("INTEGER");
+    expect(ftsRowid!.pk).toBe(1);
+  });
+
+  test("id is TEXT NOT NULL with a UNIQUE index", () => {
+    const cols = columns(db, "judgment_items");
+    const id = cols.find((c) => c.name === "id");
+    expect(id).toBeDefined();
+    expect(id!.type.toUpperCase()).toBe("TEXT");
+    expect(id!.notnull).toBe(1);
+
+    // UNIQUE constraints surface as an auto-index on the column.
+    interface IdxRow {
+      name: string;
+      unique: number;
+    }
+    const idxs = db
+      .prepare<IdxRow, [string]>(`SELECT * FROM pragma_index_list(?)`)
+      .all("judgment_items");
+    const uniqueOnId = idxs.some((row) => {
+      if (row.unique !== 1) return false;
+      interface IdxColRow {
+        name: string;
+      }
+      const cols = db
+        .prepare<IdxColRow, [string]>(`SELECT * FROM pragma_index_info(?)`)
+        .all(row.name);
+      return cols.length === 1 && cols[0]!.name === "id";
+    });
+    expect(uniqueOnId).toBe(true);
+  });
 });
