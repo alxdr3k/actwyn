@@ -159,6 +159,9 @@ A short summary; the full file map lives in `docs/CODE_MAP.md`.
   `running` jobs (force `interrupted`, requeue if `safe_retry`, kill
   orphan PIDs); offset fast-forward; one-shot `storage_sync` for
   `failed` / `delete_failed` rows only.
+- `src/judgment/*` — Phase 1A types, validators, proposal-only
+  repository, and unregistered `judgment.propose` tool contract.
+  Not wired into any runtime module; see §Phase 1A below.
 
 ## Phase 1A current slice and planned architecture
 
@@ -177,37 +180,37 @@ registered in any runtime module.
 
 The DB-native AI-first Judgment System direction (ADR-0009 …
 ADR-0013, `docs/JUDGMENT_SYSTEM.md`) defines the following
-components. The pieces below remain **not implemented**:
+components. **Implemented** (Phase 1A.1 / 1A.2):
 
-- The Phase 1A schema skeleton (`judgment_sources`,
-  `judgment_items`, `judgment_evidence_links`, `judgment_edges`,
-  `judgment_events`) **is implemented** in migration 004.
-  `src/judgment/repository.ts` writes `judgment_items` and
-  `judgment_events` (proposal rows only). `judgment_sources`,
-  `judgment_evidence_links`, and `judgment_edges` have no runtime
-  writer yet.
+- **Schema skeleton** — `judgment_sources`, `judgment_items`,
+  `judgment_evidence_links`, `judgment_edges`, `judgment_events`,
+  `judgment_items_fts` in migration 004.
+- **Proposal-only repository** — `src/judgment/repository.ts`
+  (`proposeJudgment`). Writes `judgment_items` and
+  `judgment_events` only. Forces `lifecycle_status=proposed` /
+  `approval_state=pending` / `activation_state=history_only`.
+  `judgment_sources`, `judgment_evidence_links`, and
+  `judgment_edges` have no runtime writer yet.
+- **Unregistered typed-tool contract** — `src/judgment/tool.ts`
+  (`judgment.propose`). Not imported from any runtime module.
+
+**Not implemented** (Phase 1A.3+ and beyond):
+
 - `Control Gate` evaluators and the `control_gate_events` /
-  `control_plane_events` ledger (the table name choice between the
-  two is itself open per `docs/JUDGMENT_SYSTEM.md` §Implementation
-  Readiness) — **not implemented**.
+  `control_plane_events` ledger (table name open per
+  `docs/JUDGMENT_SYSTEM.md` §Implementation Readiness) — **not
+  implemented**.
 - `Tension` telemetry and the `tensions` table — **not
   implemented**.
 - `ReflectionTriageEvent` and the `reflection_triage_events` ledger
   — **not implemented**.
-- `current_operating_view` projection (DEC-036; supersedes the
-  earlier "current truth" framing) — **not implemented**.
-- Vector and graph derived projections (FTS5 first; vector / graph
-  deferred per ADR-0009) — **not implemented**.
-- `judgment.propose` **unregistered local contract** —
-  **implemented** in `src/judgment/tool.ts` (Phase 1A.2), but not
-  registered in any runtime surface. Further typed tools (`commit` /
-  `supersede` / `revoke` / `query` / `explain` / `link_evidence` /
-  `update_current_state`) and Critique Lens v0.1 integration
-  (ADR-0013) — **not implemented**.
-- **Proposal-only repository** `src/judgment/repository.ts` —
-  **implemented** (Phase 1A.2). Creates `proposed` / `pending` /
-  `history_only` rows only. No approval, activation, supersede, or
-  revoke write path exists yet.
+- `current_operating_view` projection (DEC-036) — **not
+  implemented**.
+- Vector and graph derived projections — **not implemented**.
+- Further typed tools (`commit` / `supersede` / `revoke` /
+  `query` / `explain` / `link_evidence` / `update_current_state`)
+  and Critique Lens v0.1 integration (ADR-0013) — **not
+  implemented**.
 - Provider / context / memory-promotion runtime integration —
   **not implemented**. The judgment tables are not read or written
   by `src/providers/*`, `src/context/*`, `src/queue/worker.ts`,
