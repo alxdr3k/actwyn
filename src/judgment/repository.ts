@@ -1,19 +1,15 @@
-// Personal Agent — Judgment System Phase 1A.2 proposal repository.
+// Personal Agent — Judgment System Phase 1A.2–1A.5 proposal/review/source/commit repository.
 //
-// Exposes a single narrow write surface:
-//   proposeJudgment(db, input, deps?) → ProposedJudgment
+// Write surfaces:
+//   proposeJudgment(db, input, deps?)           → ProposedJudgment    (Phase 1A.2)
+//   approveProposedJudgment(db, input, deps?)   → ReviewedJudgment    (Phase 1A.3)
+//   rejectProposedJudgment(db, input, deps?)    → ReviewedJudgment    (Phase 1A.3)
+//   recordJudgmentSource(db, input, deps?)      → RecordedSource      (Phase 1A.4)
+//   linkJudgmentEvidence(db, input, deps?)      → LinkedEvidence      (Phase 1A.4)
+//   commitApprovedJudgment(db, input, deps?)    → CommittedJudgment   (Phase 1A.5)
 //
-// Creates one `judgment_items` row + one `judgment_events` row in a
-// single `BEGIN IMMEDIATE` transaction. All inputs are validated
-// before any DB write.
-//
-// The inserted row is forced to:
-//   lifecycle_status = proposed
-//   approval_state   = pending
-//   activation_state = history_only  ← NOT the DB default ('eligible')
-//   retention_state  = normal
-//   authority_source = none
-//   decay_policy     = supersede_only
+// Each write creates/mutates rows in a single `BEGIN IMMEDIATE` transaction.
+// All inputs are validated before any DB write.
 //
 // Per ADR-0014 (P1 Bun boundary), this module has no `Bun` / `bun:*`
 // runtime import. `DbHandle` from `~/db.ts` is a type-only import
@@ -1164,6 +1160,288 @@ export function linkJudgmentEvidence(
       created_at: linkRow.created_at,
       event_type: "judgment.evidence.linked",
       event_id: eventId,
+    };
+  });
+}
+
+// ---------------------------------------------------------------
+// Phase 1A.5 — Commit / activation
+// ---------------------------------------------------------------
+
+export interface CommitInput {
+  judgment_id: string;
+  committer: string;
+  reason: string;
+  payload?: Record<string, unknown>;
+}
+
+export interface CommitDeps {
+  /** Override event ID generation for deterministic tests. */
+  newEventId?: () => string;
+  /** Override current timestamp for deterministic tests. Must return a string. */
+  nowIso?: () => string;
+  /**
+   * If set, throw this error after the judgment_items UPDATE but before the
+   * judgment_events INSERT. Used only in tests to verify rollback behavior.
+   */
+  _injectEventInsertError?: Error;
+}
+
+export interface CommittedJudgment {
+  id: string;
+  kind: JudgmentKind;
+  statement: string;
+  approval_state: ApprovalState;
+  lifecycle_status: LifecycleStatus;
+  activation_state: ActivationStateP05;
+  retention_state: RetentionState;
+  authority_source: AuthoritySourceP05;
+  updated_at: string;
+  event_type: "judgment.committed";
+  event_id: string;
+  evidence_link_ids: string[];
+  source_ids: string[];
+}
+
+export function commitApprovedJudgment(
+  db: DbHandle,
+  input: CommitInput,
+  deps: CommitDeps = {},
+): CommittedJudgment {
+  if (input === null || typeof input !== "object") {
+    throw new JudgmentValidationError("input must be a plain object");
+  }
+
+  assertValid(validateNonEmptyString(input.judgment_id, "judgment_id"), "judgment_id");
+  const judgment_id = input.judgment_id.trim();
+
+  assertValid(validateNonEmptyString(input.committer, "committer"), "committer");
+  const committer = input.committer.trim();
+
+  assertValid(validateNonEmptyString(input.reason, "reason"), "reason");
+  const reason = input.reason.trim();
+
+  let payloadJsonObj: Record<string, unknown> | undefined;
+  if (input.payload !== undefined) {
+    const payloadSerialized = serializeOnce(input.payload, "payload");
+    assertValid(validatePlainJsonObject(input.payload, "payload"), "payload");
+    const payloadReparsed = JSON.parse(payloadSerialized) as unknown;
+    if (
+      payloadReparsed === null ||
+      Array.isArray(payloadReparsed) ||
+      typeof payloadReparsed !== "object"
+    ) {
+      throw new JudgmentValidationError("payload must serialize to a plain JSON object", "payload");
+    }
+    payloadJsonObj = payloadReparsed as Record<string, unknown>;
+  }
+
+  const makeEventId = deps.newEventId ?? (() => crypto.randomUUID());
+  const eventId = makeEventId();
+
+  return db.tx(() => {
+    const existing = db
+      .prepare<
+        {
+          id: string;
+          kind: string;
+          statement: string;
+          lifecycle_status: string;
+          approval_state: string;
+          activation_state: string;
+          retention_state: string;
+          authority_source: string;
+          source_ids_json: string | null;
+          evidence_ids_json: string | null;
+        },
+        [string]
+      >(
+        `SELECT id, kind, statement, lifecycle_status, approval_state,
+                activation_state, retention_state, authority_source,
+                source_ids_json, evidence_ids_json
+         FROM judgment_items WHERE id = ?`,
+      )
+      .get(judgment_id);
+
+    if (!existing) {
+      throw new JudgmentNotFoundError(`judgment ${judgment_id} not found`, judgment_id);
+    }
+
+    // Only proposed/approved/history_only/normal judgments may be committed.
+    if (
+      existing.lifecycle_status !== "proposed" ||
+      existing.approval_state !== "approved" ||
+      existing.activation_state !== "history_only" ||
+      existing.retention_state !== "normal"
+    ) {
+      throw new JudgmentStateError(
+        `judgment ${judgment_id} cannot be committed: ` +
+          `lifecycle=${existing.lifecycle_status}, approval=${existing.approval_state}, ` +
+          `activation=${existing.activation_state}, retention=${existing.retention_state}`,
+        judgment_id,
+      );
+    }
+
+    // Validate denormalized JSON arrays if present — malformed arrays fail before any update.
+    if (existing.source_ids_json !== null) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(existing.source_ids_json);
+      } catch {
+        throw new JudgmentValidationError(
+          `judgment ${judgment_id} has malformed source_ids_json`,
+          "source_ids_json",
+        );
+      }
+      if (!Array.isArray(parsed)) {
+        throw new JudgmentValidationError(
+          `judgment ${judgment_id} source_ids_json must be a JSON array`,
+          "source_ids_json",
+        );
+      }
+    }
+
+    if (existing.evidence_ids_json !== null) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(existing.evidence_ids_json);
+      } catch {
+        throw new JudgmentValidationError(
+          `judgment ${judgment_id} has malformed evidence_ids_json`,
+          "evidence_ids_json",
+        );
+      }
+      if (!Array.isArray(parsed)) {
+        throw new JudgmentValidationError(
+          `judgment ${judgment_id} evidence_ids_json must be a JSON array`,
+          "evidence_ids_json",
+        );
+      }
+    }
+
+    // Compute canonical evidence links ordered by created_at, then id.
+    const evidenceLinkRows = db
+      .prepare<{ id: string; source_id: string }, [string]>(
+        `SELECT id, source_id FROM judgment_evidence_links
+         WHERE judgment_id = ?
+         ORDER BY created_at ASC, id ASC`,
+      )
+      .all(judgment_id);
+
+    if (evidenceLinkRows.length === 0) {
+      throw new JudgmentStateError(
+        `judgment ${judgment_id} cannot be committed: no evidence links exist`,
+        judgment_id,
+      );
+    }
+
+    // Collect canonical arrays: evidence_link_ids in link order,
+    // source_ids deduplicated preserving first-link order.
+    const evidenceLinkIds: string[] = [];
+    const sourceIds: string[] = [];
+    const seenSourceIds = new Set<string>();
+
+    for (const row of evidenceLinkRows) {
+      evidenceLinkIds.push(row.id);
+
+      // Verify every linked source exists.
+      const sourceExists = db
+        .prepare<{ id: string }, [string]>(`SELECT id FROM judgment_sources WHERE id = ?`)
+        .get(row.source_id);
+      if (!sourceExists) {
+        throw new JudgmentStateError(
+          `judgment ${judgment_id} has evidence link referencing missing source ${row.source_id}`,
+          judgment_id,
+        );
+      }
+
+      if (!seenSourceIds.has(row.source_id)) {
+        seenSourceIds.add(row.source_id);
+        sourceIds.push(row.source_id);
+      }
+    }
+
+    const nowIsoStr = deps.nowIso !== undefined ? deps.nowIso() : new Date().toISOString();
+    if (typeof nowIsoStr !== "string") {
+      throw new JudgmentValidationError("deps.nowIso must return a string");
+    }
+
+    // Sync canonical arrays and transition state atomically.
+    const updateResult = db
+      .prepare(
+        `UPDATE judgment_items
+         SET lifecycle_status   = 'active',
+             activation_state   = 'eligible',
+             authority_source   = 'user_confirmed',
+             source_ids_json    = $source_ids_json,
+             evidence_ids_json  = $evidence_ids_json,
+             updated_at         = $now
+         WHERE id               = $id
+           AND lifecycle_status  = 'proposed'
+           AND approval_state    = 'approved'
+           AND activation_state  = 'history_only'
+           AND retention_state   = 'normal'`,
+      )
+      .run({
+        source_ids_json: JSON.stringify(sourceIds),
+        evidence_ids_json: JSON.stringify(evidenceLinkIds),
+        now: nowIsoStr,
+        id: judgment_id,
+      } as never);
+
+    if ((updateResult as unknown as { changes: number }).changes === 0) {
+      throw new JudgmentStateError(
+        `judgment ${judgment_id} was modified concurrently; commit aborted`,
+        judgment_id,
+      );
+    }
+
+    if (deps._injectEventInsertError) {
+      throw deps._injectEventInsertError;
+    }
+
+    const eventPayload: Record<string, unknown> = {
+      judgment_id,
+      committer,
+      reason,
+      previous_lifecycle_status: existing.lifecycle_status,
+      new_lifecycle_status: "active",
+      previous_activation_state: existing.activation_state,
+      new_activation_state: "eligible",
+      previous_authority_source: existing.authority_source,
+      new_authority_source: "user_confirmed",
+      approval_state: existing.approval_state,
+      evidence_link_ids: evidenceLinkIds,
+      source_ids: sourceIds,
+    };
+    if (payloadJsonObj !== undefined) eventPayload.payload = payloadJsonObj;
+
+    db
+      .prepare(
+        `INSERT INTO judgment_events (id, event_type, judgment_id, payload_json, actor)
+         VALUES ($id, 'judgment.committed', $judgment_id, $payload_json, $actor)`,
+      )
+      .run({
+        id: eventId,
+        judgment_id,
+        payload_json: JSON.stringify(eventPayload),
+        actor: committer,
+      } as never);
+
+    return {
+      id: existing.id,
+      kind: existing.kind as JudgmentKind,
+      statement: existing.statement,
+      approval_state: existing.approval_state as ApprovalState,
+      lifecycle_status: "active",
+      activation_state: "eligible",
+      retention_state: existing.retention_state as RetentionState,
+      authority_source: "user_confirmed",
+      updated_at: nowIsoStr,
+      event_type: "judgment.committed",
+      event_id: eventId,
+      evidence_link_ids: evidenceLinkIds,
+      source_ids: sourceIds,
     };
   });
 }

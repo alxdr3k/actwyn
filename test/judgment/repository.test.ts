@@ -1,4 +1,4 @@
-// Judgment System Phase 1A.2 — proposal repository integration tests.
+// Judgment System Phase 1A.2–1A.5 — proposal/review/source/commit repository integration tests.
 //
 // Uses a real temp-file SQLite with all migrations applied (pattern from
 // test/db/judgment_schema.test.ts). No mocking of DB internals.
@@ -15,11 +15,13 @@ import {
   JudgmentStateError,
   JudgmentValidationError,
   approveProposedJudgment,
+  commitApprovedJudgment,
   linkJudgmentEvidence,
   proposeJudgment,
   recordJudgmentSource,
   rejectProposedJudgment,
   type ApproveInput,
+  type CommitInput,
   type EvidenceLinkInput,
   type ProposalInput,
   type RejectInput,
@@ -2135,5 +2137,535 @@ describe("linkJudgmentEvidence — rollback", () => {
       .get(j.id)!;
     expect(afterRow.source_ids_json).toEqual(beforeRow.source_ids_json);
     expect(afterRow.evidence_ids_json).toEqual(beforeRow.evidence_ids_json);
+  });
+});
+
+// ---------------------------------------------------------------
+// Phase 1A.5 — commitApprovedJudgment
+// ---------------------------------------------------------------
+
+function makeApprovedJudgmentWithEvidence() {
+  const j = proposeJudgment(db, validInput);
+  approveProposedJudgment(db, { judgment_id: j.id, reviewer: "approver" });
+  const s = makeSource();
+  const lnk = linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id });
+  return { j, s, lnk };
+}
+
+const validCommitInput: CommitInput = {
+  judgment_id: "placeholder",
+  committer: "committer",
+  reason: "ready for runtime",
+};
+
+describe("commitApprovedJudgment — success", () => {
+  test("commits an approved proposed/history_only/normal judgment with evidence link", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    const r = commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id });
+    expect(r.id).toBe(j.id);
+  });
+
+  test("commit sets lifecycle_status = active", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id });
+    expect(getFullItem(j.id)!.lifecycle_status).toBe("active");
+  });
+
+  test("commit sets activation_state = eligible", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id });
+    expect(getFullItem(j.id)!.activation_state).toBe("eligible");
+  });
+
+  test("commit keeps approval_state = approved", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id });
+    expect(getFullItem(j.id)!.approval_state).toBe("approved");
+  });
+
+  test("commit keeps retention_state = normal", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id });
+    expect(getFullItem(j.id)!.retention_state).toBe("normal");
+  });
+
+  test("commit sets authority_source = user_confirmed", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id });
+    expect(getFullItem(j.id)!.authority_source).toBe("user_confirmed");
+  });
+
+  test("commit updates updated_at", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    const before = getFullItem(j.id)!.updated_at;
+    const fixedNow = "2026-04-27T20:00:00.000Z";
+    commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }, { nowIso: () => fixedNow });
+    expect(getFullItem(j.id)!.updated_at).toBe(fixedNow);
+    expect(getFullItem(j.id)!.updated_at).not.toBe(before);
+  });
+
+  test("commit appends exactly one judgment.committed event", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    const beforeCount = countEvents(j.id);
+    commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id });
+    const events = getEvents(j.id);
+    const committedEvents = events.filter((e) => e.event_type === "judgment.committed");
+    expect(committedEvents.length).toBe(1);
+    expect(countEvents(j.id)).toBe(beforeCount + 1);
+  });
+
+  test("commit event payload_json is valid JSON", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    const r = commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id });
+    const eventRow = db
+      .prepare<{ payload_json: string }, [string]>(
+        `SELECT payload_json FROM judgment_events WHERE id = ?`,
+      )
+      .get(r.event_id)!;
+    expect(() => JSON.parse(eventRow.payload_json)).not.toThrow();
+  });
+
+  test("commit event payload includes required fields", () => {
+    const { j, lnk, s } = makeApprovedJudgmentWithEvidence();
+    const r = commitApprovedJudgment(db, {
+      ...validCommitInput,
+      judgment_id: j.id,
+      committer: "alice",
+      reason: "ready",
+    });
+    const eventRow = db
+      .prepare<{ payload_json: string }, [string]>(
+        `SELECT payload_json FROM judgment_events WHERE id = ?`,
+      )
+      .get(r.event_id)!;
+    const ep = JSON.parse(eventRow.payload_json) as Record<string, unknown>;
+    expect(ep.judgment_id).toBe(j.id);
+    expect(ep.committer).toBe("alice");
+    expect(ep.reason).toBe("ready");
+    expect(ep.previous_lifecycle_status).toBe("proposed");
+    expect(ep.new_lifecycle_status).toBe("active");
+    expect(ep.previous_activation_state).toBe("history_only");
+    expect(ep.new_activation_state).toBe("eligible");
+    expect(ep.previous_authority_source).toBe("none");
+    expect(ep.new_authority_source).toBe("user_confirmed");
+    expect(ep.approval_state).toBe("approved");
+    expect(Array.isArray(ep.evidence_link_ids)).toBe(true);
+    expect((ep.evidence_link_ids as string[]).includes(lnk.id)).toBe(true);
+    expect(Array.isArray(ep.source_ids)).toBe(true);
+    expect((ep.source_ids as string[]).includes(s.id)).toBe(true);
+  });
+
+  test("commit trims committer", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    const r = commitApprovedJudgment(db, {
+      ...validCommitInput,
+      judgment_id: j.id,
+      committer: "  alice  ",
+    });
+    expect(r.event_id).toBeTruthy();
+    const eventRow = db
+      .prepare<{ actor: string }, [string]>(
+        `SELECT actor FROM judgment_events WHERE id = ?`,
+      )
+      .get(r.event_id)!;
+    expect(eventRow.actor).toBe("alice");
+  });
+
+  test("commit trims reason", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    const r = commitApprovedJudgment(db, {
+      ...validCommitInput,
+      judgment_id: j.id,
+      reason: "  my reason  ",
+    });
+    const eventRow = db
+      .prepare<{ payload_json: string }, [string]>(
+        `SELECT payload_json FROM judgment_events WHERE id = ?`,
+      )
+      .get(r.event_id)!;
+    const ep = JSON.parse(eventRow.payload_json) as Record<string, unknown>;
+    expect(ep.reason).toBe("my reason");
+  });
+
+  test("commit with optional payload stores it in event payload", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    const r = commitApprovedJudgment(db, {
+      ...validCommitInput,
+      judgment_id: j.id,
+      payload: { context: "manual review" },
+    });
+    const eventRow = db
+      .prepare<{ payload_json: string }, [string]>(
+        `SELECT payload_json FROM judgment_events WHERE id = ?`,
+      )
+      .get(r.event_id)!;
+    const ep = JSON.parse(eventRow.payload_json) as Record<string, unknown>;
+    expect(ep.payload).toEqual({ context: "manual review" });
+  });
+
+  test("commit returns canonical evidence_link_ids and source_ids", () => {
+    const { j, lnk, s } = makeApprovedJudgmentWithEvidence();
+    const r = commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id });
+    expect(r.evidence_link_ids).toContain(lnk.id);
+    expect(r.source_ids).toContain(s.id);
+  });
+
+  test("commit syncs source_ids_json and evidence_ids_json to canonical arrays", () => {
+    const { j, lnk, s } = makeApprovedJudgmentWithEvidence();
+    commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id });
+    const row = db
+      .prepare<{ source_ids_json: string; evidence_ids_json: string }, [string]>(
+        `SELECT source_ids_json, evidence_ids_json FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!;
+    expect(JSON.parse(row.source_ids_json)).toContain(s.id);
+    expect(JSON.parse(row.evidence_ids_json)).toContain(lnk.id);
+  });
+
+  test("commit result event_type is judgment.committed", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    const r = commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id });
+    expect(r.event_type).toBe("judgment.committed");
+  });
+
+  test("commit result includes lifecycle_status active, activation_state eligible, authority_source user_confirmed", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    const r = commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id });
+    expect(r.lifecycle_status).toBe("active");
+    expect(r.activation_state).toBe("eligible");
+    expect(r.authority_source).toBe("user_confirmed");
+  });
+
+  test("commit with multiple evidence links returns all link ids", () => {
+    const j = proposeJudgment(db, validInput);
+    approveProposedJudgment(db, { judgment_id: j.id, reviewer: "approver" });
+    const s1 = makeSource();
+    const s2 = recordJudgmentSource(db, { kind: "external_url", locator: "https://b.example.com" });
+    const lnk1 = linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s1.id });
+    const lnk2 = linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s2.id });
+    const r = commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id });
+    expect(r.evidence_link_ids).toContain(lnk1.id);
+    expect(r.evidence_link_ids).toContain(lnk2.id);
+    expect(r.source_ids).toContain(s1.id);
+    expect(r.source_ids).toContain(s2.id);
+  });
+});
+
+describe("commitApprovedJudgment — invalid state", () => {
+  test("missing judgment returns JudgmentNotFoundError", () => {
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: "nonexistent-j" }),
+    ).toThrow(JudgmentNotFoundError);
+  });
+
+  test("pending judgment fails with JudgmentStateError", () => {
+    const j = makeProposedJudgment();
+    const s = makeSource();
+    linkJudgmentEvidence(db, { ...validLinkInput, judgment_id: j.id, source_id: s.id });
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("rejected judgment fails with JudgmentStateError", () => {
+    const j = proposeJudgment(db, validInput);
+    rejectProposedJudgment(db, { judgment_id: j.id, reviewer: "reviewer", reason: "bad" });
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("already active judgment fails with JudgmentStateError and appends no second event", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id });
+    const eventsBefore = countEvents(j.id);
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }),
+    ).toThrow(JudgmentStateError);
+    expect(countEvents(j.id)).toBe(eventsBefore);
+  });
+
+  test("revoked (excluded activation) judgment fails with JudgmentStateError", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    forceState(j.id, { lifecycle_status: "revoked", activation_state: "excluded" });
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("superseded judgment fails with JudgmentStateError", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    forceState(j.id, { lifecycle_status: "superseded", activation_state: "excluded" });
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("expired judgment fails with JudgmentStateError", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    forceState(j.id, { lifecycle_status: "expired", activation_state: "excluded" });
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("archived judgment fails with JudgmentStateError", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET retention_state = 'archived' WHERE id = ?`).run(j.id);
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("deleted judgment fails with JudgmentStateError", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET retention_state = 'deleted' WHERE id = ?`).run(j.id);
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("approved proposed/history_only/normal judgment with no evidence link fails with JudgmentStateError", () => {
+    const j = proposeJudgment(db, validInput);
+    approveProposedJudgment(db, { judgment_id: j.id, reviewer: "approver" });
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("failed commit does not change lifecycle_status", () => {
+    const j = makeProposedJudgment();
+    try {
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id });
+    } catch {
+      // expected
+    }
+    expect(getFullItem(j.id)!.lifecycle_status).toBe("proposed");
+  });
+
+  test("failed commit does not change activation_state", () => {
+    const j = makeProposedJudgment();
+    try {
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id });
+    } catch {
+      // expected
+    }
+    expect(getFullItem(j.id)!.activation_state).toBe("history_only");
+  });
+
+  test("failed commit does not change authority_source", () => {
+    const j = makeProposedJudgment();
+    try {
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id });
+    } catch {
+      // expected
+    }
+    expect(getFullItem(j.id)!.authority_source).toBe("none");
+  });
+
+  test("failed commit does not append judgment.committed event", () => {
+    const j = makeProposedJudgment();
+    const before = countEvents(j.id);
+    try {
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id });
+    } catch {
+      // expected
+    }
+    expect(countEvents(j.id)).toBe(before);
+  });
+
+  test("approved judgment with non-array source_ids_json fails before update", () => {
+    // DB json_valid() passes for any valid JSON; 42 is valid JSON but not an array.
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET source_ids_json = '42' WHERE id = ?`).run(j.id);
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }),
+    ).toThrow(JudgmentValidationError);
+    expect(getFullItem(j.id)!.lifecycle_status).toBe("proposed");
+  });
+
+  test("approved judgment with non-array evidence_ids_json fails before update", () => {
+    // DB json_valid() passes for any valid JSON; "\"bad\"" is valid JSON but not an array.
+    const { j } = makeApprovedJudgmentWithEvidence();
+    db.prepare(`UPDATE judgment_items SET evidence_ids_json = '"not-an-array"' WHERE id = ?`).run(j.id);
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id }),
+    ).toThrow(JudgmentValidationError);
+    expect(getFullItem(j.id)!.lifecycle_status).toBe("proposed");
+  });
+
+  test("failed commit does not mutate denormalized arrays when state check fails", () => {
+    const j = makeProposedJudgment();
+    const beforeRow = db
+      .prepare<{ source_ids_json: string | null; evidence_ids_json: string | null }, [string]>(
+        `SELECT source_ids_json, evidence_ids_json FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!;
+    try {
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: j.id });
+    } catch {
+      // expected
+    }
+    const afterRow = db
+      .prepare<{ source_ids_json: string | null; evidence_ids_json: string | null }, [string]>(
+        `SELECT source_ids_json, evidence_ids_json FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!;
+    expect(afterRow.source_ids_json).toEqual(beforeRow.source_ids_json);
+    expect(afterRow.evidence_ids_json).toEqual(beforeRow.evidence_ids_json);
+  });
+});
+
+describe("commitApprovedJudgment — transaction rollback", () => {
+  test("if event insert fails, lifecycle_status rolls back", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    expect(() =>
+      commitApprovedJudgment(
+        db,
+        { ...validCommitInput, judgment_id: j.id },
+        { _injectEventInsertError: new Error("forced event failure") },
+      ),
+    ).toThrow("forced event failure");
+    expect(getFullItem(j.id)!.lifecycle_status).toBe("proposed");
+  });
+
+  test("if event insert fails, activation_state rolls back", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    expect(() =>
+      commitApprovedJudgment(
+        db,
+        { ...validCommitInput, judgment_id: j.id },
+        { _injectEventInsertError: new Error("forced") },
+      ),
+    ).toThrow("forced");
+    expect(getFullItem(j.id)!.activation_state).toBe("history_only");
+  });
+
+  test("if event insert fails, authority_source rolls back", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    expect(() =>
+      commitApprovedJudgment(
+        db,
+        { ...validCommitInput, judgment_id: j.id },
+        { _injectEventInsertError: new Error("forced") },
+      ),
+    ).toThrow("forced");
+    expect(getFullItem(j.id)!.authority_source).toBe("none");
+  });
+
+  test("if event insert fails, denormalized arrays roll back", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    const beforeRow = db
+      .prepare<{ source_ids_json: string | null; evidence_ids_json: string | null }, [string]>(
+        `SELECT source_ids_json, evidence_ids_json FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!;
+    expect(() =>
+      commitApprovedJudgment(
+        db,
+        { ...validCommitInput, judgment_id: j.id },
+        { _injectEventInsertError: new Error("forced") },
+      ),
+    ).toThrow("forced");
+    const afterRow = db
+      .prepare<{ source_ids_json: string | null; evidence_ids_json: string | null }, [string]>(
+        `SELECT source_ids_json, evidence_ids_json FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!;
+    expect(afterRow.source_ids_json).toEqual(beforeRow.source_ids_json);
+    expect(afterRow.evidence_ids_json).toEqual(beforeRow.evidence_ids_json);
+  });
+
+  test("if event insert fails, no judgment.committed event is appended", () => {
+    const { j } = makeApprovedJudgmentWithEvidence();
+    const before = countEvents(j.id);
+    expect(() =>
+      commitApprovedJudgment(
+        db,
+        { ...validCommitInput, judgment_id: j.id },
+        { _injectEventInsertError: new Error("forced") },
+      ),
+    ).toThrow("forced");
+    expect(countEvents(j.id)).toBe(before);
+  });
+});
+
+describe("commitApprovedJudgment — validation rejections", () => {
+  test("empty judgment_id is rejected", () => {
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: "" }),
+    ).toThrow(JudgmentValidationError);
+  });
+
+  test("whitespace-only judgment_id is rejected", () => {
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, judgment_id: "   " }),
+    ).toThrow(JudgmentValidationError);
+  });
+
+  test("empty committer is rejected", () => {
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, committer: "" }),
+    ).toThrow(JudgmentValidationError);
+  });
+
+  test("whitespace-only committer is rejected", () => {
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, committer: "  " }),
+    ).toThrow(JudgmentValidationError);
+  });
+
+  test("empty reason is rejected", () => {
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, reason: "" }),
+    ).toThrow(JudgmentValidationError);
+  });
+
+  test("whitespace-only reason is rejected", () => {
+    expect(() =>
+      commitApprovedJudgment(db, { ...validCommitInput, reason: "\t\n" }),
+    ).toThrow(JudgmentValidationError);
+  });
+
+  test("null payload is rejected", () => {
+    expect(() =>
+      commitApprovedJudgment(db, {
+        ...validCommitInput,
+        payload: null as unknown as Record<string, unknown>,
+      }),
+    ).toThrow(JudgmentValidationError);
+  });
+
+  test("array payload is rejected", () => {
+    expect(() =>
+      commitApprovedJudgment(db, {
+        ...validCommitInput,
+        payload: [] as unknown as Record<string, unknown>,
+      }),
+    ).toThrow(JudgmentValidationError);
+  });
+
+  test("primitive payload is rejected", () => {
+    expect(() =>
+      commitApprovedJudgment(db, {
+        ...validCommitInput,
+        payload: "string" as unknown as Record<string, unknown>,
+      }),
+    ).toThrow(JudgmentValidationError);
+  });
+
+  test("class instance payload is rejected", () => {
+    expect(() =>
+      commitApprovedJudgment(db, {
+        ...validCommitInput,
+        payload: new Date() as unknown as Record<string, unknown>,
+      }),
+    ).toThrow(JudgmentValidationError);
+  });
+
+  test("null input throws JudgmentValidationError", () => {
+    expect(() =>
+      commitApprovedJudgment(db, null as unknown as CommitInput),
+    ).toThrow(JudgmentValidationError);
   });
 });

@@ -170,7 +170,7 @@ Attaches meaning to an artifact.
 - `relation_type ∈ { evidence, attachment, generated_output, reference, source }`.
 - CHECK requires `memory_summary_id` or `turn_id` to be non-null.
 
-### `judgment_*` (Phase 1A — schema + proposal + review + source/evidence repository)
+### `judgment_*` (Phase 1A — schema + proposal + review + source/evidence + commit/activation repository)
 
 Migration 004 (`migrations/004_judgment_skeleton.sql`) added the
 following tables and an FTS5 virtual table per ADR-0009 ..
@@ -178,7 +178,7 @@ ADR-0013 and `docs/JUDGMENT_SYSTEM.md`.
 
 `src/judgment/repository.ts` is the **sole writer** for
 `judgment_items`, `judgment_sources`, `judgment_evidence_links`,
-and `judgment_events`. It supports five operations:
+and `judgment_events`. It supports six operations:
 - **Proposal-only insert** (`proposeJudgment`) — creates rows with
   `lifecycle_status=proposed` / `approval_state=pending` /
   `activation_state=history_only`.
@@ -202,17 +202,31 @@ and `judgment_events`. It supports five operations:
   commit a judgment.** Only links judgments with
   `retention_state = normal`; archived or deleted judgments cannot
   receive evidence links through the repository.
+- **Commit / activation** (`commitApprovedJudgment`) — requires
+  `lifecycle_status=proposed`, `approval_state=approved`,
+  `activation_state=history_only`, `retention_state=normal`, and at
+  least one row in `judgment_evidence_links`. Sets
+  `lifecycle_status=active`, `activation_state=eligible`,
+  `authority_source=user_confirmed`. Syncs `source_ids_json` /
+  `evidence_ids_json` to canonical arrays from `judgment_evidence_links`.
+  Appends a `judgment.committed` event. **This is a local,
+  unregistered operation. Active/eligible rows are not read by
+  runtime context — no Context Compiler or provider integration
+  exists yet.**
 
-No active/eligible/context-visible judgment write path exists yet.
-No activation workflow, supersede, revoke, or expire write path
-exists. The `src/judgment/tool.ts` typed-tool contracts
-(`judgment.propose`, `judgment.approve`, `judgment.reject`,
-`judgment.record_source`, `judgment.link_evidence`) wrap the
-repository but are not registered in any runtime module.
+The `src/judgment/tool.ts` typed-tool contracts (`judgment.propose`,
+`judgment.approve`, `judgment.reject`, `judgment.record_source`,
+`judgment.link_evidence`, `judgment.commit`) wrap the repository but
+are not registered in any runtime module.
 
-Evidence linking does not activate or approve judgments. Linked
-evidence does not make a judgment context-visible.
+Commit requires approval and at least one evidence link. It sets
+`lifecycle_status=active` / `activation_state=eligible` /
+`authority_source=user_confirmed`. Active/eligible rows exist in DB
+after commit but are not read by runtime context. No Context
+Compiler exists yet. No provider prompt integration exists yet.
+No Telegram command for commit exists yet.
 
+No supersede, revoke, expire, query, or explain write path exists.
 No Control Gate or Context Compiler reads from these tables. Future
 runtime writers must route through `src/judgment/repository.ts` (or
 a successor) per the single-writer policy.
@@ -315,9 +329,10 @@ reasoning.
 | `judgment_items` (approve transition) | `src/judgment/repository.ts` (`approveProposedJudgment`) — sets `approval_state=approved` only. Does not activate. |
 | `judgment_items` (reject transition)  | `src/judgment/repository.ts` (`rejectProposedJudgment`) — sets `approval_state=rejected` / `lifecycle_status=rejected` / `activation_state=excluded`. |
 | `judgment_items` (evidence arrays)    | `src/judgment/repository.ts` (`linkJudgmentEvidence`) — updates `source_ids_json` / `evidence_ids_json` denormalized arrays only. No activation. |
+| `judgment_items` (commit transition)  | `src/judgment/repository.ts` (`commitApprovedJudgment`) — sets `lifecycle_status=active` / `activation_state=eligible` / `authority_source=user_confirmed`, syncs denormalized arrays. Local unregistered. Active/eligible rows not read by runtime context. |
 | `judgment_sources` (insert)           | `src/judgment/repository.ts` (`recordJudgmentSource`) — local unregistered writer. No runtime path. |
 | `judgment_evidence_links` (insert)    | `src/judgment/repository.ts` (`linkJudgmentEvidence`) — local unregistered writer. No runtime path. |
-| `judgment_events` (insert)            | `src/judgment/repository.ts` — `judgment.proposed`, `judgment.approved`, `judgment.rejected`, `judgment.source.recorded`, `judgment.evidence.linked` events only. |
+| `judgment_events` (insert)            | `src/judgment/repository.ts` — `judgment.proposed`, `judgment.approved`, `judgment.rejected`, `judgment.source.recorded`, `judgment.evidence.linked`, `judgment.committed` events only. |
 
 ## Cross-table invariants
 

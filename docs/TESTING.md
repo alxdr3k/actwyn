@@ -97,8 +97,8 @@ Migration shape is asserted by:
 - `src/db/migrator.ts` — refuses missing prior versions at runtime,
   records applied versions in `settings`.
 
-Judgment System proposal, review, source-recording, and
-evidence-linking surface tests (Phase 1A.2/1A.3/1A.4) live under:
+Judgment System proposal, review, source-recording, evidence-linking,
+and commit surface tests (Phase 1A.2/1A.3/1A.4/1A.5) live under:
 
 - `test/judgment/validators.test.ts` — pure-TS validator behavior
   including `validateNonEmptyString` / `validatePlainJsonObject` /
@@ -112,15 +112,18 @@ evidence-linking surface tests (Phase 1A.2/1A.3/1A.4) live under:
   rollback; `linkJudgmentEvidence` insert, state guards (including
   non-normal `retention_state` — archived/deleted target judgments
   fail with `JudgmentStateError` and no side effects), trimming,
-  event, denormalized JSON array updates, rollback (Phase 1A.3/1A.4).
+  event, denormalized JSON array updates, rollback;
+  `commitApprovedJudgment` success (state transition, event payload,
+  evidence requirement, denormalized array sync), invalid state guards,
+  validation rejections, transaction rollback (Phase 1A.3/1A.4/1A.5).
 - `test/judgment/tool.test.ts` — `executeJudgmentProposeTool` /
   `executeJudgmentApproveTool` / `executeJudgmentRejectTool` /
   `executeJudgmentRecordSourceTool` /
-  `executeJudgmentLinkEvidenceTool` contracts + static boundary
-  assertions (no bun:* import in `src/judgment/*`; tools not
-  imported by runtime modules); `invalid_state` coverage for
-  archived/deleted target judgments in `executeJudgmentLinkEvidenceTool`
-  (Phase 1A.3/1A.4).
+  `executeJudgmentLinkEvidenceTool` / `executeJudgmentCommitTool`
+  contracts + static boundary assertions (no bun:* import in
+  `src/judgment/*`; tools not imported by runtime modules);
+  `invalid_state` coverage for archived/deleted target judgments in
+  `executeJudgmentLinkEvidenceTool` (Phase 1A.3/1A.4/1A.5).
 
 When you add a migration:
 
