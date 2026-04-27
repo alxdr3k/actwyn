@@ -243,6 +243,35 @@ export function validateScopeObject(v: unknown): ValidationResult {
   return { ok: true };
 }
 
+/**
+ * Verify a string array stays a JSON array after serialization.
+ * An array with a custom `toJSON()` (e.g. `toJSON() { return undefined; }`)
+ * would cause `JSON.stringify` to return `undefined` or a scalar, silently
+ * dropping the column value or corrupting its shape in SQLite.
+ * Call this after `validateStringArray` has confirmed element types.
+ */
+export function validateStringArraySerialization(
+  v: string[],
+  fieldName: string,
+): ValidationResult {
+  let serialized: string | undefined;
+  try {
+    serialized = JSON.stringify(v);
+  } catch (e) {
+    return {
+      ok: false,
+      reason: `${fieldName} cannot be serialized to JSON: ${(e as Error).message}`,
+    };
+  }
+  if (typeof serialized !== "string") {
+    return { ok: false, reason: `${fieldName} cannot be serialized to a JSON string` };
+  }
+  if (!Array.isArray(JSON.parse(serialized) as unknown)) {
+    return { ok: false, reason: `${fieldName} must serialize to a JSON array` };
+  }
+  return { ok: true };
+}
+
 /** Every element must be a non-empty string. */
 export function validateStringArray(
   v: unknown,

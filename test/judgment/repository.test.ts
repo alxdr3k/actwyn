@@ -334,6 +334,16 @@ describe("proposeJudgment — validation rejections", () => {
     assertRejectedBeforeInsert({ ...validInput, scope: scalarJson });
   });
 
+  test("source_ids with toJSON() returning undefined is rejected before DB insert", () => {
+    const arr = Object.assign(["s1"], { toJSON() { return undefined; } });
+    assertRejectedBeforeInsert({ ...validInput, source_ids: arr });
+  });
+
+  test("evidence_ids with toJSON() returning scalar is rejected before DB insert", () => {
+    const arr = Object.assign(["e1"], { toJSON() { return "scalar"; } });
+    assertRejectedBeforeInsert({ ...validInput, evidence_ids: arr });
+  });
+
   test("would_change_if = Date instance is rejected before DB insert", () => {
     // Date serializes to a string scalar — would corrupt would_change_if_json shape.
     assertRejectedBeforeInsert({ ...validInput, would_change_if: new Date() });

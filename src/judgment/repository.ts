@@ -41,6 +41,7 @@ import {
   validateScopeObject,
   validateStatement,
   validateStringArray,
+  validateStringArraySerialization,
   type ValidationResult,
 } from "~/judgment/validators.ts";
 
@@ -170,9 +171,11 @@ export function proposeJudgment(
 
   if (input.source_ids !== undefined) {
     assertValid(validateStringArray(input.source_ids, "source_ids"), "source_ids");
+    assertValid(validateStringArraySerialization(input.source_ids, "source_ids"), "source_ids");
   }
   if (input.evidence_ids !== undefined) {
     assertValid(validateStringArray(input.evidence_ids, "evidence_ids"), "evidence_ids");
+    assertValid(validateStringArraySerialization(input.evidence_ids, "evidence_ids"), "evidence_ids");
   }
   if (input.would_change_if !== undefined) {
     assertValid(validateJsonValue(input.would_change_if), "would_change_if");

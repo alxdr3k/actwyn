@@ -22,6 +22,7 @@ import {
   validateScopeObject,
   validateStatement,
   validateStringArray,
+  validateStringArraySerialization,
 } from "../../src/judgment/validators.ts";
 
 describe("type guards", () => {
@@ -262,6 +263,28 @@ describe("validateStringArray", () => {
   test("rejects array with non-string element", () => {
     expect(validateStringArray([1, 2], "ids").ok).toBe(false);
     expect(validateStringArray([null], "ids").ok).toBe(false);
+  });
+});
+
+describe("validateStringArraySerialization", () => {
+  test("accepts normal string array", () => {
+    expect(validateStringArraySerialization(["a", "b"], "ids").ok).toBe(true);
+    expect(validateStringArraySerialization([], "ids").ok).toBe(true);
+  });
+
+  test("rejects array whose toJSON() returns undefined", () => {
+    const arr = Object.assign(["s1"], { toJSON() { return undefined; } });
+    expect(validateStringArraySerialization(arr, "ids").ok).toBe(false);
+  });
+
+  test("rejects array whose toJSON() returns a scalar", () => {
+    const arr = Object.assign(["s1"], { toJSON() { return "scalar"; } });
+    expect(validateStringArraySerialization(arr, "ids").ok).toBe(false);
+  });
+
+  test("rejects array whose toJSON() returns an object (not array)", () => {
+    const arr = Object.assign(["s1"], { toJSON() { return { hijacked: true }; } });
+    expect(validateStringArraySerialization(arr, "ids").ok).toBe(false);
   });
 });
 
