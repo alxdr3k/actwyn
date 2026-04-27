@@ -1229,6 +1229,12 @@ describe("executeJudgmentSupersedeTool — error path", () => {
     const rowAfter = db.prepare<{ lifecycle_status: string }, [string]>("SELECT lifecycle_status FROM judgment_items WHERE id = ?").get(j.id)!;
     expect(rowAfter.lifecycle_status).toBe(rowBefore.lifecycle_status);
   });
+
+  test("failed supersede does not append events", () => {
+    const eventsBefore = db.prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_events").get()!.n;
+    executeJudgmentSupersedeTool(db, { old_judgment_id: "bad", replacement_judgment_id: "worse", actor: "a", reason: "r" });
+    expect(db.prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_events").get()!.n).toBe(eventsBefore);
+  });
 });
 
 describe("executeJudgmentRevokeTool — happy path", () => {

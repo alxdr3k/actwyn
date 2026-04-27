@@ -4341,6 +4341,151 @@ describe("expireJudgment — transaction rollback", () => {
 });
 
 // ---------------------------------------------------------------
+// Phase 1A.7 — archived/deleted retention_state guards
+// ---------------------------------------------------------------
+
+describe("supersedeJudgment — archived/deleted retention guard", () => {
+  test("old archived judgment fails invalid_state", () => {
+    const old = makeCommittedJudgment({ statement: "old-archived-sup" });
+    const rep = makeCommittedJudgment({ statement: "rep-for-archived-sup" });
+    forceState(old.proposed.id, { retention_state: "archived" });
+    expect(() =>
+      supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" }),
+    ).toThrow(JudgmentStateError);
+  });
+
+  test("old deleted judgment fails invalid_state", () => {
+    const old = makeCommittedJudgment({ statement: "old-deleted-sup" });
+    const rep = makeCommittedJudgment({ statement: "rep-for-deleted-sup" });
+    forceState(old.proposed.id, { retention_state: "deleted" });
+    expect(() =>
+      supersedeJudgment(db, { old_judgment_id: old.proposed.id, replacement_judgment_id: rep.proposed.id, actor: "a", reason: "r" }),
+    ).toThrow(JudgmentStateError);
+  });
+});
+
+describe("revokeJudgment — archived/deleted retention guard", () => {
+  test("archived judgment fails invalid_state", () => {
+    const j = makeCommittedJudgment({ statement: "revoke-archived" });
+    forceState(j.proposed.id, { retention_state: "archived" });
+    expect(() => revokeJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" })).toThrow(JudgmentStateError);
+  });
+
+  test("deleted judgment fails invalid_state", () => {
+    const j = makeCommittedJudgment({ statement: "revoke-deleted" });
+    forceState(j.proposed.id, { retention_state: "deleted" });
+    expect(() => revokeJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" })).toThrow(JudgmentStateError);
+  });
+});
+
+describe("expireJudgment — archived/deleted retention guard", () => {
+  test("archived judgment fails invalid_state", () => {
+    const j = makeCommittedJudgment({ statement: "expire-archived" });
+    forceState(j.proposed.id, { retention_state: "archived" });
+    expect(() => expireJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" })).toThrow(JudgmentStateError);
+  });
+
+  test("deleted judgment fails invalid_state", () => {
+    const j = makeCommittedJudgment({ statement: "expire-deleted" });
+    forceState(j.proposed.id, { retention_state: "deleted" });
+    expect(() => expireJudgment(db, { judgment_id: j.proposed.id, actor: "a", reason: "r" })).toThrow(JudgmentStateError);
+  });
+});
+
+// ---------------------------------------------------------------
+// Phase 1A.7 — lifecycle validation rejection tests
+// ---------------------------------------------------------------
+
+describe("supersedeJudgment — validation rejections", () => {
+  function assertRejected(input: SupersedeInput) {
+    const edgesBefore = countJudgmentEdges();
+    const eventsBefore = countEvents();
+    expect(() => supersedeJudgment(db, input)).toThrow(JudgmentValidationError);
+    expect(countJudgmentEdges()).toBe(edgesBefore);
+    expect(countEvents()).toBe(eventsBefore);
+  }
+
+  const base: SupersedeInput = {
+    old_judgment_id: "old-id",
+    replacement_judgment_id: "rep-id",
+    actor: "actor",
+    reason: "reason",
+  };
+
+  test("empty old_judgment_id rejected before DB write", () => assertRejected({ ...base, old_judgment_id: "" }));
+  test("whitespace old_judgment_id rejected before DB write", () => assertRejected({ ...base, old_judgment_id: "  " }));
+  test("empty replacement_judgment_id rejected before DB write", () => assertRejected({ ...base, replacement_judgment_id: "" }));
+  test("whitespace replacement_judgment_id rejected before DB write", () => assertRejected({ ...base, replacement_judgment_id: "   " }));
+  test("empty actor rejected before DB write", () => assertRejected({ ...base, actor: "" }));
+  test("whitespace-only actor rejected before DB write", () => assertRejected({ ...base, actor: "   " }));
+  test("empty reason rejected before DB write", () => assertRejected({ ...base, reason: "" }));
+  test("whitespace-only reason rejected before DB write", () => assertRejected({ ...base, reason: "   " }));
+  test("payload null rejected before DB write", () => assertRejected({ ...base, payload: null as unknown as Record<string, unknown> }));
+  test("payload array rejected before DB write", () => assertRejected({ ...base, payload: [] as unknown as Record<string, unknown> }));
+  test("payload primitive rejected before DB write", () => assertRejected({ ...base, payload: "string" as unknown as Record<string, unknown> }));
+  test("payload class instance rejected before DB write", () => assertRejected({ ...base, payload: new Date() as unknown as Record<string, unknown> }));
+  test("unserializable payload rejected before DB write", () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    assertRejected({ ...base, payload: circular });
+  });
+});
+
+describe("revokeJudgment — validation rejections", () => {
+  function assertRejected(input: RevokeInput) {
+    const eventsBefore = countEvents();
+    expect(() => revokeJudgment(db, input)).toThrow(JudgmentValidationError);
+    expect(countEvents()).toBe(eventsBefore);
+  }
+
+  const base: RevokeInput = { judgment_id: "some-id", actor: "actor", reason: "reason" };
+
+  test("empty judgment_id rejected before DB write", () => assertRejected({ ...base, judgment_id: "" }));
+  test("whitespace judgment_id rejected before DB write", () => assertRejected({ ...base, judgment_id: "  " }));
+  test("empty actor rejected before DB write", () => assertRejected({ ...base, actor: "" }));
+  test("whitespace-only actor rejected before DB write", () => assertRejected({ ...base, actor: "   " }));
+  test("empty reason rejected before DB write", () => assertRejected({ ...base, reason: "" }));
+  test("whitespace-only reason rejected before DB write", () => assertRejected({ ...base, reason: "   " }));
+  test("payload null rejected before DB write", () => assertRejected({ ...base, payload: null as unknown as Record<string, unknown> }));
+  test("payload array rejected before DB write", () => assertRejected({ ...base, payload: [] as unknown as Record<string, unknown> }));
+  test("payload primitive rejected before DB write", () => assertRejected({ ...base, payload: 42 as unknown as Record<string, unknown> }));
+  test("payload class instance rejected before DB write", () => assertRejected({ ...base, payload: new Date() as unknown as Record<string, unknown> }));
+  test("unserializable payload rejected before DB write", () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    assertRejected({ ...base, payload: circular });
+  });
+});
+
+describe("expireJudgment — validation rejections", () => {
+  function assertRejected(input: ExpireInput) {
+    const eventsBefore = countEvents();
+    expect(() => expireJudgment(db, input)).toThrow(JudgmentValidationError);
+    expect(countEvents()).toBe(eventsBefore);
+  }
+
+  const base: ExpireInput = { judgment_id: "some-id", actor: "actor", reason: "reason" };
+
+  test("empty judgment_id rejected before DB write", () => assertRejected({ ...base, judgment_id: "" }));
+  test("whitespace judgment_id rejected before DB write", () => assertRejected({ ...base, judgment_id: "  " }));
+  test("empty actor rejected before DB write", () => assertRejected({ ...base, actor: "" }));
+  test("whitespace-only actor rejected before DB write", () => assertRejected({ ...base, actor: "   " }));
+  test("empty reason rejected before DB write", () => assertRejected({ ...base, reason: "" }));
+  test("whitespace-only reason rejected before DB write", () => assertRejected({ ...base, reason: "   " }));
+  test("empty effective_at rejected before DB write", () => assertRejected({ ...base, effective_at: "" }));
+  test("whitespace effective_at rejected before DB write", () => assertRejected({ ...base, effective_at: "  " }));
+  test("payload null rejected before DB write", () => assertRejected({ ...base, payload: null as unknown as Record<string, unknown> }));
+  test("payload array rejected before DB write", () => assertRejected({ ...base, payload: [] as unknown as Record<string, unknown> }));
+  test("payload primitive rejected before DB write", () => assertRejected({ ...base, payload: true as unknown as Record<string, unknown> }));
+  test("payload class instance rejected before DB write", () => assertRejected({ ...base, payload: new Date() as unknown as Record<string, unknown> }));
+  test("unserializable payload rejected before DB write", () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    assertRejected({ ...base, payload: circular });
+  });
+});
+
+// ---------------------------------------------------------------
 // Phase 1A.7 — query/explain integration after retirement
 // ---------------------------------------------------------------
 
