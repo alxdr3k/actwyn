@@ -230,6 +230,18 @@ describe("validateScopeObject", () => {
     circ["self"] = circ;
     expect(validateScopeObject(circ).ok).toBe(false);
   });
+
+  test("rejects object whose toJSON() returns undefined", () => {
+    // JSON.stringify returns undefined — not storable as scope_json.
+    const undefinedJson = { toJSON() { return undefined; } };
+    expect(validateScopeObject(undefinedJson).ok).toBe(false);
+  });
+
+  test("rejects object whose toJSON() returns a scalar string", () => {
+    // Scalar toJSON corrupts the expected object shape in scope_json.
+    const scalarJson = { toJSON() { return "scalar"; } };
+    expect(validateScopeObject(scalarJson).ok).toBe(false);
+  });
 });
 
 describe("validateStringArray", () => {
@@ -286,9 +298,13 @@ describe("validateJsonValue", () => {
 
   test("rejects object whose toJSON() returns a scalar", () => {
     // Objects with toJSON returning a primitive corrupt the stored column shape.
-    const scalarJson = {
-      toJSON() { return "scalar"; },
-    };
+    const scalarJson = { toJSON() { return "scalar"; } };
     expect(validateJsonValue(scalarJson).ok).toBe(false);
+  });
+
+  test("rejects object whose toJSON() returns undefined", () => {
+    // JSON.stringify returns undefined — JSON.parse would throw without this guard.
+    const undefinedJson = { toJSON() { return undefined; } };
+    expect(validateJsonValue(undefinedJson).ok).toBe(false);
   });
 });

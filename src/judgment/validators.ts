@@ -221,13 +221,24 @@ export function validateScopeObject(v: unknown): ValidationResult {
   if (proto !== Object.prototype && proto !== null) {
     return { ok: false, reason: "scope must be a plain object, not a class instance" };
   }
+  let scopeSerialized: string | undefined;
   try {
-    JSON.stringify(v);
+    scopeSerialized = JSON.stringify(v);
   } catch (e) {
     return {
       ok: false,
       reason: `scope cannot be serialized to JSON: ${(e as Error).message}`,
     };
+  }
+  // JSON.stringify returns undefined when toJSON() returns undefined — not a storable string.
+  if (typeof scopeSerialized !== "string") {
+    return { ok: false, reason: "scope cannot be serialized to a JSON string" };
+  }
+  // Re-parse to verify the stored shape is still a plain object (not a scalar).
+  // An object with toJSON() returning a scalar would corrupt scope_json if accepted.
+  const scopeReparsed = JSON.parse(scopeSerialized) as unknown;
+  if (scopeReparsed === null || Array.isArray(scopeReparsed) || typeof scopeReparsed !== "object") {
+    return { ok: false, reason: "scope must serialize to a JSON object, not a scalar or array" };
   }
   return { ok: true };
 }
@@ -262,7 +273,7 @@ export function validateJsonValue(v: unknown): ValidationResult {
   if (v === null || typeof v !== "object") {
     return { ok: false, reason: "value must be a JSON object or array" };
   }
-  let serialized: string;
+  let serialized: string | undefined;
   try {
     serialized = JSON.stringify(v);
   } catch (e) {
@@ -270,6 +281,10 @@ export function validateJsonValue(v: unknown): ValidationResult {
       ok: false,
       reason: `value cannot be serialized to JSON: ${(e as Error).message}`,
     };
+  }
+  // JSON.stringify returns undefined when toJSON() returns undefined — guard before JSON.parse.
+  if (typeof serialized !== "string") {
+    return { ok: false, reason: "value cannot be serialized to a JSON string" };
   }
   // Re-parse to verify the top-level shape is still an object or array.
   // Class instances like Date serialize to a string scalar; objects with
