@@ -181,3 +181,149 @@ export function validateConfidenceLabel(s: unknown): ValidationResult {
   if (isConfidence(s)) return { ok: true };
   return { ok: false, reason: "confidence must be one of low / medium / high" };
 }
+
+export function validateKind(v: unknown): ValidationResult {
+  if (isJudgmentKind(v)) return { ok: true };
+  return {
+    ok: false,
+    reason: `kind must be one of ${JUDGMENT_KINDS.join(", ")}`,
+  };
+}
+
+export function validateEpistemicOrigin(v: unknown): ValidationResult {
+  if (isEpistemicOrigin(v)) return { ok: true };
+  return {
+    ok: false,
+    reason: `epistemic_origin must be one of ${EPISTEMIC_ORIGINS.join(", ")}`,
+  };
+}
+
+/**
+ * `scope` at the application layer must be a plain object — not null,
+ * not an array, not a primitive, and not a class instance (e.g. Date,
+ * Map, Set). Class instances serialize differently to JSON (Date becomes
+ * a string scalar, Map becomes {}) which would corrupt the stored shape
+ * and make `judgment.scope` differ from what was persisted.
+ * Unlike `validateScopeJson`, this takes the live object directly.
+ */
+export function validateScopeObject(v: unknown): ValidationResult {
+  if (v === null) {
+    return { ok: false, reason: "scope must not be null" };
+  }
+  if (Array.isArray(v)) {
+    return { ok: false, reason: "scope must not be an array" };
+  }
+  if (typeof v !== "object") {
+    return { ok: false, reason: `scope must be a plain object, got ${typeof v}` };
+  }
+  // Reject class instances: only plain objects ({} or Object.create(null)) allowed.
+  const proto = Object.getPrototypeOf(v) as unknown;
+  if (proto !== Object.prototype && proto !== null) {
+    return { ok: false, reason: "scope must be a plain object, not a class instance" };
+  }
+  let scopeSerialized: string | undefined;
+  try {
+    scopeSerialized = JSON.stringify(v);
+  } catch (e) {
+    return {
+      ok: false,
+      reason: `scope cannot be serialized to JSON: ${(e as Error).message}`,
+    };
+  }
+  // JSON.stringify returns undefined when toJSON() returns undefined — not a storable string.
+  if (typeof scopeSerialized !== "string") {
+    return { ok: false, reason: "scope cannot be serialized to a JSON string" };
+  }
+  // Re-parse to verify the stored shape is still a plain object (not a scalar).
+  // An object with toJSON() returning a scalar would corrupt scope_json if accepted.
+  const scopeReparsed = JSON.parse(scopeSerialized) as unknown;
+  if (scopeReparsed === null || Array.isArray(scopeReparsed) || typeof scopeReparsed !== "object") {
+    return { ok: false, reason: "scope must serialize to a JSON object, not a scalar or array" };
+  }
+  return { ok: true };
+}
+
+/**
+ * Verify a string array stays a JSON array after serialization.
+ * An array with a custom `toJSON()` (e.g. `toJSON() { return undefined; }`)
+ * would cause `JSON.stringify` to return `undefined` or a scalar, silently
+ * dropping the column value or corrupting its shape in SQLite.
+ * Call this after `validateStringArray` has confirmed element types.
+ */
+export function validateStringArraySerialization(
+  v: string[],
+  fieldName: string,
+): ValidationResult {
+  let serialized: string | undefined;
+  try {
+    serialized = JSON.stringify(v);
+  } catch (e) {
+    return {
+      ok: false,
+      reason: `${fieldName} cannot be serialized to JSON: ${(e as Error).message}`,
+    };
+  }
+  if (typeof serialized !== "string") {
+    return { ok: false, reason: `${fieldName} cannot be serialized to a JSON string` };
+  }
+  if (!Array.isArray(JSON.parse(serialized) as unknown)) {
+    return { ok: false, reason: `${fieldName} must serialize to a JSON array` };
+  }
+  return { ok: true };
+}
+
+/** Every element must be a non-empty string. */
+export function validateStringArray(
+  v: unknown,
+  fieldName: string,
+): ValidationResult {
+  if (!Array.isArray(v)) {
+    return { ok: false, reason: `${fieldName} must be an array` };
+  }
+  for (let i = 0; i < v.length; i++) {
+    if (typeof v[i] !== "string" || (v[i] as string).length === 0) {
+      return {
+        ok: false,
+        reason: `${fieldName}[${i}] must be a non-empty string`,
+      };
+    }
+  }
+  return { ok: true };
+}
+
+/**
+ * `v` must be a JSON-serializable object or array, and must still be an
+ * object or array **after** serialization. This catches class instances such
+ * as `new Date()` (which serializes to a string scalar) and objects that
+ * override `toJSON()` to return a primitive — both would corrupt the stored
+ * column if accepted and then persisted.
+ */
+export function validateJsonValue(v: unknown): ValidationResult {
+  if (v === null || typeof v !== "object") {
+    return { ok: false, reason: "value must be a JSON object or array" };
+  }
+  let serialized: string | undefined;
+  try {
+    serialized = JSON.stringify(v);
+  } catch (e) {
+    return {
+      ok: false,
+      reason: `value cannot be serialized to JSON: ${(e as Error).message}`,
+    };
+  }
+  // JSON.stringify returns undefined when toJSON() returns undefined — guard before JSON.parse.
+  if (typeof serialized !== "string") {
+    return { ok: false, reason: "value cannot be serialized to a JSON string" };
+  }
+  // Re-parse to verify the top-level shape is still an object or array.
+  // Class instances like Date serialize to a string scalar; objects with
+  // toJSON() returning a scalar would also fail here.
+  const reparsed = JSON.parse(serialized) as unknown;
+  if (reparsed === null || typeof reparsed !== "object") {
+    return {
+      ok: false,
+      reason: "value must serialize to a JSON object or array, not a scalar",
+    };
+  }
+  return { ok: true };
+}

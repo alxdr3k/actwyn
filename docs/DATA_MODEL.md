@@ -170,14 +170,23 @@ Attaches meaning to an artifact.
 - `relation_type ∈ { evidence, attachment, generated_output, reference, source }`.
 - CHECK requires `memory_summary_id` or `turn_id` to be non-null.
 
-### `judgment_*` (Phase 1A schema skeleton — not wired into runtime)
+### `judgment_*` (Phase 1A — schema + proposal repository)
 
 Migration 004 (`migrations/004_judgment_skeleton.sql`) added the
 following tables and an FTS5 virtual table per ADR-0009 ..
-ADR-0013 and `docs/JUDGMENT_SYSTEM.md`. They are **schema only**:
-no module under `src/` writes to them, no typed tool exists, and
-no Control Gate or Context Compiler reads from them. Future
-runtime writers will live under `src/judgment/*`.
+ADR-0013 and `docs/JUDGMENT_SYSTEM.md`.
+
+Phase 1A.2 added `src/judgment/repository.ts` as the **sole
+proposal-only writer** for `judgment_items` and `judgment_events`.
+The repository creates rows with `lifecycle_status=proposed` /
+`approval_state=pending` / `activation_state=history_only` only.
+No approval, activation, supersede, revoke, or expire write path
+exists. The `src/judgment/tool.ts` typed-tool contract wraps the
+repository but is not registered in any runtime module.
+
+No Control Gate or Context Compiler reads from these tables. Future
+runtime writers must route through `src/judgment/repository.ts` (or
+a successor) per the single-writer policy.
 
 #### `judgment_sources`
 
@@ -273,6 +282,8 @@ reasoning.
 | `outbound_notifications.status`       | `src/telegram/outbound.ts` (rolled up from chunks)                                |
 | `outbound_notification_chunks`        | `src/queue/worker.ts`, `src/commands/*` (insert in same txn as parent), `src/telegram/outbound.ts` (status) |
 | `allowed_users`                       | out-of-band config — not written at runtime                                       |
+| `judgment_items` (insert)             | `src/judgment/repository.ts` (`proposeJudgment`) — proposal rows only. No other module may write `judgment_items` directly. |
+| `judgment_events` (insert)            | `src/judgment/repository.ts` (`proposeJudgment`) — `judgment.proposed` events only. |
 
 ## Cross-table invariants
 
@@ -314,35 +325,40 @@ to keep in mind:
 - A schema change is an architecture-level event for the affected
   table. If the table is new or its semantics change, add an ADR.
 
-## Judgment System schema (Phase 1A.1 schema skeleton landed; runtime not wired)
+## Judgment System schema (Phase 1A.2 — proposal repository landed; control-plane not wired)
 
 The DB-native AI-first Judgment System direction defines a separate
 schema family. As of migration 004, **the five `judgment_*` tables
 and the FTS5 virtual table exist in `migrations/`**; the remaining
 control-plane / tensions / reflection rows below are still
-documentation only. Names and constraints come from the Phase 0 /
+documentation only.
+
+Phase 1A.2 adds `src/judgment/repository.ts` as the proposal-only
+writer for `judgment_items` and `judgment_events`. The tool contract
+in `src/judgment/tool.ts` is not registered in any runtime module.
+No approval, activation, context use, runtime extraction, Control
+Gate, or provider integration is wired. Names and constraints come from the Phase 0 /
 0.5 design records that landed on `main` as ADR-0009 … ADR-0013
 plus `docs/JUDGMENT_SYSTEM.md` (per DEC-037, that spec is a
 historical architectural record, not implementation authority).
 
 | Table                                        | Purpose                                                              | Status (2026-04-27)                                                          |
 | -------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `judgment_sources`                           | Source of a judgment fragment (turn, attachment, external).          | schema implemented in migration 004; no runtime writer.                       |
-| `judgment_items`                             | Atomic judgment rows (the Judgment System analogue of memory_items). | schema implemented in migration 004; no runtime writer / typed tool.         |
+| `judgment_sources`                           | Source of a judgment fragment (turn, attachment, external).          | schema implemented in migration 004; no runtime writer (Phase 1A.2 does not insert sources). |
+| `judgment_items`                             | Atomic judgment rows (the Judgment System analogue of memory_items). | schema implemented in migration 004; proposal-only writer: `src/judgment/repository.ts` (Phase 1A.2). |
 | `judgment_evidence_links`                    | Links between judgments and supporting evidence rows.                | schema implemented in migration 004; no runtime writer.                       |
 | `judgment_edges`                             | Typed relations between judgments (supports, contradicts, refines).  | schema implemented in migration 004; no runtime writer.                       |
-| `judgment_events`                            | Append-only event log for judgment lifecycle changes.                | schema implemented in migration 004; no runtime writer.                       |
-| `judgment_items_fts`                         | FTS5 external-content index over `judgment_items.statement`.          | schema implemented in migration 004; sync triggers tested.                   |
+| `judgment_events`                            | Append-only event log for judgment lifecycle changes.                | schema implemented in migration 004; writer: `src/judgment/repository.ts` (Phase 1A.2, `judgment.proposed` events only). |
+| `judgment_items_fts`                         | FTS5 external-content index over `judgment_items.statement`.          | schema implemented in migration 004; sync triggers tested; populated by repository inserts. |
 | `control_gate_events` / `control_plane_events` | Control Gate decisions per query (table name itself is open per Phase 1A scope). | **planned** (`docs/JUDGMENT_SYSTEM.md` §Implementation Readiness; ADR-0012). |
 | `tensions`                                   | Telemetry for unresolved tension between judgments / sources.        | **planned** (`docs/JUDGMENT_SYSTEM.md` §Critique Lens + Tension Generalization; ADR-0013). |
 | `reflection_triage_events`                   | Reflection / triage outcomes feeding back into judgments.            | **planned** (`docs/JUDGMENT_SYSTEM.md` §Metacognitive Critique Loop; ADR-0012, ADR-0013). |
 
-For the implemented rows: the schema is in place but no module
-writes to them, no typed tool exists, no Control Gate or Context
-Compiler reads them. Future runtime writers will live under
-`src/judgment/*`. Do not migrate `memory_summaries` / `memory_items`
-data into them — Q-027 stays open and ADR-0009 commits to the
-"분리" starting point.
+For the implemented rows: `src/judgment/repository.ts` writes
+`judgment_items` and `judgment_events` (proposal rows only). No
+Control Gate or Context Compiler reads them. Do not migrate
+`memory_summaries` / `memory_items` data into them — Q-027 stays
+open and ADR-0009 commits to the "분리" starting point.
 
 Q-027 (`memory_items` ↔ `judgment_items` 관계) is open. ADR-0009
 commits to "분리" as the Phase 0 starting point; the implementation

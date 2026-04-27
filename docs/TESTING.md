@@ -89,10 +89,23 @@ Migration shape is asserted by:
 
 - `test/db/schema.test.ts` — schema-level shape and migration
   ordering.
+- `test/db/judgment_schema.test.ts` — Judgment System schema
+  CHECK / NOT NULL / JSON validity / FTS5 trigger coverage
+  (Phase 1A.1).
 - `test/db/invariants.test.ts` — cross-table invariants from
   HLD §5.2.
 - `src/db/migrator.ts` — refuses missing prior versions at runtime,
   records applied versions in `settings`.
+
+Judgment System proposal-surface tests (Phase 1A.2) live under:
+
+- `test/judgment/validators.test.ts` — pure-TS validator behavior.
+- `test/judgment/repository.test.ts` — `proposeJudgment` DB
+  integration: insert, defaults, validation rejections, FTS trigger,
+  transaction rollback.
+- `test/judgment/tool.test.ts` — `executeJudgmentProposeTool`
+  contract + static boundary assertions (no bun:* import in
+  `src/judgment/*`; tool not imported by runtime modules).
 
 When you add a migration:
 
