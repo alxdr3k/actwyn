@@ -1,4 +1,4 @@
-// Judgment System Phase 1A.2 — typed-tool contract tests.
+// Judgment System Phase 1A.2–1A.5 — typed-tool contract tests.
 //
 // Covers:
 //   1. Tool contract constants
@@ -15,22 +15,30 @@ import { openDatabase, type DbHandle } from "../../src/db.ts";
 import { migrate } from "../../src/db/migrator.ts";
 import {
   JUDGMENT_APPROVE_TOOL,
+  JUDGMENT_COMMIT_TOOL,
   JUDGMENT_LINK_EVIDENCE_TOOL,
   JUDGMENT_PROPOSE_TOOL,
   JUDGMENT_RECORD_SOURCE_TOOL,
   JUDGMENT_REJECT_TOOL,
   executeJudgmentApproveTool,
+  executeJudgmentCommitTool,
   executeJudgmentLinkEvidenceTool,
   executeJudgmentProposeTool,
   executeJudgmentRecordSourceTool,
   executeJudgmentRejectTool,
   type ApproveInput,
+  type CommitInput,
   type EvidenceLinkInput,
   type ProposalInput,
   type RejectInput,
   type SourceInput,
 } from "../../src/judgment/tool.ts";
-import { proposeJudgment, recordJudgmentSource } from "../../src/judgment/repository.ts";
+import {
+  approveProposedJudgment,
+  linkJudgmentEvidence,
+  proposeJudgment,
+  recordJudgmentSource,
+} from "../../src/judgment/repository.ts";
 
 const MIGRATIONS_DIR = join(import.meta.dir, "..", "..", "migrations");
 const SRC_DIR = join(import.meta.dir, "..", "..", "src");
@@ -714,6 +722,175 @@ describe("executeJudgmentLinkEvidenceTool — error path", () => {
 });
 
 // ---------------------------------------------------------------
+// Phase 1A.5 — Commit tool tests
+// ---------------------------------------------------------------
+
+const validCommitInput: CommitInput = {
+  judgment_id: "placeholder",
+  committer: "committer",
+  reason: "ready for runtime",
+};
+
+function makeApprovedJudgmentWithEvidence(dbHandle: DbHandle) {
+  const j = proposeJudgment(dbHandle, {
+    kind: "fact",
+    statement: "the user prefers dark mode",
+    epistemic_origin: "user_stated",
+    confidence: "medium",
+    scope: { project: "actwyn" },
+  });
+  approveProposedJudgment(dbHandle, { judgment_id: j.id, reviewer: "approver" });
+  const s = recordJudgmentSource(dbHandle, { kind: "conversation", locator: "msg:001" });
+  linkJudgmentEvidence(dbHandle, { ...validLinkInput, judgment_id: j.id, source_id: s.id });
+  return { j, s };
+}
+
+describe("JUDGMENT_COMMIT_TOOL", () => {
+  test("tool contract name is judgment.commit", () => {
+    expect(JUDGMENT_COMMIT_TOOL.name).toBe("judgment.commit");
+  });
+
+  test("tool has a description string", () => {
+    expect(typeof JUDGMENT_COMMIT_TOOL.description).toBe("string");
+    expect(JUDGMENT_COMMIT_TOOL.description.length).toBeGreaterThan(0);
+  });
+});
+
+describe("executeJudgmentCommitTool — happy path", () => {
+  test("valid commit input returns ok: true", () => {
+    const { j } = makeApprovedJudgmentWithEvidence(db);
+    const result = executeJudgmentCommitTool(db, { ...validCommitInput, judgment_id: j.id });
+    expect(result.ok).toBe(true);
+  });
+
+  test("valid commit result has lifecycle_status active", () => {
+    const { j } = makeApprovedJudgmentWithEvidence(db);
+    const result = executeJudgmentCommitTool(db, { ...validCommitInput, judgment_id: j.id });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.judgment.lifecycle_status).toBe("active");
+    }
+  });
+
+  test("valid commit result has activation_state eligible", () => {
+    const { j } = makeApprovedJudgmentWithEvidence(db);
+    const result = executeJudgmentCommitTool(db, { ...validCommitInput, judgment_id: j.id });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.judgment.activation_state).toBe("eligible");
+    }
+  });
+
+  test("valid commit result has authority_source user_confirmed", () => {
+    const { j } = makeApprovedJudgmentWithEvidence(db);
+    const result = executeJudgmentCommitTool(db, { ...validCommitInput, judgment_id: j.id });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.judgment.authority_source).toBe("user_confirmed");
+    }
+  });
+
+  test("successful commit tool does not register or wire runtime behavior", () => {
+    const { j } = makeApprovedJudgmentWithEvidence(db);
+    const result = executeJudgmentCommitTool(db, { ...validCommitInput, judgment_id: j.id });
+    // The function returns a plain result object; no side effects on providers/context.
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.judgment.id).toBeTruthy();
+    }
+  });
+});
+
+describe("executeJudgmentCommitTool — error paths", () => {
+  test("invalid input (empty committer) returns ok false with validation_error", () => {
+    const result = executeJudgmentCommitTool(db, {
+      ...validCommitInput,
+      judgment_id: "some-id",
+      committer: "",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("validation_error");
+    }
+  });
+
+  test("missing target returns ok false with not_found", () => {
+    const result = executeJudgmentCommitTool(db, {
+      ...validCommitInput,
+      judgment_id: "nonexistent-id",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("not_found");
+    }
+  });
+
+  test("invalid state (pending judgment) returns ok false with invalid_state", () => {
+    const j = proposeJudgment(db, {
+      kind: "fact",
+      statement: "some fact",
+      epistemic_origin: "user_stated",
+      confidence: "medium",
+      scope: {},
+    });
+    const result = executeJudgmentCommitTool(db, { ...validCommitInput, judgment_id: j.id });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("invalid_state");
+    }
+  });
+
+  test("missing evidence returns ok false with invalid_state", () => {
+    const j = proposeJudgment(db, {
+      kind: "fact",
+      statement: "some fact",
+      epistemic_origin: "user_stated",
+      confidence: "medium",
+      scope: {},
+    });
+    approveProposedJudgment(db, { judgment_id: j.id, reviewer: "approver" });
+    const result = executeJudgmentCommitTool(db, { ...validCommitInput, judgment_id: j.id });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("invalid_state");
+    }
+  });
+
+  test("failed tool call does not write status updates", () => {
+    const j = proposeJudgment(db, {
+      kind: "fact",
+      statement: "some fact",
+      epistemic_origin: "user_stated",
+      confidence: "medium",
+      scope: {},
+    });
+    const before = db
+      .prepare<{ lifecycle_status: string }, [string]>(
+        `SELECT lifecycle_status FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!;
+    executeJudgmentCommitTool(db, { ...validCommitInput, judgment_id: j.id });
+    const after = db
+      .prepare<{ lifecycle_status: string }, [string]>(
+        `SELECT lifecycle_status FROM judgment_items WHERE id = ?`,
+      )
+      .get(j.id)!;
+    expect(after.lifecycle_status).toBe(before.lifecycle_status);
+  });
+
+  test("failed tool call does not append events", () => {
+    const before = db
+      .prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_events")
+      .get()!.n;
+    executeJudgmentCommitTool(db, { ...validCommitInput, judgment_id: "nonexistent" });
+    const after = db
+      .prepare<{ n: number }, never[]>("SELECT COUNT(*) as n FROM judgment_events")
+      .get()!.n;
+    expect(after).toBe(before);
+  });
+});
+
+// ---------------------------------------------------------------
 // Static boundary tests
 // ---------------------------------------------------------------
 
@@ -740,6 +917,7 @@ describe("static boundary — judgment tools not registered", () => {
     /['"]judgment\.reject['"]/,
     /['"]judgment\.record_source['"]/,
     /['"]judgment\.link_evidence['"]/,
+    /['"]judgment\.commit['"]/,
   ];
 
   function checkDir(dirName: string): void {

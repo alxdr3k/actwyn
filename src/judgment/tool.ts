@@ -1,12 +1,18 @@
-// Personal Agent — Judgment System Phase 1A.2/1A.3 typed-tool contracts.
+// Personal Agent — Judgment System Phase 1A.2–1A.5 typed-tool contracts.
 //
 // Exports narrow, unregistered tool contracts:
-//   JUDGMENT_PROPOSE_TOOL  — name + description constant
+//   JUDGMENT_PROPOSE_TOOL        — name + description constant
 //   executeJudgmentProposeTool(db, input, deps?) → ToolResult
-//   JUDGMENT_APPROVE_TOOL  — name + description constant  (Phase 1A.3)
+//   JUDGMENT_APPROVE_TOOL        — name + description constant  (Phase 1A.3)
 //   executeJudgmentApproveTool(db, input, deps?) → ReviewToolResult
-//   JUDGMENT_REJECT_TOOL   — name + description constant  (Phase 1A.3)
+//   JUDGMENT_REJECT_TOOL         — name + description constant  (Phase 1A.3)
 //   executeJudgmentRejectTool(db, input, deps?) → ReviewToolResult
+//   JUDGMENT_RECORD_SOURCE_TOOL  — name + description constant  (Phase 1A.4)
+//   executeJudgmentRecordSourceTool(db, input, deps?) → SourceToolResult
+//   JUDGMENT_LINK_EVIDENCE_TOOL  — name + description constant  (Phase 1A.4)
+//   executeJudgmentLinkEvidenceTool(db, input, deps?) → EvidenceLinkToolResult
+//   JUDGMENT_COMMIT_TOOL         — name + description constant  (Phase 1A.5)
+//   executeJudgmentCommitTool(db, input, deps?) → CommitToolResult
 //
 // These tools are NOT registered anywhere. They must not be imported from
 // src/main.ts, src/providers/*, src/context/*, src/queue/worker.ts,
@@ -22,11 +28,15 @@ import {
   JudgmentStateError,
   JudgmentValidationError,
   approveProposedJudgment,
+  commitApprovedJudgment,
   linkJudgmentEvidence,
   proposeJudgment,
   recordJudgmentSource,
   rejectProposedJudgment,
   type ApproveInput,
+  type CommitDeps,
+  type CommitInput,
+  type CommittedJudgment,
   type EvidenceLinkDeps,
   type EvidenceLinkInput,
   type LinkedEvidence,
@@ -71,6 +81,12 @@ export const JUDGMENT_LINK_EVIDENCE_TOOL = {
   name: "judgment.link_evidence" as const,
   description:
     "links an existing judgment to an existing judgment source as evidence, without activating the judgment",
+} as const;
+
+export const JUDGMENT_COMMIT_TOOL = {
+  name: "judgment.commit" as const,
+  description:
+    "commits an approved, evidence-linked proposed judgment as active/eligible without wiring it into runtime context",
 } as const;
 
 // ---------------------------------------------------------------
@@ -138,6 +154,17 @@ export type EvidenceLinkToolSuccess = {
 
 export type EvidenceLinkToolResult = EvidenceLinkToolSuccess | ReviewToolError;
 
+// ---------------------------------------------------------------
+// Commit tool result types (Phase 1A.5)
+// ---------------------------------------------------------------
+
+export type CommitToolSuccess = {
+  readonly ok: true;
+  readonly judgment: CommittedJudgment;
+};
+
+export type CommitToolResult = CommitToolSuccess | ReviewToolError;
+
 // Re-export input/deps types so callers import from tool.ts only.
 export type {
   ProposalInput,
@@ -152,6 +179,9 @@ export type {
   EvidenceLinkInput,
   EvidenceLinkDeps,
   LinkedEvidence,
+  CommitInput,
+  CommitDeps,
+  CommittedJudgment,
 };
 
 // ---------------------------------------------------------------
@@ -270,6 +300,23 @@ export function executeJudgmentLinkEvidenceTool(
   try {
     const evidence_link = linkJudgmentEvidence(db, input, deps);
     return { ok: true, evidence_link };
+  } catch (e) {
+    return mapReviewError(e);
+  }
+}
+
+// ---------------------------------------------------------------
+// Commit executor (Phase 1A.5)
+// ---------------------------------------------------------------
+
+export function executeJudgmentCommitTool(
+  db: DbHandle,
+  input: CommitInput,
+  deps?: CommitDeps,
+): CommitToolResult {
+  try {
+    const judgment = commitApprovedJudgment(db, input, deps);
+    return { ok: true, judgment };
   } catch (e) {
     return mapReviewError(e);
   }

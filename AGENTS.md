@@ -82,13 +82,25 @@ Do not read `docs/design/archive/` by default. Those are history.
     `executeJudgmentLinkEvidenceTool`. These are **not runtime-wired**.
     Evidence linking does **not** activate, approve, or make a
     judgment context-visible.
+  - **Phase 1A.5 (landed)**: `src/judgment/repository.ts` now also
+    exports `commitApprovedJudgment`. Commit requires an approved,
+    evidence-linked proposed judgment and sets
+    `lifecycle_status=active` / `activation_state=eligible` /
+    `authority_source=user_confirmed`. `src/judgment/tool.ts` now also
+    exports `JUDGMENT_COMMIT_TOOL` / `executeJudgmentCommitTool`.
+    These are **not runtime-wired**. Active/eligible judgment rows may
+    now exist in the DB, but **runtime must not read them unless
+    explicitly tasked** — no Context Compiler, no provider prompt
+    integration, no Telegram command, and no memory-promotion path for
+    judgments exists yet.
   - None of the judgment tools are **registered** anywhere in `src/`.
     They must not be imported from `src/main.ts`, `src/providers/*`,
     `src/context/*`, `src/queue/worker.ts`, `src/memory/*`,
     `src/telegram/*`, or `src/commands/*`.
-  - Do **not** implement activation, commit, supersede, revoke, expire,
-    query, explain, Control Gate, Tension, ReflectionTriageEvent,
-    `current_operating_view`, vector / graph projections, Critique Lens,
+  - Do **not** implement supersede, revoke, expire, query, explain,
+    Control Gate, Tension, ReflectionTriageEvent,
+    `current_operating_view`, Context Compiler, provider/context
+    integration, vector / graph projections, Critique Lens,
     or any further runtime Judgment surface unless the task explicitly
     authorizes them.
 

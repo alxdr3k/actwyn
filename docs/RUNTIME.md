@@ -154,14 +154,14 @@ promotes a `session` attachment to `long_term`.
 
 Phase 1A.1 (schema skeleton + types + validators), Phase 1A.2
 (proposal-only write surface), Phase 1A.3 (proposal review
-local surface), and Phase 1A.4 (source/evidence-link local
-surface) have landed on `main`. **Runtime request handling
-is unchanged.** The implemented runtime stages above — Telegram
-inbound, `provider_run`, `summary_generation`, `storage_sync`,
-`notification_retry`, and outbound delivery — do not call any
-judgment tool. Provider context still uses the existing
-`src/context/builder.ts` + `src/context/packer.ts` memory
-implementation.
+local surface), Phase 1A.4 (source/evidence-link local surface),
+and Phase 1A.5 (commit/activation local surface) have landed on
+`main`. **Runtime request handling is unchanged.** The implemented
+runtime stages above — Telegram inbound, `provider_run`,
+`summary_generation`, `storage_sync`, `notification_retry`, and
+outbound delivery — do not call any judgment tool. Provider context
+still uses the existing `src/context/builder.ts` +
+`src/context/packer.ts` memory implementation.
 
 ### What is implemented
 
@@ -216,14 +216,31 @@ implementation.
   `executeJudgmentLinkEvidenceTool`) — local unregistered
   typed-tool contracts.
 
-The proposal, review, source-recording, and evidence-linking
+**Phase 1A.5** — commit/activation local surface:
+
+- `src/judgment/repository.ts` (`commitApprovedJudgment`) — requires
+  `lifecycle_status=proposed`, `approval_state=approved`,
+  `activation_state=history_only`, `retention_state=normal`, and at
+  least one `judgment_evidence_links` row. Sets `lifecycle_status=active`,
+  `activation_state=eligible`, `authority_source=user_confirmed`, syncs
+  denormalized `source_ids_json` / `evidence_ids_json` from canonical
+  link rows, and appends a `judgment.committed` event — all in one
+  transaction. **Active/eligible judgment rows can now exist in the DB,
+  but runtime context does not read them: no Context Compiler, no
+  provider prompt integration exists yet.**
+- `src/judgment/tool.ts` (`JUDGMENT_COMMIT_TOOL`,
+  `executeJudgmentCommitTool`) — local unregistered typed-tool
+  contract.
+
+The proposal, review, source-recording, evidence-linking, and commit
 surfaces can be exercised by tests or direct local code. They are
 **not** exposed to providers, Telegram, commands, worker dispatch,
 or context building:
 
 - `judgment.propose`, `judgment.approve`, `judgment.reject`,
-  `judgment.record_source`, `judgment.link_evidence` are not
-  registered in `src/main.ts` or any runtime module.
+  `judgment.record_source`, `judgment.link_evidence`,
+  `judgment.commit` are not registered in `src/main.ts` or any
+  runtime module.
 - `src/providers/*`, `src/context/*`, `src/queue/worker.ts`,
   `src/memory/*`, `src/telegram/*`, and `src/commands/*` do not
   import from `src/judgment/`.
@@ -245,10 +262,11 @@ rows from provider output: **not implemented**.
   and `judgment.proposed` / `judgment.approved` /
   `judgment.rejected` / `judgment.source.recorded` /
   `judgment.evidence.linked` events.
-- Not implemented: activation workflow, `commit`, `supersede`,
-  `revoke`, `expire`, `query`, `explain`. `judgment_edges` has
-  no runtime writer. Linked evidence does not make a judgment
-  active or context-visible.
+- Not implemented: `supersede`, `revoke`, `expire`, `query`,
+  `explain`. `judgment_edges` has no runtime writer. Active/eligible
+  judgment rows exist in DB (after commit) but are not read by
+  runtime context — no Context Compiler or provider read path exists
+  yet. Commit is local and unregistered.
 
 **Stage 4** — Context Compiler: `current_operating_view`
 projection (DEC-036) and the Stage 4 Context Compiler that would

@@ -22,7 +22,7 @@
 | Redaction at the persistence boundary             | implemented |
 | Memory summaries with provenance + confidence     | implemented |
 | Telegram attachment two-phase capture             | implemented |
-| DB-native AI-first Judgment System (Phase 1A+)    | schema skeleton + proposal repository + proposal review repository + source/evidence-link repository + unregistered tool contracts (not runtime-wired) |
+| DB-native AI-first Judgment System (Phase 1A+)    | schema skeleton + proposal repository + proposal review repository + source/evidence-link repository + commit/activation repository + unregistered tool contracts (not runtime-wired) |
 | Vector / graph derived projections                | planned     |
 | second-brain repo as canonical runtime memory     | not planned (history/seed only) |
 | Obsidian / Markdown active write path             | not planned |
@@ -73,9 +73,26 @@ denormalized `source_ids_json` / `evidence_ids_json` arrays on
 judgment context-visible.** None of these tools are registered
 anywhere in the runtime.
 
-No Control Gate, no activation workflow, no context-compiler
-integration, no provider runtime hookup, and no memory-promotion
-path exists yet — those remain Phase 1A+ work.
+Phase 1A.5 has added the **commit / activation local surface**:
+`src/judgment/repository.ts` now also exports
+`commitApprovedJudgment`, and `src/judgment/tool.ts` now also
+exports `JUDGMENT_COMMIT_TOOL` and `executeJudgmentCommitTool`.
+Commit requires `lifecycle_status=proposed`, `approval_state=approved`,
+`activation_state=history_only`, `retention_state=normal`, and at
+least one row in `judgment_evidence_links`. On success it sets
+`lifecycle_status=active`, `activation_state=eligible`,
+`authority_source=user_confirmed`, syncs the denormalized
+`source_ids_json` / `evidence_ids_json` arrays from canonical link
+rows, and appends a `judgment.committed` event — all in one
+transaction. **Active/eligible rows can now exist in the DB, but
+runtime context still does not read them: no Context Compiler, no
+provider prompt integration, no Telegram command, and no memory
+promotion path exists yet.** The commit tool is not registered
+anywhere in the runtime.
+
+No Control Gate, no Context Compiler, no context/provider runtime
+hookup, and no memory-promotion path exists yet — those remain
+Phase 1A+ work.
 
 ## System overview
 
