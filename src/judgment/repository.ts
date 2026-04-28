@@ -1,4 +1,4 @@
-// Personal Agent — Judgment System Phase 1A.2–1A.5 proposal/review/source/commit repository.
+// Personal Agent — Judgment System Phase 1A.2–1A.7 proposal/review/source/commit/query/retirement repository.
 //
 // Write surfaces:
 //   proposeJudgment(db, input, deps?)           → ProposedJudgment    (Phase 1A.2)
@@ -7,6 +7,15 @@
 //   recordJudgmentSource(db, input, deps?)      → RecordedSource      (Phase 1A.4)
 //   linkJudgmentEvidence(db, input, deps?)      → LinkedEvidence      (Phase 1A.4)
 //   commitApprovedJudgment(db, input, deps?)    → CommittedJudgment   (Phase 1A.5)
+//
+// Read surfaces:
+//   queryJudgments(db, input, deps?)            → JudgmentQueryResult (Phase 1A.6)
+//   explainJudgment(db, input, deps?)           → JudgmentExplain     (Phase 1A.6)
+//
+// Retirement surfaces:
+//   supersedeJudgment(db, input, deps?)         → SupersededJudgment  (Phase 1A.7)
+//   revokeJudgment(db, input, deps?)            → RevokedJudgment     (Phase 1A.7)
+//   expireJudgment(db, input, deps?)            → ExpiredJudgment     (Phase 1A.7)
 //
 // Each write creates/mutates rows in a single `BEGIN IMMEDIATE` transaction.
 // All inputs are validated before any DB write.
