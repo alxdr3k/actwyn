@@ -1,6 +1,6 @@
 # Decision Register
 
-> Status: living document · Owner: project lead · Last updated: 2026-04-26
+> Status: living document · Owner: project lead · Last updated: 2026-04-28
 >
 > Small, confirmed decisions that shape the project but are not
 > architecture-level. Architecture-level decisions live under
@@ -85,6 +85,7 @@ deployment shape). Everything else is a `DEC-###`.
 | DEC-035 | Reflection 5 sub-action P0.5 도입 (`reflection_triage`만)     | accepted |
 | DEC-036 | `current_truth` → `current_operating_view` 이름 변경          | accepted |
 | DEC-037 | Implementation Documentation Lifecycle Policy                  | accepted |
+| DEC-038 | Judgment System Phase 1B.1–1B.3 Runtime Wiring (2026-04-28)   | accepted |
 
 Decisions that were previously `D01`..`D05` in the flat log have
 been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..

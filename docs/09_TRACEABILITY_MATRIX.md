@@ -170,6 +170,7 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | DEC-035 | Reflection 5 sub-action P0.5 도입 (`reflection_triage`만)     | —                        | —                  | ADR-0013 §Decision 5; Q-054    |
 | DEC-036 | `current_truth` → `current_operating_view` 이름 변경          | —                        | —                  | ADR-0013 §Decision 4; Q-057    |
 | DEC-037 | Implementation Documentation Lifecycle Policy                  | —                        | —                  | ADR README §Promotion rules; Q-063 (follow-up docs-structure PR) |
+| DEC-038 | Judgment System Phase 1B.1–1B.3 Runtime Wiring (2026-04-28)  | —                        | —                  | `src/queue/worker.ts`; `src/context/builder.ts`; `src/telegram/inbound.ts`; Phase 1B tests |
 
 ## Matrix — PRD acceptance criteria → evidence
 
