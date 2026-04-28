@@ -369,7 +369,7 @@ components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4 / 1A.5 / 1A.6 / 1A.
   v0.1 integration (ADR-0013) — **not implemented**.
 - Telegram write commands (propose/approve/commit) — **not implemented**.
 - Resume-mode judgment refresh (issue #44) — **not implemented**.
-- `control_gate_events` job_id attribution (issue #45) — **not implemented**.
+- `control_gate_events` job_id attribution (issue #45) — **implemented** (migration 006, worker.ts passes `job.id`).
 - Full Context Compiler (`current_operating_view`) — **not implemented**.
 - `src/providers/*`, `src/memory/*`, and `src/telegram/*` do not
   import from `src/judgment/*`.

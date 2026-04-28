@@ -250,14 +250,27 @@ export function evaluateCandidate(
 export function recordControlGateDecision(
   db: DbHandle,
   decision: ControlGateDecision,
+  job_id?: string,
 ): string {
-  db.prepare<unknown, [string, string, string | null, string | null, string, string, string, string, string, number, string, number, string]>(
+  // Idempotency: for turn-phase events with a job_id, skip if already recorded.
+  // Uses a targeted pre-check so constraint violations on other fields still
+  // propagate as errors (not silently dropped by a broad INSERT OR IGNORE).
+  if (job_id !== undefined && decision.phase === "turn") {
+    const existing = db
+      .prepare<{ id: string }, [string]>(
+        "SELECT id FROM control_gate_events WHERE job_id = ? AND phase = 'turn' LIMIT 1",
+      )
+      .get(job_id);
+    if (existing) return existing.id;
+  }
+
+  db.prepare<unknown, [string, string, string | null, string | null, string, string, string, string, string, number, string, number, string, string | null]>(
     `INSERT INTO control_gate_events
        (id, phase, turn_id, candidate_id, level,
         probes_json, lenses_json, triggers_json,
         budget_class, critic_model_allowed, persist_policy,
-        direct_commit_allowed, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        direct_commit_allowed, created_at, job_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     decision.id,
     decision.phase,
@@ -272,6 +285,7 @@ export function recordControlGateDecision(
     decision.persist_policy,
     0,
     decision.created_at,
+    job_id ?? null,
   );
   return decision.id;
 }

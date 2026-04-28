@@ -57,6 +57,7 @@ async function main(): Promise<void> {
   });
 
   const db = openDatabase({ path: resolveDbPath() });
+  assertNoPendingProviderRunsBeforeMigration006(db);
   migrate(db, resolveMigrationsPath());
 
   const recovery = runStartupRecovery(db, {
@@ -154,7 +155,7 @@ async function main(): Promise<void> {
     required_bun_version: config.runtime.required_bun_version,
     current_bun_version: Bun.version,
     bootstrap_whoami: config.bootstrap_whoami,
-    expected_schema_version: 5,
+    expected_schema_version: 6,
     config_ok: () => {
       const missing: string[] = [];
       if (!config.telegram.bot_token) missing.push("TELEGRAM_BOT_TOKEN");
@@ -264,6 +265,56 @@ async function main(): Promise<void> {
 
   events.info("boot.shutdown", {});
   db.close();
+}
+
+// assertNoPendingProviderRunsBeforeMigration006 — upgrade-boundary guard.
+//
+// Migration 006 adds job_id to control_gate_events. A provider_run job
+// that wrote a NULL-job_id gate row under schema 5 and is then retried
+// after migration 006 would insert a second turn row (the unique index
+// does not constrain NULL rows), permanently duplicating the append-only
+// ledger. This function aborts boot if any provider_run jobs are still
+// in running or queued state at the time migrations are about to run.
+//
+// It is safe to call on a fresh DB (no jobs table yet — the query
+// returns 0 rows and the function is a no-op).
+function assertNoPendingProviderRunsBeforeMigration006(db: import("~/db.ts").DbHandle): void {
+  // Check if the settings table exists — fresh DBs have no schema yet; skip guard.
+  const hasSettings = db
+    .prepare<{ n: number }, []>(
+      "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name='settings'",
+    )
+    .get();
+  if (!hasSettings || hasSettings.n === 0) return;
+
+  // Check if migration 006 has already been applied (safe to skip guard).
+  const already = db
+    .prepare<{ n: number }, [string]>(
+      "SELECT COUNT(*) AS n FROM settings WHERE key = 'schema.migrations.006'",
+    )
+    .get("schema.migrations.006");
+  if (already && already.n > 0) return;
+
+  // Check if the jobs table exists (migration 001 may not have run yet).
+  const hasJobs = db
+    .prepare<{ n: number }, []>(
+      "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name='jobs'",
+    )
+    .get();
+  if (!hasJobs || hasJobs.n === 0) return;
+
+  const pending = db
+    .prepare<{ n: number }, []>(
+      "SELECT COUNT(*) AS n FROM jobs WHERE job_type = 'provider_run' AND status IN ('running', 'queued')",
+    )
+    .get();
+  if (pending && pending.n > 0) {
+    throw new Error(
+      `migration 006 upgrade guard: ${pending.n} provider_run job(s) are running/queued. ` +
+      "Drain the queue (wait for completion or mark failed) before deploying schema 6. " +
+      "See migrations/006_control_gate_job_id.sql for details.",
+    );
+  }
 }
 
 function resolveDbPath(): string {

@@ -137,4 +137,33 @@ describe("Phase 1B.1 — Control Gate telemetry", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]!.level).toBe("L0");
   });
+
+  test("provider_run persists job_id on the control_gate_events row (issue #45)", async () => {
+    seedProviderJob("j-cg-jobid", "k-cg-jobid", "테스트 메시지");
+    await runWorkerOnce(deps());
+
+    const row = db
+      .prepare<{ job_id: string | null }, []>(
+        "SELECT job_id FROM control_gate_events LIMIT 1",
+      )
+      .get();
+    expect(row?.job_id).toBe("j-cg-jobid");
+  });
+
+  test("retrying the same job does not insert a second control_gate_events row (idempotency)", async () => {
+    // Simulate retry: insert the job again with the same id after worker run.
+    seedProviderJob("j-cg-retry", "k-cg-retry", "재시도 테스트");
+    await runWorkerOnce(deps());
+
+    // Reset job to queued to simulate retry.
+    db.prepare<unknown, [string]>("UPDATE jobs SET status='queued' WHERE id=?").run("j-cg-retry");
+    await runWorkerOnce(deps());
+
+    const rows = db
+      .prepare<{ job_id: string | null }, []>(
+        "SELECT job_id FROM control_gate_events WHERE job_id = 'j-cg-retry'",
+      )
+      .all();
+    expect(rows).toHaveLength(1);
+  });
 });

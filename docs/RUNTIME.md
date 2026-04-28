@@ -161,8 +161,7 @@ substrate) landed earlier and are described below.
 - **Phase 1B.1**: `src/queue/worker.ts` calls `evaluateTurn()` +
   `recordControlGateDecision()` before non-system `provider_run` job
   (not `summary_generation`). All turns are recorded at L0; signal
-  detection is deferred (see issue #45 for `job_id` attribution and
-  idempotency follow-up).
+  detection is deferred. `job_id` attribution is now implemented (migration 006, issue #45).
 - **Phase 1B.2**: `src/context/builder.ts` gains a `judgment_items`
   slot (priority 600, between `memory_user_stated` and `recent_turns`).
   `src/queue/worker.ts` queries `judgment_items` with filters
@@ -348,7 +347,7 @@ rows from provider output: **not implemented**.
   Telegram write commands (propose/approve/commit). `judgment_edges`
   has no runtime-wired reader. Resume-mode judgment refresh is
   pending (issue #44). `control_gate_events` `job_id` attribution
-  and idempotency is pending (issue #45).
+  is now implemented (migration 006, issue #45).
 
 **Stage 4** — Context Compiler: `current_operating_view`
 projection (DEC-036) and the Stage 4 Context Compiler that would
@@ -364,8 +363,8 @@ replace `src/context/builder.ts` + `src/context/packer.ts` are
 - Control Gate evaluators (`evaluateTurn`, `evaluateCandidate`) and
   `control_gate_events` ledger: **implemented and runtime-wired**
   (Phase 1B.1). `src/queue/worker.ts` calls `evaluateTurn()` +
-  `recordControlGateDecision()` per non-system `provider_run`. Pending: `job_id`
-  attribution and retry idempotency (issue #45).
+  `recordControlGateDecision(db, decision, job.id)` per non-system `provider_run`.
+  `job_id` attribution implemented (migration 006, issue #45).
 - Judgment context injection: **implemented and runtime-wired**
   (Phase 1B.2). `src/queue/worker.ts` queries active/eligible/normal/global/
   time-valid rows and injects them into `buildContext()`. Pending: resume-mode
