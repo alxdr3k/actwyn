@@ -70,7 +70,7 @@ deployment shape). Everything else is a `DEC-###`.
 | DEC-020 | Telegram message chunking at 3,800 chars                       | accepted |
 | DEC-021 | CJK-safer token estimator rule                                 | accepted |
 | DEC-022 | second-brain GitHub repo는 actwyn judgment의 canonical 아님    | accepted |
-| DEC-023 | `JudgmentItem.kind` v1 도입 enum 범위 (6 enforced + 5 deferred) | accepted |
+| DEC-023 | `JudgmentItem.kind` v1 도입 enum 범위 (6 enforced + 6 deferred) | accepted |
 | DEC-024 | P0.5 cognitive scope (Goal / Workspace / Reflection 최소형)    | accepted |
 | DEC-025 | JudgmentItem metacognitive 필드는 P0.5 schema에 optional 도입  | accepted |
 | DEC-026 | `JudgmentItem.status` enum P0.5 도입 범위 (9 enum 모두)        | superseded by DEC-033 |
@@ -677,17 +677,20 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
   **11개** (`fact` / `preference` / `claim` / `principle` /
   `hypothesis` / `experiment` / `result` / `decision` /
   `current_state` / `procedure` / `caution`)를 conceptual catalog로
-  정의했다. Phase 1 schema 첫 도입에서 11개를 모두 enforce하면
+  정의했다. 이후 ADR-0013 §architecture_assumption refine이 `assumption`
+  (`kind=assumption` + `target_domain` 패턴)을 추가해 conceptual catalog는
+  **12개**가 됐다. Phase 1 schema 첫 도입에서 12개를 모두 enforce하면
   사용자 측 모델링 비용 / classification 비용이 크고, 실제로 actwyn
   P0 use case에 모두 필요하다는 evidence는 아직 없다. Open question
   Q-028 (kind v1 enum 범위)에 대한 commitment 단계의 출발점이 필요하다.
 - Decision: Phase 1 (P0.5) 첫 schema 도입은 **6개 enforced kind**에서
   시작한다: `fact` / `preference` / `decision` / `current_state` /
-  `procedure` / `caution`. 나머지 5개 deferred (`claim` / `principle` /
-  `hypothesis` / `experiment` / `result`)는 evidence가 모일 때 별
-  마이그레이션 / DEC로 추가한다. 단, schema 자체는 enum 확장이 비
+  `procedure` / `caution`. 나머지 6개 deferred (`claim` / `principle` /
+  `hypothesis` / `experiment` / `result` / `assumption`)는 evidence가 모일 때 별
+  마이그레이션 / DEC로 추가한다. `assumption`은 P1 도입 예정
+  (ADR-0013 §architecture_assumption). schema 자체는 enum 확장이 비
   파괴적으로 가능한 형태 (TEXT NOT NULL + 검증)로 작성한다.
-- Alternatives considered: 처음부터 11개 모두 도입; 더 좁게 4개
+- Alternatives considered: 처음부터 12개 모두 도입; 더 좁게 4개
   (`fact` / `preference` / `decision` / `caution`)부터; Phase 2
   (typed tool) 도입 시점까지 enum 범위 미정.
 - Impacted docs: `docs/JUDGMENT_SYSTEM.md` §Enum catalog,

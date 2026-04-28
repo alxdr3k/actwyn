@@ -154,7 +154,7 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | DEC-020 | Telegram message chunking at 3,800 chars                     | §8.4                     | §9.4               | —                            |
 | DEC-021 | CJK-safer token estimator rule                               | §12.6                    | §10.4              | —                            |
 | DEC-022 | second-brain GitHub repo는 actwyn judgment의 canonical 아님    | §12 (taxonomy 확장 예정) | §11.3              | ADR-0009 §1; second-brain Round 7 |
-| DEC-023 | `JudgmentItem.kind` v1 enum 범위 (6 enforced + 5 deferred)   | —                        | —                  | ADR-0009 §Risks; Q-028        |
+| DEC-023 | `JudgmentItem.kind` v1 enum 범위 (6 enforced + 6 deferred)   | —                        | —                  | ADR-0009 §Risks; Q-028; ADR-0013 §architecture_assumption (assumption 추가) |
 | DEC-024 | P0.5 cognitive scope (Goal / Workspace / Reflection 최소형)  | —                        | —                  | ADR-0010 §Phase 재구성; Q-032; **Reflection clause superseded by DEC-035** |
 | DEC-025 | JudgmentItem metacognitive 필드 P0.5 optional 도입           | —                        | —                  | ADR-0010 §Decision 3          |
 | DEC-026 | `JudgmentItem.status` enum P0.5 9 enum 모두 schema 도입 (**superseded by DEC-033**) | —          | —                  | ADR-0011 §Decision 2; Q-036; ADR-0013 §Decision 3 |

@@ -87,8 +87,8 @@ queue/worker
   ├─ claim queued job (BEGIN IMMEDIATE → single-row update)
   ├─ dispatch by job_type
   │   ├─ provider_run        → providers/claude
-  │   │     └─ spawn detached, parse stream-json, persist turns + raw events
-  │   │     └─ resume_mode then optional replay_mode fallback
+  │   │     └─ spawn detached, parse stream-json, return parsed events
+  │   │     └─ worker persists turns + raw events; resume_mode then optional replay_mode fallback
   │   ├─ summary_generation  → memory/summary (advisory Claude profile)
   │   ├─ storage_sync        → storage/sync → S3
   │   └─ notification_retry  → outbound chunk retry
