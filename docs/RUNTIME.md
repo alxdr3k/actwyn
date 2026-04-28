@@ -3,6 +3,9 @@
 > Status: thin current-state map · Owner: project lead ·
 > Last updated: 2026-04-29
 >
+> This file is an index, not an implementation log. Replace
+> current-state summaries; do not append phase history.
+>
 > This file describes the implemented runtime as it exists in
 > `src/`. The fuller, design-level state-machine specifications
 > for the implemented P0 vertical live in `docs/02_HLD.md` §6. The

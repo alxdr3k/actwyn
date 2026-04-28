@@ -3,8 +3,11 @@
 > Status: thin current-state map · Owner: project lead ·
 > Last updated: 2026-04-29
 >
+> This file is an index, not an implementation log. Replace
+> current-state summaries; do not append phase history.
+>
 > This file lists verification commands (`test`, `typecheck`, `lint:redactor`,
-> `ci`). The `dev` script (`bun run dev`) is a local service runner, not a
+> `lint:thin-docs`, `ci`). The `dev` script (`bun run dev`) is a local service runner, not a
 > test command, and is not part of `bun run ci` — see `docs/OPERATIONS.md`
 > for local dev setup.
 >
@@ -48,12 +51,16 @@ bun run typecheck
 
 ```sh
 bun run lint:redactor
+bun run lint:thin-docs
 ```
 
-This runs `scripts/check-single-redactor.ts`, which enforces the
-HLD §13.1 single-redactor invariant: only
-`src/observability/redact.ts` may define redaction patterns or emit
-`[REDACTED:*]` placeholders.
+This runs:
+
+- `scripts/check-single-redactor.ts`, which enforces the HLD §13.1
+  single-redactor invariant: only `src/observability/redact.ts` may
+  define redaction patterns or emit `[REDACTED:*]` placeholders.
+- `scripts/check-thin-docs.ts`, which enforces thin current-state doc
+  line budgets and role notes.
 
 There is no general-purpose ESLint/Prettier step in P0. If you
 introduce one, update this file.
@@ -151,7 +158,7 @@ This is the all-in-one pre-PR check. It runs (per
 `package.json#scripts.ci`):
 
 ```
-bun run lint:redactor && bun run typecheck && bun test
+bun run lint:redactor && bun run lint:thin-docs && bun run typecheck && bun test
 ```
 
 ## Before opening a PR

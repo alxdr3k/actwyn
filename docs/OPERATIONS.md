@@ -1,7 +1,10 @@
 # Operations
 
 > Status: thin current-state map · Owner: project lead ·
-> Last updated: 2026-04-28
+> Last updated: 2026-04-29
+>
+> This file is an index, not an implementation log. Replace
+> current-state summaries; do not append phase history.
 >
 > This file covers only what is verifiable from `src/`,
 > `config/`, `deploy/`, and `.env.example`. Anything not listed
@@ -150,8 +153,9 @@ After install:
    - `migrations/*.sql` (consumed by `src/db/migrator.ts` against
      `ACTWYN_MIGRATIONS_PATH`, defaulting to `/opt/actwyn/migrations`).
    - `src/*` (the application).
-   - `scripts/check-single-redactor.ts` (used by `bun run lint:redactor`;
-     listed in the existing `deploy/systemd/README.md`).
+   - `scripts/check-single-redactor.ts` and `scripts/check-thin-docs.ts`
+     (used by local validation; listed in the existing
+     `deploy/systemd/README.md`).
 3. As root: `systemctl enable --now actwyn.service`.
 4. Tail logs: `journalctl -u actwyn -f`.
 

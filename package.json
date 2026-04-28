@@ -12,7 +12,8 @@
     "test": "bun test",
     "typecheck": "bunx --bun tsc --noEmit",
     "lint:redactor": "bun run scripts/check-single-redactor.ts",
-    "ci": "bun run lint:redactor && bun run typecheck && bun test",
+    "lint:thin-docs": "bun run scripts/check-thin-docs.ts",
+    "ci": "bun run lint:redactor && bun run lint:thin-docs && bun run typecheck && bun test",
     "docs:generate:schema": "bun run scripts/generate-schema-doc.ts"
   },
   "devDependencies": {

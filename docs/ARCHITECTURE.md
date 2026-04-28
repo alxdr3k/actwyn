@@ -3,6 +3,9 @@
 > Status: thin current-state overview · Owner: project lead ·
 > Last updated: 2026-04-29
 >
+> This file is an index, not an implementation log. Replace
+> current-state summaries; do not append phase history.
+>
 > This is a short pointer doc. For why decisions were made, see
 > `docs/adr/` (ADR-0001 … ADR-0015). For acceptance contracts and
 > full P0 design rationale, see `docs/PRD.md` and `docs/02_HLD.md`.

@@ -17,6 +17,10 @@ this template is a checklist, not a place for long prose.
   - [ ] `docs/RUNTIME.md`
   - [ ] `docs/TESTING.md`
   - [ ] `docs/OPERATIONS.md`
+- [ ] Thin current-state docs were updated by replacing stale current state,
+      not by appending implementation history
+- [ ] Detailed implementation history stays in PRs, tests, ADRs, generated
+      docs, issues, or commits
 - [ ] Added or superseded an ADR under `docs/adr/`
 - [ ] Updated registers (`docs/07_QUESTIONS_REGISTER.md` /
       `docs/08_DECISION_REGISTER.md` /

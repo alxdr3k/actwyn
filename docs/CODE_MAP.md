@@ -3,6 +3,9 @@
 > Status: thin current-state map · Owner: project lead ·
 > Last updated: 2026-04-29
 >
+> This file is an index, not an implementation log. Replace
+> current-state summaries; do not append phase history.
+>
 > This file maps the actual files in `src/`, `test/`, `migrations/`,
 > `scripts/`, `config/`, and `deploy/`. It is meant to be skimmed by
 > AI coding agents before they edit code, so they touch the right
@@ -30,7 +33,7 @@ Status legend:
 | --------------------------------- | ----------------------------------------------------------------------- |
 | `src/main.ts`                     | systemd entrypoint and composition root. Wires real transports.        |
 | `src/config.ts`                   | Typed config loader: reads env vars + `config/runtime.json`; fails fast on missing required fields. |
-| `package.json`                    | Bun scripts (`dev`, `test`, `typecheck`, `lint:redactor`, `ci`, `docs:generate:schema`). `dev` runs `doppler run -- bun run src/main.ts`. |
+| `package.json`                    | Bun scripts (`dev`, `test`, `typecheck`, `lint:redactor`, `lint:thin-docs`, `ci`, `docs:generate:schema`). `dev` runs `doppler run -- bun run src/main.ts`. |
 | `doppler.yaml`                    | Doppler project/config pin (`actwyn` / `dev`) for local development secret injection. |
 | `bunfig.toml`                     | Bun runtime config.                                                     |
 | `.bun-version`                    | Pinned Bun version.                                                     |
@@ -92,8 +95,8 @@ Status legend:
 The Judgment System (`JudgmentItem`, Control Gate, Tension,
 ReflectionTriageEvent, `current_operating_view`, vector / graph
 projections) is architecturally committed under ADR-0009 … ADR-0013
-and `docs/JUDGMENT_SYSTEM.md`. Phase 1A slices and Phase 1B.1–1B.3
-runtime wiring have landed:
+and `docs/JUDGMENT_SYSTEM.md`. Current implemented/runtime-reachable
+slice:
 
 - **Phase 1A.1–1A.8**: schema skeleton, proposal/review/source/evidence/commit/retirement
   repositories, query/explain read surfaces, typed-tool contracts, Control Gate evaluator +
@@ -104,7 +107,7 @@ runtime wiring have landed:
 - **Phase 1B.2**: `src/context/builder.ts` gains `judgment_items` slot (priority 600).
   Worker queries active/eligible/normal/global/time-valid judgments and injects them
   into `buildContext()` in `replay_mode`. Excluded from `summary_generation`.
-- **Phase 1B.3**: `/judgment` and `/judgment_explain <id>` Telegram commands added to
+- **Phase 1B.3**: `/judgment` and `/judgment_explain <id>` are known commands in
   `KNOWN_COMMANDS` (inbound) and `SYSTEM_COMMANDS` (worker). `executeJudgmentQueryTool`
   + `executeJudgmentExplainTool` from `src/judgment/tool.ts` imported by worker for
   these commands only. Command output not stored as turns.
@@ -164,6 +167,7 @@ See `docs/RUNTIME.md` for the full runtime boundary description.
 | Path                                       | Purpose                                                                              |
 | ------------------------------------------ | ------------------------------------------------------------------------------------ |
 | `scripts/check-single-redactor.ts`         | Lint that enforces the single-redactor invariant (HLD §13.1).                        |
+| `scripts/check-thin-docs.ts`               | Lint that enforces thin current-state doc line budgets and role notes.               |
 | `scripts/generate-schema-doc.ts`           | Generates `docs/generated/schema.md` from migration SQL files. Run via `bun run docs:generate:schema` after any migration change. |
 
 ## Deploy
@@ -203,6 +207,7 @@ See `docs/RUNTIME.md` for the full runtime boundary description.
 | `test/redaction.test.ts`                          | Redaction pattern coverage (DEC-010, AC-SEC-001).                                |
 | `test/skills/*.test.ts`                           | Codex skill contract/static compatibility checks.                                |
 | `test/single-redactor.test.ts`                    | Asserts the single-redactor lint catches violations.                             |
+| `test/thin-docs.test.ts`                          | Asserts the thin current-state docs guard catches budget and implementation-log drift. |
 | `test/startup/recovery.test.ts`                   | Boot-time reconciliation behavior (AC-JOB-002).                                  |
 | `test/storage/roundtrip.test.ts`                  | Local + S3 roundtrip.                                                            |
 | `test/storage/state_machine.test.ts`              | `storage_objects.status` transitions.                                            |
