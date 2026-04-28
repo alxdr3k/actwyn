@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, existsSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -90,6 +90,22 @@ describe("backup-sqlite — WAL-safe snapshot", () => {
     expect(() => createSqliteBackup({ sourcePath: dir, outputPath: join(dir, "out.db") })).toThrow(
       /source path is not a file/,
     );
+  });
+
+  test("rejects source/output aliasing through symlinked directories", () => {
+    const dir = tempDir();
+    const dataDir = join(dir, "data");
+    const aliasDir = join(dir, "alias");
+    mkdirSync(dataDir);
+    symlinkSync(dataDir, aliasDir, "dir");
+    const sourcePath = join(dataDir, "live.db");
+    const outputPath = join(aliasDir, "live.db");
+    seedSource(sourcePath, "row");
+
+    expect(() => createSqliteBackup({ sourcePath, outputPath, force: true })).toThrow(
+      /source and output paths must differ/,
+    );
+    expect(readItemBodies(sourcePath)).toEqual(["row"]);
   });
 
   test("verifySqliteBackup reports a corrupt output deterministically", () => {

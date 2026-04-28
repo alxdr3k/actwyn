@@ -37,7 +37,7 @@ export function createSqliteBackup(opts: CreateSqliteBackupOptions): SqliteBacku
   const verify = opts.verify ?? true;
   const busyTimeoutMs = Math.max(1, Math.trunc(opts.busyTimeoutMs ?? 5000));
 
-  if (sourcePath === outputPath) {
+  if (pathsReferToSameFile(sourcePath, outputPath)) {
     throw new BackupError("source and output paths must differ");
   }
   if (existsSync(outputPath) && !force) {
@@ -193,6 +193,19 @@ function resolveRequiredPath(path: string, label: string): string {
     throw new BackupError(`${label} path is not a file: ${resolved}`);
   }
   return resolved;
+}
+
+function pathsReferToSameFile(leftPath: string, rightPath: string): boolean {
+  if (leftPath === rightPath) {
+    return true;
+  }
+  try {
+    const left = statSync(leftPath);
+    const right = statSync(rightPath);
+    return left.dev === right.dev && left.ino === right.ino;
+  } catch {
+    return false;
+  }
 }
 
 function readPragmaNumber(db: Database, name: "page_count" | "page_size"): number {
