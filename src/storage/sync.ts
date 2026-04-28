@@ -40,6 +40,8 @@ export interface SyncConfig {
   readonly local_path: (storage_object_id: string) => string;
   /** S3 bucket for new storage_objects rows that don't inherit a bucket from inbound. */
   readonly bucket?: string | undefined;
+  /** Optional capacity-pressure throttle for upload batches. */
+  readonly max_uploads_per_pass?: number | undefined;
 }
 
 export interface SyncDeps {
@@ -74,9 +76,9 @@ interface EligibleDeletionRow {
 // against syncing metadata-only row types.
 // ---------------------------------------------------------------
 
-export function selectEligibleUploads(db: DbHandle): EligibleUploadRow[] {
-  return db
-    .prepare<EligibleUploadRow, []>(
+export function selectEligibleUploads(db: DbHandle, limit?: number | undefined): EligibleUploadRow[] {
+  const limitSql = limit === undefined ? "" : " LIMIT ?";
+  const sql =
       `SELECT id, storage_backend, bucket, storage_key, retention_class,
               mime_type, sha256, error_json,
               NULL AS attempt_count_json
@@ -87,9 +89,14 @@ export function selectEligibleUploads(db: DbHandle): EligibleUploadRow[] {
          AND storage_backend = 's3'
          AND artifact_type IN
            ('user_upload', 'generated_artifact', 'redacted_provider_transcript',
-            'conversation_transcript', 'memory_snapshot', 'parser_fixture')`,
-    )
-    .all();
+            'conversation_transcript', 'memory_snapshot', 'parser_fixture')
+       ORDER BY created_at ASC, id ASC${limitSql}`;
+  if (limit === undefined) {
+    return db.prepare<EligibleUploadRow, []>(sql).all();
+  }
+  return db
+    .prepare<EligibleUploadRow, [number]>(sql)
+    .all(limit);
 }
 
 export function selectEligibleDeletions(db: DbHandle): EligibleDeletionRow[] {
@@ -114,7 +121,7 @@ export interface UploadPassResult {
 }
 
 export async function runUploadPass(deps: SyncDeps): Promise<UploadPassResult> {
-  const rows = selectEligibleUploads(deps.db);
+  const rows = selectEligibleUploads(deps.db, deps.config.max_uploads_per_pass);
   let uploaded = 0;
   let failed = 0;
   let local_missing = 0;

@@ -8,6 +8,7 @@ import { openDatabase, type DbHandle } from "../../src/db.ts";
 import { migrate } from "../../src/db/migrator.ts";
 import { runDoctor } from "../../src/commands/doctor.ts";
 import { BunS3Transport } from "../../src/storage/s3.ts";
+import { evaluateStorageCapacity } from "../../src/storage/capacity.ts";
 
 const MIGRATIONS = join(import.meta.dir, "..", "..", "migrations");
 
@@ -336,6 +337,34 @@ describe("AC-OBS-001 / Blocker 8 — s3_endpoint_smoke attributes failures to st
     const check = results.find((r) => r.name === "s3_endpoint_smoke")!;
     expect(check.status).toBe("fail");
     expect(check.detail).toContain("list");
+  });
+});
+
+describe("storage_capacity check", () => {
+  test("warns when artifact capacity is above threshold", async () => {
+    const capacity = evaluateStorageCapacity({
+      objects_path: "/objects",
+      used_bytes: 301,
+      free_bytes: 500,
+      total_bytes: 1000,
+      thresholds: {
+        warning_used_bytes: 100,
+        degraded_used_bytes: 200,
+        hard_used_bytes: 300,
+        warning_free_ratio: 0.2,
+        degraded_free_ratio: 0.15,
+        hard_free_ratio: 0.1,
+        reduced_sync_batch_size: 2,
+      },
+    });
+    const results = await runDoctor({
+      db,
+      ...BASE_DEPS,
+      storage_capacity_check: () => capacity,
+    });
+    const check = results.find((r) => r.name === "storage_capacity")!;
+    expect(check.status).toBe("warn");
+    expect(check.detail).toContain("long_term=blocked");
   });
 });
 

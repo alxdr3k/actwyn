@@ -32,6 +32,7 @@ import type { TelegramMessage, TelegramUpdate } from "~/telegram/types.ts";
 import { parseSaveIntent } from "~/commands/save.ts";
 import { parseCorrection } from "~/commands/correct.ts";
 import { cancelJob } from "~/commands/cancel.ts";
+import type { StorageCapacityReport } from "~/storage/capacity.ts";
 
 // ---------------------------------------------------------------
 // Classification (pure)
@@ -194,6 +195,7 @@ export interface InboundConfig {
   readonly bootstrap_whoami: boolean;
   readonly attachment: InboundAttachmentConfig;
   readonly s3_bucket: string | null;
+  readonly storage_capacity_check?: () => StorageCapacityReport;
 }
 
 export interface InboundDeps {
@@ -510,6 +512,11 @@ export function classifyAndCommit(
   const explicitSaveIntent =
     resolvedClassification.kind === "text" &&
     (resolvedClassification as { explicit_save_intent?: boolean }).explicit_save_intent === true;
+  const capacity =
+    explicitSaveIntent && deps.config.storage_capacity_check
+      ? deps.config.storage_capacity_check()
+      : null;
+  const longTermAllowed = !capacity || capacity.long_term_writes_allowed;
 
   // Attachments: metadata-only insert, NO network I/O.
   const storageIds: string[] = [];
@@ -529,7 +536,7 @@ export function classifyAndCommit(
         now: deps.now(),
       });
       // Override retention_class when caption expressed explicit save intent.
-      const retentionClass = explicitSaveIntent ? "long_term" : row.retention_class;
+      const retentionClass = explicitSaveIntent && longTermAllowed ? "long_term" : row.retention_class;
       deps.db
         .prepare<
           unknown,
@@ -594,6 +601,16 @@ export function classifyAndCommit(
     skip_reason: null,
     job_id: effectiveJobId,
     storage_object_ids: storageIds,
+    ...(explicitSaveIntent && !longTermAllowed && capacity
+      ? {
+          instant_response: {
+            chat_id,
+            text:
+              "첨부파일은 받았지만 디스크 용량 임계치 때문에 long_term 저장은 보류했습니다. " +
+              `현재 상태: ${capacity.detail}`,
+          },
+        }
+      : {}),
   };
 }
 

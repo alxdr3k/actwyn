@@ -56,6 +56,11 @@ import {
   runUploadPass,
   type SyncConfig,
 } from "~/storage/sync.ts";
+import {
+  reducedSyncBatchLimit,
+  unknownStorageCapacityReport,
+  type StorageCapacityReport,
+} from "~/storage/capacity.ts";
 import type { S3Transport } from "~/storage/s3.ts";
 import {
   captureOne,
@@ -1133,11 +1138,16 @@ async function runStorageSyncJob(deps: WorkerDeps, job: ClaimedJob): Promise<Run
     return commitSystemNoop(deps, job);
   }
 
+  const capacity = await readStorageCapacityForWorker(deps);
+  const batchLimit = reducedSyncBatchLimit(capacity, deps.config.sync.max_uploads_per_pass);
   const syncDeps = {
     db: deps.db,
     transport: deps.s3,
     events: deps.events,
-    config: deps.config.sync,
+    config: {
+      ...deps.config.sync,
+      ...(batchLimit !== undefined ? { max_uploads_per_pass: batchLimit } : {}),
+    },
   };
 
   let uploadResult: { uploaded: number; failed: number; local_missing: number };
@@ -1235,6 +1245,17 @@ function commitSystemNoop(deps: WorkerDeps, job: ClaimedJob): RunResult {
   return { job_id: job.id, terminal: "succeeded", turn_id: null, provider_run_id: "" };
 }
 
+async function readStorageCapacityForWorker(
+  deps: WorkerDeps,
+): Promise<StorageCapacityReport | null> {
+  if (!deps.doctor?.storage_capacity_check) return null;
+  try {
+    return await deps.doctor.storage_capacity_check();
+  } catch (e) {
+    return unknownStorageCapacityReport(e);
+  }
+}
+
 // ---------------------------------------------------------------
 // Auto-trigger summary (AC-MEM-005 / PRD §12.3)
 // ---------------------------------------------------------------
@@ -1328,23 +1349,10 @@ async function enqueueMemorySnapshotSync(
   const sync = deps.config.sync!;
   const content = JSON.stringify(summary) + "\n";
   const bytes = new TextEncoder().encode(content);
-
-  const sha256Buf = await crypto.subtle.digest("SHA-256", bytes);
-  const sha256Hex = Array.from(new Uint8Array(sha256Buf))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-
-  const objectId = deps.newId();
   const now = deps.now();
   const yyyy = now.getUTCFullYear().toString();
   const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
   const dd = String(now.getUTCDate()).padStart(2, "0");
-  const storageKey = `objects/${yyyy}/${mm}/${dd}/${objectId}/${sha256Hex}.jsonl`;
-  const localPath = sync.local_path(objectId);
-
-  // Write S3 staging file (HLD §7.10: no blocking I/O inside transactions).
-  mkdirSync(dirname(localPath), { recursive: true });
-  writeFileSync(localPath, bytes);
 
   // AC-MEM-001: write human-readable memory files per PRD §12 / HLD §11.2.
   // memory/sessions/<session_id>.jsonl — append-only JSONL per session.
@@ -1360,6 +1368,29 @@ async function enqueueMemorySnapshotSync(
     const mdLine = `<!-- ${yyyy}-${mm}-${dd} session=${summary.session_id} summary=${summaryId} -->\n`;
     appendFileSync(join(personalDir, `${yyyy}-${mm}-${dd}.md`), mdLine);
   }
+
+  const capacity = await readStorageCapacityForWorker(deps);
+  if (capacity && !capacity.long_term_writes_allowed) {
+    deps.events.warn("memory.snapshot.storage_capacity_blocked", {
+      job_id: jobId,
+      summary_id: summaryId,
+      capacity: capacity.detail,
+    });
+    return;
+  }
+
+  const sha256Buf = await crypto.subtle.digest("SHA-256", bytes);
+  const sha256Hex = Array.from(new Uint8Array(sha256Buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+
+  const objectId = deps.newId();
+  const storageKey = `objects/${yyyy}/${mm}/${dd}/${objectId}/${sha256Hex}.jsonl`;
+  const localPath = sync.local_path(objectId);
+
+  // Write S3 staging file (HLD §7.10: no blocking I/O inside transactions).
+  mkdirSync(dirname(localPath), { recursive: true });
+  writeFileSync(localPath, bytes);
 
   const bucket = sync.bucket ?? null;
 
@@ -1574,9 +1605,11 @@ async function dispatchSystemCommand(
     }
 
     case "/status": {
+      const capacity = await readStorageCapacityForWorker(deps);
       const report = buildStatusReport(deps.db, {
         session_id: job.session_id,
         chat_id: job.chat_id,
+        storage_capacity: capacity,
         now: deps.now,
       });
       return formatStatus(report);
@@ -1646,6 +1679,8 @@ async function dispatchSystemCommand(
         ...(deps.doctor?.telegram_ping ? { telegram_ping: deps.doctor.telegram_ping } : {}),
         ...(deps.doctor?.s3_ping ? { s3_ping: deps.doctor.s3_ping } : {}),
         ...(deps.doctor?.claude_version ? { claude_version: deps.doctor.claude_version } : {}),
+        ...(deps.doctor?.storage_capacity_check
+          ? { storage_capacity_check: deps.doctor.storage_capacity_check } : {}),
         ...(deps.doctor?.disk_check ? { disk_check: deps.doctor.disk_check } : {}),
         ...(deps.doctor?.claude_lockdown_smoke
           ? { claude_lockdown_smoke: deps.doctor.claude_lockdown_smoke } : {}),
@@ -1677,12 +1712,17 @@ async function dispatchSystemCommand(
 
     case "/save_last_attachment": {
       if (!job.session_id) return "활성 세션이 없습니다.";
+      const capacity = await readStorageCapacityForWorker(deps);
       const result = saveLastAttachment({
         db: deps.db,
         newId: deps.newId,
         session_id: job.session_id,
         caption: args || undefined,
+        storage_capacity: capacity,
       });
+      if (result.blocked_reason === "storage_capacity_critical") {
+        return `저장하지 않았습니다: 디스크 용량 임계치 때문에 long_term 저장이 차단됐습니다. ${result.blocked_detail ?? ""}`;
+      }
       if (result.promoted && result.storage_object_id) {
         const artType = result.artifact_type ?? "user_upload";
         const shortId = result.storage_object_id.slice(0, 8);

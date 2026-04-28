@@ -8,5 +8,14 @@
     "phone_pii_mode": false,
     "high_entropy_min_length": 32,
     "high_entropy_min_bits_per_char": 4.0
+  },
+  "storage_capacity": {
+    "warning_used_bytes": 1000000000,
+    "degraded_used_bytes": 2000000000,
+    "hard_used_bytes": 3000000000,
+    "warning_free_ratio": 0.2,
+    "degraded_free_ratio": 0.15,
+    "hard_free_ratio": 0.1,
+    "reduced_sync_batch_size": 10
   }
 }

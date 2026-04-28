@@ -14,6 +14,7 @@
 // we don't hold).
 
 import type { DbHandle } from "~/db.ts";
+import type { StorageCapacityReport } from "~/storage/capacity.ts";
 
 // ---------------------------------------------------------------
 // Natural-language save intent detector (pure, ADR-0006)
@@ -69,6 +70,8 @@ export interface SaveResult {
   readonly storage_object_id?: string;
   readonly artifact_type?: string;
   readonly memory_artifact_link_id?: string;
+  readonly blocked_reason?: "storage_capacity_critical";
+  readonly blocked_detail?: string;
 }
 
 export function saveLastAttachment(args: {
@@ -76,8 +79,17 @@ export function saveLastAttachment(args: {
   newId: () => string;
   session_id: string;
   caption?: string | undefined;
+  storage_capacity?: StorageCapacityReport | null | undefined;
 }): SaveResult {
   return args.db.tx<SaveResult>(() => {
+    if (args.storage_capacity && !args.storage_capacity.long_term_writes_allowed) {
+      return {
+        promoted: false,
+        blocked_reason: "storage_capacity_critical",
+        blocked_detail: args.storage_capacity.detail,
+      };
+    }
+
     // Find the most recent captured attachment row owned by a
     // job in this session.
     const row = args.db

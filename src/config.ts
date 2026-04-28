@@ -13,6 +13,10 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
+import {
+  DEFAULT_STORAGE_CAPACITY_THRESHOLDS,
+  type StorageCapacityThresholds,
+} from "~/storage/capacity.ts";
 
 export interface RedactionConfig {
   readonly email_pii_mode: boolean;
@@ -26,6 +30,7 @@ export interface RuntimeFileConfig {
   readonly log: { readonly level: LogLevel };
   readonly redaction: RedactionConfig;
   readonly claude_binary: string;
+  readonly storage_capacity: StorageCapacityThresholds;
 }
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -176,13 +181,44 @@ function parseRuntimeFile(path: string): RuntimeFileConfig {
     typeof raw.claude_binary === "string" && raw.claude_binary.trim() !== ""
       ? raw.claude_binary.trim()
       : "claude";
+  const storageCapacity = parseStorageCapacity(raw.storage_capacity);
 
   return {
     required_bun_version: requiredBun.trim(),
     log: { level: log.level as LogLevel },
     redaction: parsed,
     claude_binary: claudeBinary,
+    storage_capacity: storageCapacity,
   };
+}
+
+function parseStorageCapacity(raw: unknown): StorageCapacityThresholds {
+  if (raw === undefined) return { ...DEFAULT_STORAGE_CAPACITY_THRESHOLDS };
+  if (!isRecord(raw)) {
+    throw new ConfigError(`runtime config 'storage_capacity' must be an object`);
+  }
+  const cfg: StorageCapacityThresholds = {
+    warning_used_bytes: expectPositiveInt(raw, "storage_capacity.warning_used_bytes"),
+    degraded_used_bytes: expectPositiveInt(raw, "storage_capacity.degraded_used_bytes"),
+    hard_used_bytes: expectPositiveInt(raw, "storage_capacity.hard_used_bytes"),
+    warning_free_ratio: expectRatio(raw, "storage_capacity.warning_free_ratio"),
+    degraded_free_ratio: expectRatio(raw, "storage_capacity.degraded_free_ratio"),
+    hard_free_ratio: expectRatio(raw, "storage_capacity.hard_free_ratio"),
+    reduced_sync_batch_size: expectPositiveInt(raw, "storage_capacity.reduced_sync_batch_size"),
+  };
+  if (!(cfg.warning_used_bytes < cfg.degraded_used_bytes &&
+        cfg.degraded_used_bytes < cfg.hard_used_bytes)) {
+    throw new ConfigError(
+      "runtime config storage_capacity byte thresholds must increase: warning < degraded < hard",
+    );
+  }
+  if (!(cfg.warning_free_ratio > cfg.degraded_free_ratio &&
+        cfg.degraded_free_ratio > cfg.hard_free_ratio)) {
+    throw new ConfigError(
+      "runtime config storage_capacity free ratios must decrease: warning > degraded > hard",
+    );
+  }
+  return cfg;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -212,6 +248,14 @@ function expectPositiveNumber(obj: Record<string, unknown>, path: string): numbe
   const v = obj[key];
   if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) {
     throw new ConfigError(`runtime config '${path}' must be a positive number`);
+  }
+  return v;
+}
+
+function expectRatio(obj: Record<string, unknown>, path: string): number {
+  const v = expectPositiveNumber(obj, path);
+  if (v >= 1) {
+    throw new ConfigError(`runtime config '${path}' must be a ratio between 0 and 1`);
   }
   return v;
 }

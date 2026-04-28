@@ -146,6 +146,13 @@ describe("selectEligibleUploads — §14.1 query contract", () => {
     const rows = selectEligibleUploads(db);
     expect(rows.find((r) => r.id === "so-up")).toBeUndefined();
   });
+
+  test("optional limit caps selected rows in deterministic order", () => {
+    seedStorageObject({ id: "so-1" });
+    seedStorageObject({ id: "so-2" });
+    const rows = selectEligibleUploads(db, 1);
+    expect(rows.map((r) => r.id)).toEqual(["so-1"]);
+  });
 });
 
 // ---------------------------------------------------------------
@@ -167,6 +174,21 @@ describe("upload pass — happy path", () => {
     expect(r.status).toBe("uploaded");
     expect(r.uploaded_at).not.toBeNull();
     expect(transport.store.size).toBe(1);
+  });
+
+  test("max_uploads_per_pass throttles upload attempts", async () => {
+    seedStorageObject({ id: "so-limit-1", bytes: new Uint8Array([1]) });
+    seedStorageObject({ id: "so-limit-2", bytes: new Uint8Array([2]) });
+    const transport = new StubS3Transport();
+    const res = await runUploadPass({
+      db,
+      transport,
+      config: { max_attempts: 3, local_path: localPath, max_uploads_per_pass: 1 },
+    });
+    expect(res.attempted).toBe(1);
+    expect(res.uploaded).toBe(1);
+    expect(readStatus("so-limit-1").status).toBe("uploaded");
+    expect(readStatus("so-limit-2").status).toBe("pending");
   });
 
   test("local file missing → marked failed with reason", async () => {

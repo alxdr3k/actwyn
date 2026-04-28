@@ -33,6 +33,10 @@ import { runDoctor } from "~/commands/doctor.ts";
 import { runWorkerLoop } from "~/queue/worker.ts";
 import { runStartupRecovery } from "~/startup/recovery.ts";
 import { BunS3Transport } from "~/storage/s3.ts";
+import {
+  readStorageCapacityReport,
+  unknownStorageCapacityReport,
+} from "~/storage/capacity.ts";
 import { MagicMimeProbe } from "~/storage/mime.ts";
 import { BotAPITransport } from "~/telegram/bot_api.ts";
 import { runPoller } from "~/telegram/poller.ts";
@@ -130,6 +134,16 @@ async function main(): Promise<void> {
 
   const localObjectsPath = process.env.ACTWYN_OBJECTS_PATH ?? "/var/lib/actwyn/objects";
   const memoryBasePath = process.env.ACTWYN_MEMORY_PATH ?? "/var/lib/actwyn/memory";
+  const storageCapacityCheck = () => {
+    try {
+      return readStorageCapacityReport({
+        objects_path: localObjectsPath,
+        thresholds: config.runtime.storage_capacity,
+      });
+    } catch (e) {
+      return unknownStorageCapacityReport(e);
+    }
+  };
 
   // Shared registry: worker populates this before each provider_run; the
   // inbound path reads it to abort a running job immediately on /cancel
@@ -144,6 +158,7 @@ async function main(): Promise<void> {
       bootstrap_whoami: config.bootstrap_whoami,
       attachment: { max_inbound_size_bytes: 20 * 1024 * 1024 },
       s3_bucket: config.s3.bucket,
+      storage_capacity_check: storageCapacityCheck,
     },
     newId: () => crypto.randomUUID(),
     now: () => new Date(),
@@ -174,6 +189,7 @@ async function main(): Promise<void> {
       return ok ? { ok: true } : { ok: false, detail: "bearer token not redacted" };
     },
     s3_ping: () => s3.ping(),
+    storage_capacity_check: storageCapacityCheck,
     telegram_ping: async () => {
       try {
         const res = await fetch(`https://api.telegram.org/bot${config.telegram.bot_token}/getMe`);

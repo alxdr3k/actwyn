@@ -38,7 +38,7 @@ Status legend:
 | `bunfig.toml`                     | Bun runtime config.                                                     |
 | `.bun-version`                    | Pinned Bun version.                                                     |
 | `tsconfig.json`                   | TypeScript compiler config (`~/*` path alias to `src/*`).               |
-| `config/runtime.json`             | Tunables (Bun version, log level, redaction config). Optional `claude_binary` field overrides the default `claude` PATH lookup; do not commit machine-local paths. |
+| `config/runtime.json`             | Tunables (Bun version, log level, redaction config, storage-capacity thresholds). Optional `claude_binary` field overrides the default `claude` PATH lookup; do not commit machine-local paths. |
 | `.env.example`                    | Required env surface for runtime.                                       |
 
 ## Runtime / Telegram
@@ -76,8 +76,9 @@ Status legend:
 | `migrations/005_control_gate_events.sql` | Phase 1A.8 append-only Control Gate ledger: `control_gate_events` table with CHECK constraints (level L0–L3, phase, budget_class, persist_policy, direct_commit_allowed=0), BEFORE UPDATE/DELETE/INSERT triggers enforcing immutability (including INSERT OR REPLACE block). |
 | `migrations/006_control_gate_job_id.sql` | Phase 1B.1 job attribution: adds `job_id` column + partial UNIQUE index on `(job_id) WHERE job_id IS NOT NULL AND phase='turn'` (retry idempotency). Resolves issue #45. |
 | `src/storage/local.ts`            | Local object read / existence / remove helpers (`readLocal`, `localExists`, `removeLocal`). Byte writes happen in `src/telegram/attachment_capture.ts`; memory snapshot writes in `src/queue/worker.ts`. |
+| `src/storage/capacity.ts`         | DEC-018 local artifact capacity evaluator. Reads `ACTWYN_OBJECTS_PATH`, classifies `ok` / `warn` / `degraded` / `critical`, and supplies the long-term-write gate plus reduced sync batch limit. |
 | `src/storage/s3.ts`               | Hetzner Object Storage transport (Bun.S3Client based).                                       |
-| `src/storage/sync.ts`             | `storage_sync` worker; advances `storage_objects.status`.                                    |
+| `src/storage/sync.ts`             | `storage_sync` worker; advances `storage_objects.status`; honors optional capacity-pressure upload batch limits. |
 | `src/storage/objects.ts`          | Storage key and extension helpers (`safeExtensionFromMime`, `generateStorageKey`, `finalizeStorageKey`, `isProvisionalKey`). Performs no SQLite reads/writes. |
 | `src/storage/mime.ts`             | Magic-bytes MIME probe used during attachment capture.                                       |
 
@@ -212,7 +213,9 @@ See `docs/RUNTIME.md` for the full runtime boundary description.
 | `test/thin-docs.test.ts`                          | Asserts the thin current-state docs guard catches budget and implementation-log drift. |
 | `test/startup/recovery.test.ts`                   | Boot-time reconciliation behavior (AC-JOB-002).                                  |
 | `test/storage/roundtrip.test.ts`                  | Local + S3 roundtrip.                                                            |
+| `test/storage/capacity.test.ts`                   | DEC-018 artifact capacity classification, directory sizing, and sync batch-limit helpers. |
 | `test/storage/state_machine.test.ts`              | `storage_objects.status` transitions.                                            |
+| `test/storage/capacity.test.ts`                   | DEC-018 artifact-capacity classification and sync throttle helpers.              |
 | `test/telegram/*.test.ts`                         | Telegram inbound classifier, poller offset durability, attachment metadata.      |
 
 ## Stale / superseded

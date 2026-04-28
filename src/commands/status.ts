@@ -15,11 +15,13 @@
 //   sync-eligible artifact_type count toward the backlog.
 
 import type { DbHandle } from "~/db.ts";
+import type { StorageCapacityReport } from "~/storage/capacity.ts";
 
 export interface StatusContext {
   readonly session_id?: string | null;
   readonly chat_id?: string | null;
   readonly s3_health?: "ok" | "degraded" | "unknown";
+  readonly storage_capacity?: StorageCapacityReport | null | undefined;
   readonly now?: () => Date;
 }
 
@@ -35,6 +37,7 @@ export interface StatusReport {
   readonly last_completed_rel: string | null;
   readonly last_issue: string | null;
   readonly s3_health: "ok" | "degraded" | "unknown";
+  readonly storage_capacity: StorageCapacityReport | null;
 }
 
 export function buildStatusReport(db: DbHandle, ctx: StatusContext = {}): StatusReport {
@@ -143,7 +146,14 @@ export function buildStatusReport(db: DbHandle, ctx: StatusContext = {}): Status
   let overall: "OK" | "degraded" | "issue" = "OK";
   if (q.failed > 0 || q.interrupted > 0 || n.failed > 0 || captureFails > 0) {
     overall = "issue";
+  } else if (ctx.storage_capacity?.level === "critical") {
+    overall = "issue";
   } else if (s.failed > 0 || s.pending > 0 || n.pending > 0) {
+    overall = "degraded";
+  } else if (
+    ctx.storage_capacity?.level === "warn" ||
+    ctx.storage_capacity?.level === "degraded"
+  ) {
     overall = "degraded";
   }
 
@@ -159,6 +169,7 @@ export function buildStatusReport(db: DbHandle, ctx: StatusContext = {}): Status
     last_completed_rel: lastCompletedRel,
     last_issue: lastIssue,
     s3_health: ctx.s3_health ?? "unknown",
+    storage_capacity: ctx.storage_capacity ?? null,
   };
 }
 
@@ -174,6 +185,9 @@ export function formatStatus(report: StatusReport): string {
     `post-processing: notifications pending ${report.outbound_notifications.pending} · storage_sync pending ${report.storage_sync.pending} · failed ${report.storage_sync.failed}`,
   );
   lines.push(`S3: ${report.s3_health}`);
+  if (report.storage_capacity) {
+    lines.push(`storage capacity: ${report.storage_capacity.detail}`);
+  }
   lines.push(`last completed: ${report.last_completed_rel ?? "—"}`);
   if (report.attachment_capture_failures > 0) {
     lines.push(`capture_failed: ${report.attachment_capture_failures} (/doctor storage 로 상세 확인)`);

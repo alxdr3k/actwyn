@@ -211,6 +211,22 @@ sqlite3 /var/lib/actwyn/actwyn.db "SELECT status, COUNT(*) FROM jobs GROUP BY st
   a job (AC-STO-002).
 - `/doctor` runs `s3.ping()` against the configured bucket on demand.
 
+### Disk / artifact capacity
+
+`src/storage/capacity.ts` checks `ACTWYN_OBJECTS_PATH` and filesystem
+free space using `config/runtime.json#storage_capacity` (DEC-018):
+
+- warn: artifact bytes > 1 GB or free disk < 20%
+- degraded: artifact bytes > 2 GB or free disk < 15%; `storage_sync`
+  upload batches are reduced
+- critical: artifact bytes > 3 GB or free disk < 10%; new `long_term`
+  writes are blocked
+
+`/status` and `/doctor` surface the current level. When the critical
+threshold is active, `/save_last_attachment` refuses promotion,
+save-intent attachment captions remain `session` retention with an
+instant Telegram explanation, and memory snapshot S3 staging is skipped.
+
 ## Provider configuration
 
 - The only enabled provider in P0 is `claude` (ADR-0005). The fake
@@ -248,6 +264,6 @@ sqlite3 /var/lib/actwyn/actwyn.db "SELECT status, COUNT(*) FROM jobs GROUP BY st
   `expected_schema_version` in `src/main.ts` together with the new
   migration, then redeploy.
 
-For anything else — including capacity, alerting thresholds,
-backup automation, and DR procedures — `TODO`. Do not invent
-runbook entries; promote a `TODO` here once an owner agrees.
+For anything else — including alerting thresholds, backup automation,
+and DR procedures — `TODO`. Do not invent runbook entries; promote a
+`TODO` here once an owner agrees.

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { openDatabase, type DbHandle } from "../../src/db.ts";
 import { migrate } from "../../src/db/migrator.ts";
 import { createRedactor } from "../../src/observability/redact.ts";
+import { evaluateStorageCapacity } from "../../src/storage/capacity.ts";
 import {
   classifyUpdate,
   processBatch,
@@ -519,6 +520,38 @@ describe("attachment + save-intent caption — retention_class=long_term (Blocke
     expect(row.retention_class).toBe("long_term");
   });
 
+  test("critical storage capacity downgrades save-intent caption to session retention", () => {
+    deps = {
+      ...deps,
+      config: {
+        ...deps.config,
+        storage_capacity_check: () => evaluateStorageCapacity({
+          objects_path: "/objects",
+          used_bytes: 301,
+          free_bytes: 500,
+          total_bytes: 1000,
+          thresholds: {
+            warning_used_bytes: 100,
+            degraded_used_bytes: 200,
+            hard_used_bytes: 300,
+            warning_free_ratio: 0.2,
+            degraded_free_ratio: 0.15,
+            hard_free_ratio: 0.1,
+            reduced_sync_batch_size: 2,
+          },
+        }),
+      },
+    };
+    const result = processBatch(deps, [photoUpdate(303, { caption: "이 사진 저장해줘" })]);
+    const row = db
+      .prepare<{ retention_class: string }>(
+        "SELECT retention_class FROM storage_objects LIMIT 1",
+      )
+      .get()!;
+    expect(row.retention_class).toBe("session");
+    expect(result.processed[0]?.instant_response?.text).toContain("long_term 저장은 보류");
+  });
+
   test("photo without save-intent caption gets retention_class=session", () => {
     processBatch(deps, [photoUpdate(301, { caption: "그냥 사진이야" })]);
     const row = db
@@ -537,6 +570,38 @@ describe("attachment + save-intent caption — retention_class=long_term (Blocke
       )
       .get()!;
     expect(row.retention_class).toBe("session");
+  });
+
+  test("critical capacity downgrades save-intent attachment to session and notifies user", () => {
+    deps = {
+      ...deps,
+      config: {
+        ...deps.config,
+        storage_capacity_check: () => evaluateStorageCapacity({
+          objects_path: "/objects",
+          used_bytes: 301,
+          free_bytes: 500,
+          total_bytes: 1000,
+          thresholds: {
+            warning_used_bytes: 100,
+            degraded_used_bytes: 200,
+            hard_used_bytes: 300,
+            warning_free_ratio: 0.2,
+            degraded_free_ratio: 0.15,
+            hard_free_ratio: 0.1,
+            reduced_sync_batch_size: 2,
+          },
+        }),
+      },
+    };
+    const result = processBatch(deps, [photoUpdate(303, { caption: "이 사진 저장해줘" })]);
+    const row = db
+      .prepare<{ retention_class: string }>(
+        "SELECT retention_class FROM storage_objects LIMIT 1",
+      )
+      .get()!;
+    expect(row.retention_class).toBe("session");
+    expect(result.processed[0]!.instant_response?.text).toContain("long_term");
   });
 });
 

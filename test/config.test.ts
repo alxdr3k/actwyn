@@ -52,6 +52,7 @@ describe("loadConfig — happy path", () => {
     expect(cfg.s3.bucket).toBe("actwyn-test");
     expect(cfg.runtime.required_bun_version).toBe("1.3.11");
     expect(cfg.runtime.log.level).toBe("info");
+    expect(cfg.runtime.storage_capacity.hard_used_bytes).toBe(3_000_000_000);
     expect(cfg.env).toBe("test");
     expect(Object.isFrozen(cfg)).toBe(true);
     expect(Object.isFrozen(cfg.telegram)).toBe(true);
@@ -166,6 +167,41 @@ describe("loadConfig — runtime file validation", () => {
     expect(() => loadConfig(envWith({ ACTWYN_CONFIG_PATH: bad }))).toThrow(
       /high_entropy_min_length/,
     );
+  });
+
+  test("accepts explicit storage_capacity thresholds", () => {
+    const custom = join(workdir, "storage-capacity.json");
+    writeFileSync(custom, JSON.stringify({
+      ...GOOD_RUNTIME,
+      storage_capacity: {
+        warning_used_bytes: 10,
+        degraded_used_bytes: 20,
+        hard_used_bytes: 30,
+        warning_free_ratio: 0.4,
+        degraded_free_ratio: 0.3,
+        hard_free_ratio: 0.2,
+        reduced_sync_batch_size: 2,
+      },
+    }));
+    const cfg = loadConfig(envWith({ ACTWYN_CONFIG_PATH: custom }));
+    expect(cfg.runtime.storage_capacity.reduced_sync_batch_size).toBe(2);
+  });
+
+  test("rejects unordered storage_capacity thresholds", () => {
+    const bad = join(workdir, "bad-storage-capacity.json");
+    writeFileSync(bad, JSON.stringify({
+      ...GOOD_RUNTIME,
+      storage_capacity: {
+        warning_used_bytes: 30,
+        degraded_used_bytes: 20,
+        hard_used_bytes: 10,
+        warning_free_ratio: 0.4,
+        degraded_free_ratio: 0.3,
+        hard_free_ratio: 0.2,
+        reduced_sync_batch_size: 2,
+      },
+    }));
+    expect(() => loadConfig(envWith({ ACTWYN_CONFIG_PATH: bad }))).toThrow(/byte thresholds/);
   });
 });
 

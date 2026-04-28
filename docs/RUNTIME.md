@@ -40,7 +40,7 @@
    See `src/startup/recovery.ts`.
 5. Wires composition root: redactor, S3 transport, Telegram Bot API
    transport, Claude adapter (full + advisory variants), MIME probe,
-   shared cancel-handle map.
+   storage-capacity check, shared cancel-handle map.
 6. Boot `/doctor` quick checks via `runDoctor` (config, schema
    version, redaction self-test).
 7. Launches concurrently:
@@ -124,6 +124,17 @@ outbound_notifications (status=pending)
 `status = sent` is terminal; the `notification_retry` handler never
 re-sends a sent notification.
 
+### Storage capacity
+
+`src/storage/capacity.ts` evaluates `ACTWYN_OBJECTS_PATH` usage and
+filesystem free space against `config/runtime.json#storage_capacity`
+(DEC-018). `/status` and `/doctor` surface warnings. Above the hard
+threshold, new `long_term` attachment promotions are blocked; caption
+save intent is downgraded to `session` retention with an instant
+Telegram explanation. Summary jobs still write memory JSONL / Markdown,
+but skip the S3-backed `memory_snapshot` row while the hard threshold is
+active. Degraded capacity reduces `storage_sync` upload batch size.
+
 ### Storage (attachment lifecycle)
 
 ```
@@ -145,6 +156,15 @@ inbound attachment
 `/save_last_attachment` (or natural-language equivalents) is what
 promotes a `session` attachment to `long_term`.
 
+DEC-018 local artifact capacity is enforced from
+`src/storage/capacity.ts` using `config/runtime.json#storage_capacity`
+thresholds. `/status` and `/doctor` surface the current capacity
+level. `degraded` / `critical` levels reduce `storage_sync` upload
+batch size; `critical` blocks new `long_term` promotion through
+`/save_last_attachment`, save-intent attachment captions, and memory
+snapshot S3 staging. Incoming attachments still land as `session`
+rows so the conversation path keeps moving.
+
 ### Failure modes (current)
 
 | Failure                          | Behavior                                                                              |
@@ -153,7 +173,9 @@ promotes a `session` attachment to `long_term`.
 | Resume failed mid-run            | Same `jobs` row flips back to `queued` with `replay_mode` (HLD §6.2).                  |
 | DB busy (WAL contention)         | `BEGIN IMMEDIATE` retried by Bun SQLite busy_timeout; long contention surfaces in events. |
 | S3 unavailable                   | `storage_objects.status` cycles `pending → failed → pending`; never blocks the worker. |
+| Artifact cache capacity pressure | `/status` / `/doctor` warn; hard threshold blocks new `long_term` writes and degrades save-intent attachments to `session`. |
 | Notification send failure        | Per-chunk `failed` row picked up by a `notification_retry` job (worker-dispatched); sent chunks not resent. |
+| Local artifact capacity pressure | `/status` / `/doctor` warn from DEC-018 thresholds; critical pressure blocks new `long_term` writes while keeping new attachments as `session`. |
 | Process restart                  | `startup/recovery` reconciles: `running → interrupted`, `safe_retry` → `queued`, kills orphan PIDs. |
 | Missing required env             | `loadConfig()` throws `ConfigError` and the process exits 1 before opening the DB.     |
 | Unauthorized inbound             | `telegram_updates.status=skipped`, `skip_reason` recorded, no job created.             |

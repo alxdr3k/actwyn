@@ -12,6 +12,7 @@
 import type { DbHandle } from "~/db.ts";
 import { buildStatusReport } from "~/commands/status.ts";
 import { appliedVersions } from "~/db/migrator.ts";
+import type { StorageCapacityReport } from "~/storage/capacity.ts";
 
 export type CheckCategory = "quick" | "deep";
 export type CheckStatus = "ok" | "warn" | "fail";
@@ -41,6 +42,7 @@ export interface DoctorDeps {
   readonly telegram_ping?: () => Promise<{ ok: boolean; detail?: string }>;
   readonly s3_ping?: () => Promise<{ ok: boolean; detail?: string }>;
   readonly claude_version?: () => Promise<{ ok: boolean; version?: string; detail?: string }>;
+  readonly storage_capacity_check?: () => StorageCapacityReport | Promise<StorageCapacityReport>;
   readonly disk_check?: () => Promise<{ ok: boolean; detail?: string }>;
   readonly claude_lockdown_smoke?: () => Promise<{ ok: boolean; detail?: string }>;
   readonly subprocess_teardown_smoke?: () => Promise<{ ok: boolean; detail?: string }>;
@@ -185,6 +187,16 @@ export async function runDoctor(deps: DoctorDeps): Promise<readonly CheckResult[
       return {
         status: r.ok ? "ok" : "fail",
         ...(r.detail ? { detail: r.detail } : {}),
+      };
+    }));
+  }
+
+  if (deps.storage_capacity_check) {
+    results.push(await timed("storage_capacity", "deep", async () => {
+      const r = await deps.storage_capacity_check!();
+      return {
+        status: r.level === "ok" ? "ok" : "warn",
+        detail: r.detail,
       };
     }));
   }

@@ -550,13 +550,11 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
   - **> 3 GB** or **< 10% free** → refuse new
     `long_term` writes; attachments still accepted as
     `ephemeral` / `session` with a user-visible explanation.
-  **Implementation status**: threshold policy accepted but not yet
-  implemented. `config/storage.json` does not exist; `/status` and
-  `/doctor` do not enforce these thresholds at runtime
-  (`src/commands/doctor.ts` disk check requires an external hook not
-  wired in `src/main.ts`). See `docs/OPERATIONS.md` §Disk / artifact
-  capacity (TODO). Implement before the first production deploy to a
-  disk-constrained host.
+  **Implementation status**: implemented via
+  `config/runtime.json#storage_capacity`, `src/storage/capacity.ts`,
+  `/status` / `/doctor` warnings, hard-cap `long_term` write guards,
+  and degraded `storage_sync` upload batch reduction. See
+  `docs/OPERATIONS.md` §Disk / artifact capacity.
 - Alternatives considered: percentage-only; absolute-only; no
   hard cap.
 - Impacted docs: PRD §8.7, AC-STO-001, AC-OBS-001; HLD §12.5, §16.1;
@@ -1161,4 +1159,3 @@ Follow the runbook §13 template. One entry per incident; keep
 entries terse.
 
 *No incidents yet.*
-

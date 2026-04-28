@@ -12,6 +12,7 @@ import { whoamiReply } from "../../src/commands/whoami.ts";
 import { switchProvider } from "../../src/commands/provider.ts";
 import { runDoctor } from "../../src/commands/doctor.ts";
 import { saveLastAttachment } from "../../src/commands/save.ts";
+import { evaluateStorageCapacity } from "../../src/storage/capacity.ts";
 
 const MIGRATIONS = join(import.meta.dir, "..", "..", "migrations");
 
@@ -89,6 +90,27 @@ describe("/status", () => {
     const report = buildStatusReport(db);
     expect(report.overall_status).toBe("issue");
     expect(formatStatus(report)).toContain("상태: issue");
+  });
+
+  test("storage capacity warning degrades /status output", () => {
+    const capacity = evaluateStorageCapacity({
+      objects_path: "/objects",
+      used_bytes: 101,
+      free_bytes: 500,
+      total_bytes: 1000,
+      thresholds: {
+        warning_used_bytes: 100,
+        degraded_used_bytes: 200,
+        hard_used_bytes: 300,
+        warning_free_ratio: 0.2,
+        degraded_free_ratio: 0.15,
+        hard_free_ratio: 0.1,
+        reduced_sync_batch_size: 2,
+      },
+    });
+    const report = buildStatusReport(db, { storage_capacity: capacity });
+    expect(report.overall_status).toBe("degraded");
+    expect(formatStatus(report)).toContain("storage capacity: warn");
   });
 });
 
@@ -294,6 +316,34 @@ describe("/doctor", () => {
     expect(results.some((r) => r.name === "telegram_api_reachable")).toBe(true);
     expect(results.some((r) => r.name === "s3_endpoint_smoke")).toBe(true);
   });
+
+  test("storage_capacity check warns when thresholds are crossed", async () => {
+    const critical = evaluateStorageCapacity({
+      objects_path: "/objects",
+      used_bytes: 301,
+      free_bytes: 500,
+      total_bytes: 1000,
+      thresholds: {
+        warning_used_bytes: 100,
+        degraded_used_bytes: 200,
+        hard_used_bytes: 300,
+        warning_free_ratio: 0.2,
+        degraded_free_ratio: 0.15,
+        hard_free_ratio: 0.1,
+        reduced_sync_batch_size: 2,
+      },
+    });
+    const results = await runDoctor({
+      db,
+      required_bun_version: "1.3.11",
+      current_bun_version: "1.3.11",
+      bootstrap_whoami: false,
+      storage_capacity_check: () => critical,
+    });
+    const check = results.find((r) => r.name === "storage_capacity")!;
+    expect(check.status).toBe("warn");
+    expect(check.detail).toContain("critical");
+  });
 });
 
 // ---------------------------------------------------------------
@@ -337,6 +387,50 @@ describe("/save_last_attachment", () => {
       .get("link-save")!;
     expect(link.provenance).toBe("user_stated");
     expect(link.caption_or_summary).toBe("important diagram");
+  });
+
+  test("critical storage capacity blocks long_term promotion", () => {
+    db.prepare<unknown, [string, string, string, string]>(
+      `INSERT INTO jobs(id, status, job_type, session_id, chat_id, request_json, idempotency_key, provider)
+       VALUES(?, 'succeeded', 'provider_run', ?, ?, '{}', ?, 'fake')`,
+    ).run("j-capacity", "sess-1", "chat-1", "ikey-capacity");
+    db.prepare<unknown, [string]>(
+      `INSERT INTO storage_objects
+         (id, storage_backend, bucket, storage_key, source_channel, source_message_id,
+          source_job_id, source_external_id, artifact_type, retention_class,
+          capture_status, status, captured_at)
+       VALUES(?, 's3', 'b', 'objects/2026/04/23/obj-capacity/pending.bin', 'telegram', '0', 'j-capacity', NULL, 'user_upload', 'session', 'captured', 'pending', strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
+    ).run("obj-capacity");
+
+    const critical = evaluateStorageCapacity({
+      objects_path: "/objects",
+      used_bytes: 301,
+      free_bytes: 500,
+      total_bytes: 1000,
+      thresholds: {
+        warning_used_bytes: 100,
+        degraded_used_bytes: 200,
+        hard_used_bytes: 300,
+        warning_free_ratio: 0.2,
+        degraded_free_ratio: 0.15,
+        hard_free_ratio: 0.1,
+        reduced_sync_batch_size: 2,
+      },
+    });
+    const r = saveLastAttachment({
+      db,
+      newId: () => "link-blocked",
+      session_id: "sess-1",
+      storage_capacity: critical,
+    });
+    expect(r.promoted).toBe(false);
+    expect(r.blocked_reason).toBe("storage_capacity_critical");
+    const row = db
+      .prepare<{ retention_class: string }, [string]>(
+        "SELECT retention_class FROM storage_objects WHERE id = ?",
+      )
+      .get("obj-capacity")!;
+    expect(row.retention_class).toBe("session");
   });
 
   test("no captured attachment → promoted=false", () => {

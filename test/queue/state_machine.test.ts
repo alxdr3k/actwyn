@@ -9,6 +9,7 @@ import { createEmitter } from "../../src/observability/events.ts";
 import { createRedactor } from "../../src/observability/redact.ts";
 import { createFakeAdapter } from "../../src/providers/fake.ts";
 import { runWorkerOnce, type WorkerDeps } from "../../src/queue/worker.ts";
+import { evaluateStorageCapacity } from "../../src/storage/capacity.ts";
 import { StubS3Transport } from "../../src/storage/s3.ts";
 import type { MimeProbe, TelegramFileTransport } from "../../src/telegram/attachment_capture.ts";
 
@@ -469,6 +470,86 @@ describe("AC-MEM-001 — summary_generation writes local file + enqueues storage
     expect(syncJob).not.toBeNull();
     expect(syncJob!.status).toBe("queued");
   });
+
+  test("critical storage capacity skips memory_snapshot long_term storage row", async () => {
+    const summaryJson = JSON.stringify({
+      session_id: "sess-1",
+      summary_type: "session",
+      facts: [],
+      preferences: [],
+      open_tasks: [],
+      decisions: [],
+      cautions: [],
+      source_turn_ids: [],
+    });
+
+    db.prepare<unknown, [string, string, string, string]>(
+      `INSERT INTO jobs
+         (id, status, job_type, session_id, user_id, chat_id, request_json, idempotency_key, provider)
+       VALUES(?, 'queued', 'summary_generation', ?, 'user-1', 'chat-1', ?, ?, 'fake')`,
+    ).run(
+      "j-mem-capacity",
+      "sess-1",
+      JSON.stringify({ text: "", command: "/summary", args: "", has_attachments: false }),
+      "telegram:mem-capacity",
+    );
+
+    const localDir = join(workdir, "objects-capacity");
+    const memDir = join(workdir, "memory-capacity");
+    await runWorkerOnce(deps({
+      summaryAdapter: {
+        name: "fake",
+        run: async () => ({
+          kind: "succeeded" as const,
+          response: {
+            provider: "fake",
+            session_id: "fake-session",
+            final_text: summaryJson,
+            raw_events: [],
+            duration_ms: 1,
+            exit_code: 0,
+            parser_status: "parsed" as const,
+          },
+        }),
+      },
+      doctor: {
+        required_bun_version: "1.3.11",
+        current_bun_version: "1.3.11",
+        bootstrap_whoami: false,
+        storage_capacity_check: () => evaluateStorageCapacity({
+          objects_path: localDir,
+          used_bytes: 301,
+          free_bytes: 500,
+          total_bytes: 1000,
+          thresholds: {
+            warning_used_bytes: 100,
+            degraded_used_bytes: 200,
+            hard_used_bytes: 300,
+            warning_free_ratio: 0.2,
+            degraded_free_ratio: 0.15,
+            hard_free_ratio: 0.1,
+            reduced_sync_batch_size: 2,
+          },
+        }),
+      },
+      config: {
+        capture: { max_download_size_bytes: 20 * 1024 * 1024, local_path: (id: string) => join(localDir, id) },
+        sync: { max_attempts: 3, local_path: (id: string) => join(localDir, id) },
+        memory_base_path: memDir,
+      },
+    }));
+
+    const sumRow = db
+      .prepare<{ storage_key: string | null }>(
+        "SELECT storage_key FROM memory_summaries WHERE session_id = 'sess-1' LIMIT 1",
+      )
+      .get();
+    expect(sumRow).not.toBeNull();
+    expect(sumRow!.storage_key).toBeNull();
+    expect(db.prepare<{ n: number }>("SELECT COUNT(*) AS n FROM storage_objects WHERE artifact_type = 'memory_snapshot'").get()!.n).toBe(0);
+    expect(db.prepare<{ n: number }>("SELECT COUNT(*) AS n FROM jobs WHERE job_type = 'storage_sync'").get()!.n).toBe(0);
+    expect(existsSync(join(memDir, "sessions", "sess-1.jsonl"))).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------
@@ -597,6 +678,64 @@ describe("storage_sync job dispatch — uploads pending storage_objects when s3 
       .get(objectId)!;
     expect(so.status).toBe("uploaded");
     expect(stubTransport.store.size).toBe(1);
+  });
+
+  test("degraded storage capacity reduces storage_sync upload batch", async () => {
+    const localDir = join(workdir, "objects-degraded");
+    mkdirSync(localDir, { recursive: true });
+    for (const [objectId, bytes] of [
+      ["so-degraded-1", new Uint8Array([1])],
+      ["so-degraded-2", new Uint8Array([2])],
+    ] as const) {
+      writeFileSync(join(localDir, objectId), bytes);
+      db.prepare<unknown, [string, string, string]>(
+        `INSERT INTO storage_objects
+           (id, storage_backend, bucket, storage_key, source_channel, source_message_id,
+            source_job_id, artifact_type, retention_class, capture_status, status, sha256)
+         VALUES(?, 's3', 'test-bucket', ?, 'system', '0', NULL, 'user_upload', 'long_term', 'captured', 'pending', ?)`,
+      ).run(objectId, `objects/2026/04/23/${objectId}/hash.bin`, await sha256HexUint8(bytes));
+    }
+
+    db.prepare<unknown, [string, string, string]>(
+      `INSERT INTO jobs
+         (id, status, job_type, request_json, idempotency_key)
+       VALUES(?, 'queued', 'storage_sync', ?, ?)`,
+    ).run("j-sync-degraded", JSON.stringify({}), "sync:degraded");
+
+    const stubTransport = new StubS3Transport();
+    await runWorkerOnce(deps({
+      s3: stubTransport,
+      doctor: {
+        required_bun_version: "1.3.11",
+        current_bun_version: "1.3.11",
+        bootstrap_whoami: false,
+        storage_capacity_check: () => evaluateStorageCapacity({
+          objects_path: localDir,
+          used_bytes: 250,
+          free_bytes: 500,
+          total_bytes: 1000,
+          thresholds: {
+            warning_used_bytes: 100,
+            degraded_used_bytes: 200,
+            hard_used_bytes: 300,
+            warning_free_ratio: 0.2,
+            degraded_free_ratio: 0.15,
+            hard_free_ratio: 0.1,
+            reduced_sync_batch_size: 1,
+          },
+        }),
+      },
+      config: {
+        capture: { max_download_size_bytes: 20 * 1024 * 1024, local_path: (id) => join(localDir, id) },
+        sync: { max_attempts: 3, local_path: (id) => join(localDir, id) },
+      },
+    }));
+
+    expect(stubTransport.store.size).toBe(1);
+    const pending = db
+      .prepare<{ n: number }>("SELECT COUNT(*) AS n FROM storage_objects WHERE status = 'pending'")
+      .get()!.n;
+    expect(pending).toBe(1);
   });
 
   test("storage_sync rejects upload when sha256 does not match stored hash", async () => {
