@@ -378,13 +378,8 @@ async function runOneClaimedInner(
 
   // In replay_mode, inject the full packed context (memory + turns + summary)
   // as the message so Claude receives the conversation history. In resume_mode
-  // Claude already has the history via --resume, so just send the user message.
-  // Phase 1B.2 note: active judgment injection only runs in replay_mode (inside
-  // buildContextForRun). In resume_mode, Claude holds cached history so judgments
-  // committed after the last replay are not visible until the next replay (new
-  // session, forced replay, or resume-fallback). This is an accepted Phase 1B.2
-  // limitation; real-time judgment refresh in resume_mode is deferred to a
-  // future sub-phase.
+  // Claude already has the history via --resume, so inject only a fresh,
+  // bounded judgment_active block plus the user message.
   let request = baseRequest;
   let snapshotJson: string;
   if (packingMode === "replay_mode" && job.session_id) {
@@ -430,20 +425,7 @@ async function runOneClaimedInner(
     // Claude holds conversation history via --resume; inject a fresh, bounded
     // judgment_active block so judgments committed after the last replay are visible.
     // Excludes turns, memory, and summary — only judgment_items + user_message.
-    const resumeJudgments = deps.db
-      .prepare<JudgmentItemSlot, []>(
-        `SELECT id, kind, statement, authority_source, confidence
-         FROM judgment_items
-         WHERE lifecycle_status = 'active'
-           AND activation_state = 'eligible'
-           AND retention_state = 'normal'
-           AND json_extract(scope_json, '$.global') = 1
-           AND (valid_from IS NULL OR valid_from <= strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-           AND (valid_until IS NULL OR valid_until > strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-         ORDER BY importance DESC, created_at DESC
-         LIMIT 20`,
-      )
-      .all();
+    const resumeJudgments = queryActiveGlobalJudgmentSlots(deps.db);
     if (resumeJudgments.length > 0) {
       const snap = buildContext({
         mode: "resume_mode",
@@ -986,13 +968,11 @@ interface ContextBuildResult {
 }
 
 /**
- * Build and pack the context for a replay_mode provider run.
+ * Build and pack the full replay_mode context for a provider run.
  *
  * Returns both the full rendered message (to pass to Claude) and the
  * observability snapshot (to persist in injected_snapshot_json).
- * In resume_mode the context is managed by Claude's session, so only
- * the raw user message is used; this function still returns an
- * appropriate snapshot for observability.
+ * Resume-mode judgment refresh is handled separately in runOneClaimedInner.
  */
 function buildContextForRun(args: {
   db: DbHandle;
@@ -1075,22 +1055,7 @@ function buildContextForRun(args: {
   // per-session/chat scope matching is deferred to a later sub-phase when a
   // scope resolver is available; global-scope judgments are universally
   // applicable and safe to inject without a resolver.
-  const activeJudgments = args.skipJudgments
-    ? []
-    : args.db
-        .prepare<JudgmentItemSlot, []>(
-          `SELECT id, kind, statement, authority_source, confidence
-           FROM judgment_items
-           WHERE lifecycle_status = 'active'
-             AND activation_state = 'eligible'
-             AND retention_state = 'normal'
-             AND json_extract(scope_json, '$.global') = 1
-             AND (valid_from IS NULL OR valid_from <= strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-             AND (valid_until IS NULL OR valid_until > strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-           ORDER BY importance DESC, created_at DESC
-           LIMIT 20`,
-        )
-        .all();
+  const activeJudgments = args.skipJudgments ? [] : queryActiveGlobalJudgmentSlots(args.db);
 
   const snap = buildContext({
     mode: "replay_mode",
@@ -1115,6 +1080,23 @@ function buildContextForRun(args: {
     if (e instanceof PromptOverflowError) throw e;
     return fallback;
   }
+}
+
+function queryActiveGlobalJudgmentSlots(db: DbHandle): JudgmentItemSlot[] {
+  return db
+    .prepare<JudgmentItemSlot, []>(
+      `SELECT id, kind, statement, authority_source, confidence
+       FROM judgment_items
+       WHERE lifecycle_status = 'active'
+         AND activation_state = 'eligible'
+         AND retention_state = 'normal'
+         AND json_extract(scope_json, '$.global') = 1
+         AND (valid_from IS NULL OR valid_from <= strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+         AND (valid_until IS NULL OR valid_until > strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+       ORDER BY importance DESC, created_at DESC
+       LIMIT 20`,
+    )
+    .all();
 }
 
 function insertProviderRunStart(args: {

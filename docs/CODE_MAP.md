@@ -106,7 +106,8 @@ slice:
   `summary_generation`). L0-only telemetry; signal detection deferred.
 - **Phase 1B.2**: `src/context/builder.ts` gains `judgment_items` slot (priority 600).
   Worker queries active/eligible/normal/global/time-valid judgments and injects them
-  into `buildContext()` in `replay_mode`. Excluded from `summary_generation`.
+  into `buildContext()` in `replay_mode` and into the bounded resume-mode judgment
+  refresh path. Excluded from `summary_generation`.
 - **Phase 1B.3**: `/judgment` and `/judgment_explain <id>` are known commands in
   `KNOWN_COMMANDS` (inbound) and `SYSTEM_COMMANDS` (worker). `executeJudgmentQueryTool`
   + `executeJudgmentExplainTool` from `src/judgment/tool.ts` imported by worker for
