@@ -300,6 +300,15 @@ describe("append-only enforcement", () => {
     const count = db.prepare<{ n: number }, []>("SELECT COUNT(*) as n FROM control_gate_events").get();
     expect(count!.n).toBe(2);
   });
+
+  test("blocks INSERT OR REPLACE (REPLACE conflict algorithm bypasses BEFORE DELETE)", () => {
+    const id = insertRow();
+    expect(() => {
+      db.prepare<unknown, SQLQueryBindings[]>(
+        "INSERT OR REPLACE INTO control_gate_events (id, phase, level, budget_class, persist_policy, direct_commit_allowed) VALUES (?,?,?,?,?,?)",
+      ).run(id, "candidate", "L3", "audit", "full", 0);
+    }).toThrow(/append-only.*duplicate/i);
+  });
 });
 
 // ---------------------------------------------------------------

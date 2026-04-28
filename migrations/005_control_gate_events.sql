@@ -85,3 +85,13 @@ BEFORE DELETE ON control_gate_events
 BEGIN
   SELECT RAISE(ABORT, 'control_gate_events is append-only: DELETE not allowed');
 END;
+
+-- SQLite INSERT OR REPLACE bypasses BEFORE DELETE triggers via the REPLACE
+-- conflict resolution algorithm. Block it explicitly with a BEFORE INSERT
+-- check so the append-only guarantee holds even against OR REPLACE callers.
+CREATE TRIGGER IF NOT EXISTS control_gate_events_no_replace
+BEFORE INSERT ON control_gate_events
+WHEN EXISTS (SELECT 1 FROM control_gate_events WHERE id = NEW.id)
+BEGIN
+  SELECT RAISE(ABORT, 'control_gate_events is append-only: duplicate id insert not allowed');
+END;
