@@ -124,6 +124,9 @@ read commands) tests live under:
   fixture coverage, persistence, and import-boundary assertions.
 - `test/judgment/tool.test.ts` — typed-tool contracts, executor
   outcomes, and runtime import-boundary assertions.
+- `test/context/compiler.test.ts` — Stage 4 Context Compiler v0:
+  replay/resume modes, judgment scope/time filters, summary-generation
+  exclusion (skipJudgments), and PromptOverflowError propagation.
 - `test/context/builder_judgments.test.ts` — judgment context slot
   rendering and priority behavior.
 - `test/queue/control_gate_telemetry.test.ts` — worker telemetry writes
