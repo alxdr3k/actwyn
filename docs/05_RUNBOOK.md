@@ -21,7 +21,10 @@
 
 - **Service name**: `actwyn.service` (systemd unit).
 - **Service user**: `actwyn` (non-root, per PRD §15).
-- **Paths**:
+- **Paths** *(⚠ stale: `/etc/actwyn/config.json` does not exist — config
+  comes from env/Doppler; actual DB default is `/var/lib/actwyn/actwyn.db`,
+  not `/var/lib/actwyn/db/actwyn.sqlite` — see `src/main.ts` and
+  `docs/OPERATIONS.md` for current values)*:
   - Config: `/etc/actwyn/config.json`, `/etc/actwyn/env`.
   - DB: `/var/lib/actwyn/db/actwyn.sqlite` (+ WAL / SHM).
   - Data: `/var/lib/actwyn/data/` (memory files, attachments,

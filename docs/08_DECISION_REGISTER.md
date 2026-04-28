@@ -101,8 +101,9 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
   jobs adds real complexity (subprocess budgeting, context
   interleaving, token cost) without a P0 benefit.
 - Decision: Exactly one `provider_run` may be `status = running`
-  at any time. `notification_retry` and `storage_sync` run
-  concurrently with the worker; they do not spawn Claude.
+  at any time. `notification_retry` and `storage_sync` are
+  worker-owned job handlers dispatched inside the single worker loop;
+  they do not spawn Claude.
 - Alternatives considered: multi-worker with global semaphore;
   multi-provider concurrency.
 - Impacted docs: PRD §5, §8.5; HLD §3.1, §6.2.
