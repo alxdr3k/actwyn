@@ -71,10 +71,10 @@ Status legend:
 | `migrations/003_notification_payload_text.sql` | Adds `payload_text` to `outbound_notifications`.                              |
 | `migrations/004_judgment_skeleton.sql` | Phase 1A.1 schema-only Judgment System skeleton: `judgment_sources`, `judgment_items`, `judgment_evidence_links`, `judgment_edges`, `judgment_events`, plus the `judgment_items_fts` FTS5 virtual table and sync triggers. |
 | `migrations/005_control_gate_events.sql` | Phase 1A.8 append-only Control Gate ledger: `control_gate_events` table with CHECK constraints (level L0–L3, phase, budget_class, persist_policy, direct_commit_allowed=0), BEFORE UPDATE/DELETE/INSERT triggers enforcing immutability (including INSERT OR REPLACE block). |
-| `src/storage/local.ts`            | Local FS reads / writes for objects and transcripts.                                         |
+| `src/storage/local.ts`            | Local object read / existence / remove helpers (`readLocal`, `localExists`, `removeLocal`). Byte writes happen in `src/telegram/attachment_capture.ts`; memory snapshot writes in `src/queue/worker.ts`. |
 | `src/storage/s3.ts`               | Hetzner Object Storage transport (Bun.S3Client based).                                       |
 | `src/storage/sync.ts`             | `storage_sync` worker; advances `storage_objects.status`.                                    |
-| `src/storage/objects.ts`          | DB-row builders / readers for `storage_objects`.                                             |
+| `src/storage/objects.ts`          | Storage key and extension helpers (`safeExtensionFromMime`, `generateStorageKey`, `finalizeStorageKey`, `isProvisionalKey`). Performs no SQLite reads/writes. |
 | `src/storage/mime.ts`             | Magic-bytes MIME probe used during attachment capture.                                       |
 
 ## Memory / context

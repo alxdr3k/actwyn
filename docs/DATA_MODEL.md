@@ -17,8 +17,11 @@
 - `migrations/*.sql` — SQL definitions, CHECK constraints, indices.
 - `src/db.ts`, `src/db/migrator.ts` — pragma setup and migration
   runner (`schema.migrations.<NNN>` keys in `settings`).
-- `src/storage/objects.ts` — row builders / readers for
-  `storage_objects` and `memory_artifact_links`.
+- `src/storage/objects.ts` — storage key and extension helpers only
+  (`safeExtensionFromMime`, `generateStorageKey`, `finalizeStorageKey`,
+  `isProvisionalKey`). Performs no SQLite reads/writes.
+  `memory_artifact_links` is written by `src/commands/save.ts` and
+  `src/commands/forget.ts`.
 - `docs/PRD.md` Appendix D — original column contract.
 - `docs/02_HLD.md` §5 — historical reasoning for writer map and
   cross-table invariants. The operative single-writer map is the
@@ -361,7 +364,9 @@ reasoning.
 | `memory_items.status`                 | `src/commands/correct.ts` (`active → superseded`), `src/commands/forget.ts` (`→ revoked`) |
 | `storage_objects` (insert)            | `src/telegram/inbound.ts` (Telegram attachments, capture_status=pending); `src/queue/worker.ts` `enqueueMemorySnapshotSync` (memory_snapshot rows for `/summary` / `/end`, also enqueues the `storage_sync` job in the same txn). These are the only two `INSERT INTO storage_objects` sites in `src/`. |
 | `storage_objects.status`              | `src/storage/sync.ts`, `src/commands/forget.ts` (recovery only counts `failed` / `delete_failed` rows and enqueues a `storage_sync` job; it does not update `storage_objects.status` directly) |
-| `memory_artifact_links`               | `src/memory/summary.ts`, `src/commands/save.ts`, `src/commands/forget.ts`         |
+| `storage_objects.capture_status`      | Insert-time: `src/telegram/inbound.ts` (`pending`; oversized attachments: `failed`), `src/queue/worker.ts` memory snapshot inserts (`captured`). Post-insert transitions: `src/telegram/attachment_capture.ts` (`pending → captured` or `pending → failed`). |
+| `storage_objects.retention_class`     | `src/commands/save.ts` — promotes to `long_term`. The initial `retention_class` value is set at insert time by `src/telegram/inbound.ts` / `src/queue/worker.ts`. |
+| `memory_artifact_links`               | `src/commands/save.ts` (INSERT), `src/commands/forget.ts` (DELETE)                |
 | `outbound_notifications` (insert)     | `src/telegram/outbound.ts`; `src/startup/recovery.ts` (recovery direct-write)    |
 | `outbound_notifications.status`       | `src/telegram/outbound.ts` (rolled up from chunks)                                |
 | `outbound_notification_chunks`        | `src/telegram/outbound.ts` (insert in same txn as parent + status); `src/startup/recovery.ts` (insert) |
