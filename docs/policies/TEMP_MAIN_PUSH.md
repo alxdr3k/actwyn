@@ -36,5 +36,11 @@ of the following are true:
 - [ ] CI is reliably green on `dev`
 - [ ] The global `CLAUDE.md` branch policy has been updated to remove the
       `actwyn` exception
+- [ ] `actwyn` has been removed from `.claude/direct-push-repos.txt` (local
+      Claude dev-cycle config; the file is gitignored so this is a manual step
+      on each developer machine)
+- [ ] The `push` trigger removed from `.github/workflows/doc-freshness.yml`
+      (PR trigger remains active)
+- [ ] This file deleted
 
-After removing the `push` trigger, the workflow remains useful on PRs alone.
+After graduating, the workflow remains useful on PRs alone.
