@@ -181,7 +181,8 @@ Runtime access:
   turns.
 - `src/context/builder.ts` — gains `judgment_items` slot type
   (priority 600). `src/queue/worker.ts` populates it with
-  active/eligible/normal/global/time-valid rows in `replay_mode`;
+  active/eligible/normal/global/time-valid rows in `replay_mode`
+  full context builds and in the `resume_mode` judgment refresh path;
   it is excluded from `summary_generation`.
 - `src/providers/*`, `src/memory/*`, `src/telegram/*`,
   `src/commands/*`, and `src/main.ts` do **not** import from
