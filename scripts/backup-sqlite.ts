@@ -69,7 +69,7 @@ export function createSqliteBackup(opts: CreateSqliteBackupOptions): SqliteBacku
     writeFileSync(tmpPath, serialized, { flag: "wx", mode: 0o600 });
     normalizeBackupFile(tmpPath);
     const integrityCheck = verify ? verifySqliteBackup(tmpPath) : "not_run";
-    if (integrityCheck !== "ok") {
+    if (verify && integrityCheck !== "ok") {
       throw new BackupError(`backup integrity_check failed: ${integrityCheck}`);
     }
     publishTempFile(tmpPath, outputPath, force);

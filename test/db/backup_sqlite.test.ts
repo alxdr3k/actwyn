@@ -67,6 +67,18 @@ describe("backup-sqlite — WAL-safe snapshot", () => {
     expect(readItemBodies(outputPath)).toEqual(["second"]);
   });
 
+  test("can skip integrity verification when requested", () => {
+    const dir = tempDir();
+    const sourcePath = join(dir, "live.db");
+    const outputPath = join(dir, "backup.sqlite");
+    seedSource(sourcePath, "unverified");
+
+    const result = createSqliteBackup({ sourcePath, outputPath, verify: false });
+
+    expect(result.integrity_check).toBe("not_run");
+    expect(readItemBodies(outputPath)).toEqual(["unverified"]);
+  });
+
   test("rejects source/output aliasing and non-files", () => {
     const dir = tempDir();
     const sourcePath = join(dir, "live.db");
@@ -108,6 +120,15 @@ describe("backup-sqlite — WAL-safe snapshot", () => {
       json: true,
       busyTimeoutMs: 100,
     });
+
+    expect(parseBackupArgs(["--db", "actwyn.db", "--out", "backup.sqlite", "--no-verify"]))
+      .toEqual({
+        sourcePath: "actwyn.db",
+        outputPath: "backup.sqlite",
+        force: false,
+        verify: false,
+        json: false,
+      });
   });
 });
 
