@@ -129,7 +129,8 @@ out of the Phase 1B.2 context injection query.
 Phase 1A.8 added the **Control Gate substrate**: `src/judgment/control_gate.ts`
 (`evaluateTurn`, `evaluateCandidate`, `recordControlGateDecision`) and
 `migrations/005_control_gate_events.sql` (append-only `control_gate_events`
-table; schema version 5). The gate evaluates TurnInput / JudgmentCandidate →
+table; schema version 5) + migration 006 adds `job_id` attribution (schema version 6).
+The gate evaluates TurnInput / JudgmentCandidate →
 ControlGateDecision (L0–L3); `direct_commit_allowed` is always false
 (ADR-0012 invariant).
 **Phase 1B.1**: `src/queue/worker.ts` now imports `control_gate.ts` and calls
@@ -339,7 +340,8 @@ components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4 / 1A.5 / 1A.6 / 1A.
 - **Control Gate substrate** — `src/judgment/control_gate.ts`
   (`evaluateTurn`, `evaluateCandidate`, `recordControlGateDecision`)
   and `migrations/005_control_gate_events.sql` (append-only
-  `control_gate_events` table; schema version 5). Evaluates
+  `control_gate_events` table; schema version 5) + migration 006 `job_id`
+  attribution (schema version 6). Evaluates
   TurnInput / JudgmentCandidate → ControlGateDecision (L0–L3);
   `direct_commit_allowed` is always false (ADR-0012 invariant).
   **Phase 1B.1**: now wired — `src/queue/worker.ts` calls

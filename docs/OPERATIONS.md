@@ -91,6 +91,36 @@ Notes:
 - For test runs without external dependencies, prefer `bun test` —
   see `docs/TESTING.md`.
 
+## Schema upgrade notes
+
+**Schema 6 (migration 006):** The boot sequence checks for running **or** queued
+`provider_run` jobs before applying migration 006; if any exist, the process exits with
+an error.
+
+**Upgrade during a quiet window** (no active or pending messages):
+
+1. Wait until the Telegram conversation is idle — no message in flight, queue empty.
+   Verify:
+   ```sh
+   sqlite3 $ACTWYN_DB_PATH \
+     "SELECT id, status FROM jobs WHERE job_type='provider_run' AND status IN ('running','queued');"
+   ```
+2. Stop, deploy, and restart:
+   ```sh
+   systemctl stop actwyn   # terminates poller + worker
+   # deploy new build
+   systemctl start actwyn  # migration 006 applies; service resumes
+   ```
+
+**If the guard fires** (e.g. crash left a stale `running` row):
+Startup recovery runs after the guard, so a `running` row from a crash cannot be
+auto-resolved before the guard fires. In that case, deploy the old build first
+(to let recovery and the worker drain the queue), verify the queue is empty, then
+re-deploy the schema-6 build during a quiet window.
+
+Do not issue raw SQL `UPDATE jobs SET status=...` — this bypasses recovery accounting
+(`provider_runs`, `finished_at`, `error_json`, user notifications, orphan process groups).
+
 ## Production deploy (systemd)
 
 Source: `deploy/install.sh`, `deploy/systemd/actwyn.service`,

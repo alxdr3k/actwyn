@@ -182,7 +182,7 @@ When you add a migration:
 
 1. Add `migrations/<NNN>_<slug>.sql` (versions contiguous from 001).
 2. Update `expected_schema_version` in `src/main.ts` (currently
-   5) so `/doctor` flags drift.
+   6) so `/doctor` flags drift.
 3. Update `docs/DATA_MODEL.md` and `docs/CODE_MAP.md`.
 4. Regenerate the schema doc: `bun run docs:generate:schema` and commit
    `docs/generated/schema.md`.

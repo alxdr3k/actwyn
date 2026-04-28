@@ -43,8 +43,9 @@ Forward-only, contiguous from version 1. Gaps are refused at boot
 | 003     | `migrations/003_notification_payload_text.sql`          |
 | 004     | `migrations/004_judgment_skeleton.sql`                  |
 | 005     | `migrations/005_control_gate_events.sql`                |
+| 006     | `migrations/006_control_gate_job_id.sql`                |
 
-`/doctor` checks `expected_schema_version = 5` (see
+`/doctor` checks `expected_schema_version = 6` (see
 `src/main.ts`). Bumping the schema requires updating that constant
 in lockstep with a new migration.
 

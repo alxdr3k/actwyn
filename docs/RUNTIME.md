@@ -19,6 +19,11 @@
    `config/runtime.json` (`src/config.ts`).
 2. `openDatabase()` — opens SQLite with WAL, busy_timeout, FK pragmas
    (`src/db.ts`).
+2a. `assertNoPendingProviderRunsBeforeMigration006()` — upgrade guard:
+   aborts boot if schema-5 `provider_run` jobs are running/queued and
+   migration 006 has not yet been applied. Prevents cross-schema retry
+   duplicates in the append-only `control_gate_events` ledger.
+   Skip: fresh DB (no `settings` table), already-upgraded DB, no jobs table.
 3. `migrate(db, migrationsPath)` — forward-only, idempotent
    (`src/db/migrator.ts`).
 4. `runStartupRecovery(db, …)` — reconciles stale `running` jobs
@@ -316,7 +321,9 @@ registered in `src/main.ts` or any runtime module.
   `src/commands/*`, and `src/main.ts` do **not** import from
   `src/judgment/`.
 
-Schema version is **5** (migration 005 adds `control_gate_events`).
+Schema version is **6** (migration 005 adds `control_gate_events`; migration 006 adds
+`job_id` attribution and a pre-migration upgrade guard — see `src/main.ts`
+`assertNoPendingProviderRunsBeforeMigration006()`).
 
 ### What is not implemented
 

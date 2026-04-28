@@ -1128,7 +1128,7 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
   - Write-path tool contracts (propose/approve/commit/…) remain unregistered in runtime.
   - `src/providers/*`, `src/memory/*`, `src/telegram/*`, and `src/main.ts` do not import from `src/judgment/*`.
   - Context injection scoped to `global` scope and `retention_state=normal` rows only; resume-mode staleness deferred (issue #44).
-  - Control Gate `job_id` attribution and retry idempotency deferred (issue #45).
+  - Control Gate `job_id` attribution and retry idempotency: **resolved** (migration 006, issue #45). `recordControlGateDecision` now accepts `job_id`, worker passes `job.id`; partial UNIQUE index + pre-check guard ensure one turn row per job. Boot-time upgrade guard prevents cross-schema duplicates.
 - **Impacted docs**: `docs/ARCHITECTURE.md`, `docs/RUNTIME.md`, `docs/CODE_MAP.md`, `docs/DATA_MODEL.md`, `docs/TESTING.md`, `AGENTS.md`, `docs/07_QUESTIONS_REGISTER.md` (Q-027).
 - **Refs**: AGENTS.md §Source of truth Phase 1B; `feat(judgment): Phase 1B.1-1B.3 runtime wiring` commit.
 

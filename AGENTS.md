@@ -114,7 +114,8 @@ Do not read `docs/design/archive/` by default. Those are history.
   - **Phase 1A.8 (landed)**: `src/judgment/control_gate.ts` exports
     `ControlGateDecision`, `evaluateTurn`, `evaluateCandidate`, and
     `recordControlGateDecision`. `migrations/005_control_gate_events.sql`
-    adds the append-only `control_gate_events` table (schema version 5).
+    adds the append-only `control_gate_events` table (schema version 5);
+    migration 006 adds `job_id` attribution (current schema version 6).
     `direct_commit_allowed` is always 0 (ADR-0012 invariant).
   - **Phase 1B.1 (landed)**: `src/queue/worker.ts` calls `evaluateTurn()`
     and `recordControlGateDecision()` on every **non-system**
