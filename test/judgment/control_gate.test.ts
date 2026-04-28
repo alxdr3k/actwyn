@@ -172,12 +172,20 @@ describe("evaluateCandidate", () => {
     expect(d.lenses).toContain("architecture_critique_lens_v0.1");
   });
 
-  test("L3 for explicit full review", () => {
+  test("L3 for explicit full review on durable kind includes durable_candidate trigger", () => {
     const d = evaluateCandidate({ ...base, kind: "decision", is_explicit_full_review: true });
     expect(d.level).toBe("L3");
     expect(d.critic_model_allowed).toBe(true);
     expect(d.triggers).toContain("user_review_request");
+    expect(d.triggers).toContain("durable_candidate");
     expect(d.budget_class).toBe("audit");
+  });
+
+  test("L3 for explicit full review on non-durable kind omits durable_candidate trigger", () => {
+    const d = evaluateCandidate({ ...base, kind: "fact", is_explicit_full_review: true });
+    expect(d.level).toBe("L3");
+    expect(d.triggers).toContain("user_review_request");
+    expect(d.triggers).not.toContain("durable_candidate");
   });
 
   test("attaches candidate_id when provided", () => {

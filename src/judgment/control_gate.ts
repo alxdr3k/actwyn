@@ -194,11 +194,15 @@ export function evaluateCandidate(
   const durableKinds: JudgmentKind[] = ["decision", "current_state", "procedure"];
 
   if (candidate.is_explicit_full_review) {
+    const triggers: TriggerCode[] = ["user_review_request"];
+    if (durableKinds.includes(candidate.kind) || candidate.touches_schema) {
+      triggers.push("durable_candidate");
+    }
     return makeDecision({
       phase: "candidate",
       level: "L3",
       probes: ["authority", "conflict"],
-      triggers: ["user_review_request", "durable_candidate"],
+      triggers,
       ...(candidate.id != null ? { candidate_id: candidate.id } : {}),
     });
   }
