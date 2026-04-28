@@ -28,7 +28,11 @@ argument-hint: [--loop [N]] [--phase <id>]
 ## 리포지토리 유형 정의
 
 **Direct-push 리포 (main에 직접 커밋/push):**
-목록은 `.claude/direct-push-repos.txt` 에서 관리된다. Phase 시작 전 해당 파일을 읽어 현재 리포가 포함되어 있는지 확인한다.
+- actwyn
+- concluv
+- statistics-for-data-science
+
+리포 이름이 위 목록에 있으면 Direct-push 리포로 취급한다.
 
 그 외 모든 리포는 **Standard 리포** (feat/* → dev → main PR 워크플로우).
 
