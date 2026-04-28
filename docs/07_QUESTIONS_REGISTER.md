@@ -1369,9 +1369,9 @@ committed for a later milestone.
 - **Status**: open.
 - **Owner**: project lead.
 - **Context**: `docs/design/salvage-audit-2026-04.md` §5.3 / §7에서
-  surfaced. [`src/queue/worker.ts`](../src/queue/worker.ts) L1269-L1282
-  가 `${memory_base_path}/sessions/<session_id>.jsonl` (append-only
-  per-session log) 와 `${memory_base_path}/personal/YYYY-MM-DD.md`
+  surfaced. [`src/queue/worker.ts`](../src/queue/worker.ts)의
+  `enqueueMemorySnapshotSync()`가 `${memory_base_path}/sessions/<session_id>.jsonl`
+  (append-only per-session log) 와 `${memory_base_path}/personal/YYYY-MM-DD.md`
   (rolled-up daily) 를 작성한다 (AC-MEM-001). DB-native judgment
   방향 (ADR-0009/0011/0012)에서 이 sidecar의 역할이 불분명: archive
   only / behavior baseline contributor / 제거 중 어느 것인가? 결정에

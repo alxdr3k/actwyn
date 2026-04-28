@@ -225,8 +225,17 @@ Other table roles:
   triggers keep it in sync.
 
 Active/eligible rows can exist after the local commit operation.
-`src/queue/worker.ts` reads active/eligible/normal/global/time-valid
-rows for runtime context injection and read-only Telegram commands.
+`src/queue/worker.ts` has three distinct read paths for judgment rows:
+
+- **Context injection** — reads `active`/`eligible`/`normal`/`global`/time-valid
+  rows (scope_json must contain `"global":true`); injects them into every
+  non-system `provider_run` turn.
+- **`/judgment` command** — reads `active`/`eligible`/`normal`/time-valid rows
+  without a scope filter (no `"global":true` requirement), then lists them in
+  the Telegram response.
+- **`/judgment_explain <id>` command** — reads a single row by ID regardless
+  of scope.
+
 Write-path tool contracts remain unregistered.
 
 ### `control_gate_events`

@@ -24,9 +24,12 @@
 //   JUDGMENT_EXPIRE_TOOL         — name + description constant  (Phase 1A.7)
 //   executeJudgmentExpireTool(db, input, deps?) → ExpireToolResult
 //
-// These tools are NOT registered anywhere. They must not be imported from
-// src/main.ts, src/providers/*, src/context/*, src/queue/worker.ts,
-// src/memory/*, src/telegram/*, or src/commands/*.
+// These tools are NOT registered anywhere. Write-path tools and other
+// runtime modules must not import from this file. Exception: worker.ts
+// may import executeJudgmentQueryTool and executeJudgmentExplainTool
+// for Phase 1B.3 read-only Telegram commands (/judgment, /judgment_explain).
+// All other imports from src/main.ts, src/providers/*, src/context/*,
+// src/memory/*, src/telegram/*, or src/commands/* remain prohibited.
 //
 // Per ADR-0014 (P1 Bun boundary), this module has no `Bun` / `bun:*`
 // runtime import. `DbHandle` is a type-only import (erased at compile time).

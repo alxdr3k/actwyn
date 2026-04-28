@@ -237,8 +237,8 @@ sqlite3 /var/lib/actwyn/actwyn.db "SELECT status, COUNT(*) FROM jobs GROUP BY st
   `S3_REGION`, and bucket policy. The runtime keeps working;
   uploads will retry per `storage_sync` schedule.
 - **Telegram notification stuck in `pending`** — check
-  `outbound_notification_chunks.status`; the
-  `notification_retry` loop will pick up `pending` / `failed`
+  `outbound_notification_chunks.status`; the worker dispatches a
+  `notification_retry` job that picks up `pending` / `failed`
   chunks. `sent` chunks are never re-sent.
 - **Schema-version mismatch warning in `/doctor`** — bump
   `expected_schema_version` in `src/main.ts` together with the new
