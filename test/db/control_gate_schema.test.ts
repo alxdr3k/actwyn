@@ -4,6 +4,7 @@
 // and successful insert/fetch round-trips. No repository helper — direct SQL.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { type SQLQueryBindings } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -73,9 +74,9 @@ function insertRow(o: RowOverrides = {}): string {
   return id;
 }
 
-function insertRaw(sql: string, params: unknown[]): () => void {
+function insertRaw(sql: string, params: SQLQueryBindings[]): () => void {
   return () => {
-    (db.prepare<unknown, unknown[]>(sql) as ReturnType<typeof db.prepare>).run(...params);
+    db.prepare<unknown, SQLQueryBindings[]>(sql).run(...params);
   };
 }
 
