@@ -1,7 +1,7 @@
 # Code Map
 
 > Status: thin current-state map · Owner: project lead ·
-> Last updated: 2026-04-28
+> Last updated: 2026-04-29
 >
 > This file maps the actual files in `src/`, `test/`, `migrations/`,
 > `scripts/`, `config/`, and `deploy/`. It is meant to be skimmed by
@@ -113,21 +113,21 @@ Pending: Context Compiler, Telegram write commands (propose/approve/commit), res
 judgment refresh (#44). `control_gate_events` `job_id` attribution resolved (#45, migration 006).
 See `docs/RUNTIME.md` for the full runtime boundary description.
 
-## Judgment (Phase 1B.3 — schema + repositories + typed-tool contracts + Control Gate + runtime wiring)
+## Judgment
 
 | Path                                  | Purpose                                                                              | Status                                                                       |
 | ------------------------------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| `src/judgment/types.ts`               | `as const` literal arrays + union types for the P0.5 enum surfaces (`kind`, `epistemic_origin`, `authority_source`, `approval_state`, `lifecycle_status`, `activation_state`, `retention_state`, `confidence`, `decay_policy`, `procedure_subtype`, `trust_level`) plus `ONTOLOGY_VERSION` / `SCHEMA_VERSION` defaults (DEC-028). Pure TS, no `Bun` / `bun:*` import (ADR-0014). | implemented (Phase 1A.1); runtime-reachable via Phase 1B.3 read-command path (`/judgment`, `/judgment_explain`). Write-path tools remain unregistered. |
-| `src/judgment/validators.ts`          | Pure-TS type guards over the literal arrays in `types.ts`, plus `validateStatement` / `validateScopeJson` / `validateScopeObject` / `validateKind` / `validateEpistemicOrigin` / `validateImportance` / `validateConfidenceLabel` / `validateStringArray` / `validateJsonValue` / `validateNonEmptyString` / `validatePlainJsonObject` / `validateTrustLevel` / `validateOptionalNonEmptyString`, and Phase 1A.6 query/explain input helpers (`validateBoolean`, enum-array helpers, pagination/order helpers, `validateScopeContains`) returning a tagged result. | implemented (Phase 1A.1/1A.2/1A.3/1A.4/1A.6); runtime-reachable via Phase 1B.3 read-command path. Write-path tools remain unregistered. |
-| `src/judgment/repository.ts`          | Proposal + proposal review + source recording + evidence linking + commit/activation + retirement lifecycle transitions, plus read-only query/explain surfaces: `proposeJudgment`, `approveProposedJudgment`, `rejectProposedJudgment`, `recordJudgmentSource`, `linkJudgmentEvidence`, `commitApprovedJudgment`, `supersedeJudgment`, `revokeJudgment`, `expireJudgment`, `queryJudgments`, `explainJudgment`. Write paths use `BEGIN IMMEDIATE` transactions. Query/explain read local judgment rows, FTS hits, evidence, sources, and lifecycle events without mutating tables or appending events. Active/eligible rows read by worker context injection (Phase 1B.2) and Telegram commands (Phase 1B.3). | implemented (Phase 1A.2–1A.7 + Phase 1B.2/1B.3 runtime read)                     |
-| `src/judgment/tool.ts`                | Typed-tool contracts (constants + `execute*` functions) for propose/approve/reject/record_source/link_evidence/commit/query/explain/supersede/revoke/expire. Write-path contracts not registered in runtime. `executeJudgmentQueryTool` + `executeJudgmentExplainTool` imported by `src/queue/worker.ts` for `/judgment` + `/judgment_explain` commands (Phase 1B.3). | implemented (Phase 1A.2–1A.7; query+explain runtime-wired in Phase 1B.3)                     |
-| `src/judgment/control_gate.ts`        | Control Gate evaluator: `ProbeLevel`, `ProbeType`, `LensId`, `TriggerCode`, `ControlGateDecision` types; `evaluateTurn(input, turnId?)` → L0/L1/L3 decision; `evaluateCandidate(candidate)` → L0/L1/L2/L3 decision; `recordControlGateDecision(db, decision, job_id?)` → persists to `control_gate_events` with retry idempotency (pre-checks existing turn row by job_id). `direct_commit_allowed` is always false (ADR-0012 invariant). Imported by `src/queue/worker.ts` (Phase 1B.1). | implemented (Phase 1A.8 + Phase 1B.1 runtime-wired + #45 job_id)        |
+| `src/judgment/types.ts`               | Judgment enum literals, defaults, and shared TS types. Pure TS.                     | implemented |
+| `src/judgment/validators.ts`          | Pure-TS validators for judgment inputs and query/explain filters.                   | implemented |
+| `src/judgment/repository.ts`          | Sole writer for `judgment_*` tables; owns local lifecycle operations and query/explain. | implemented; write paths local/unregistered |
+| `src/judgment/tool.ts`                | Local typed-tool contracts. Only query/explain executors are runtime-reachable via worker system commands. | implemented |
+| `src/judgment/control_gate.ts`        | Control Gate evaluation and `control_gate_events` writer.                           | implemented; worker telemetry path only |
 
 ## Queue / orchestration
 
 | Path                                  | Purpose                                                                              | Status                                       |
 | ------------------------------------- | ------------------------------------------------------------------------------------ | -------------------------------------------- |
-| `src/queue/worker.ts`                 | Single job claim + dispatch loop; one `provider_run` at a time. Also: attachment capture pre-step, Control Gate evaluation (Phase 1B.1), active judgment context injection (Phase 1B.2), `/judgment` + `/judgment_explain` Telegram command dispatch (Phase 1B.3). | implemented · salvage:ADAPT (`buildContextForRun` reads `memory_items` / `memory_summaries` / `turns` / `judgment_items` and calls `buildContext` / `pack` directly — retrieval / packing responsibility moves to Stage 4 Compiler) |
+| `src/queue/worker.ts`                 | Single job claim + dispatch loop; one `provider_run` at a time. Also: attachment capture, Control Gate telemetry, judgment context injection, and judgment read-command dispatch. | implemented · salvage:ADAPT |
 | `src/queue/notification_retry.ts`     | Handlers / helpers used by the worker to process `notification_retry` jobs (per-chunk re-send of `outbound_notification_chunks`). Not a separate loop. | implemented · salvage:KEEP |
 | `src/startup/recovery.ts`             | Boot-time reconciliation of stale `running` jobs (force `interrupted`, requeue if `safe_retry`, kill orphan PIDs); offset fast-forward; enqueues one `storage_sync` job for `failed` / `delete_failed` rows only (not for `pending`). | implemented · salvage:KEEP |
 
@@ -187,14 +187,14 @@ See `docs/RUNTIME.md` for the full runtime boundary description.
 | `test/db/judgment_schema.test.ts`                 | Judgment schema CHECK / NOT NULL / JSON / FTS5 trigger coverage (Phase 1A.1).    |
 | `test/db/control_gate_schema.test.ts`             | `control_gate_events` schema CHECK / NOT NULL / JSON / append-only trigger coverage (Phase 1A.8). |
 | `test/events.test.ts`                             | Event emitter contract.                                                          |
-| `test/judgment/validators.test.ts`                | Pure-TS validator type guards + field validator behavior including `validateNonEmptyString` / `validatePlainJsonObject` / `validateTrustLevel` / `validateOptionalNonEmptyString`, plus Phase 1A.6 query/explain helper validators for booleans, enum filters, pagination, ordering, and `scope_contains`. |
-| `test/judgment/repository.test.ts`                | Proposal repository insert, defaults, validation rejections, FTS trigger, transaction rollback; approve/reject review transitions, event payloads, state guards, rollback; source recording insert, defaults, trimming, event, rollback; evidence linking insert, state guards, trimming, event, denormalized JSON arrays, rollback; commit success (state transition, event, evidence requirement, denormalized array sync), invalid state guards, malformed denormalized array element guards, validation rejections, transaction rollback; Phase 1A.6 read-only `queryJudgments` / `explainJudgment` filters, FTS query, scope filter, evidence/source/event explanation output, malformed persisted JSON handling, and no-mutation/no-event-append assertions; Phase 1A.7 supersede/revoke/expire state transitions, event payloads, JSON array updates, edge insertion, invalid state guards, rollback on event/edge failure, and query/explain integration checks after retirement. |
-| `test/judgment/tool.test.ts`                      | Typed-tool contract constants, executor happy/error paths (including malformed array element errors returning `validation_error`), Phase 1A.6 `judgment.query` / `judgment.explain` contract coverage, read-only no-mutation/no-event-append checks, Phase 1A.7 `judgment.supersede` / `judgment.revoke` / `judgment.expire` executor happy/error paths and no-mutation checks, static boundary assertions for all eleven judgment tools; Phase 1B.3: worker is now allowed to import `executeJudgmentQueryTool` + `executeJudgmentExplainTool`. |
-| `test/context/builder_judgments.test.ts`          | Phase 1B.2 — `judgment_active` slot injection, priority ordering (700→600→500), `skipJudgments` empty-array behavior, multi-item rendering. |
-| `test/queue/control_gate_telemetry.test.ts`       | Phase 1B.1 — `control_gate_events` row inserted per non-system `provider_run`; excluded for system commands and `summary_generation`; L0 default; ADR-0012 `direct_commit_allowed=0` invariant. |
-| `test/queue/judgment_commands.test.ts`            | Phase 1B.3 — `/judgment` and `/judgment_explain` command dispatch via worker; output delivered via notification (not turns); empty/not-found/valid responses. |
-| `test/queue/judgment_context_injection.test.ts`   | Phase 1B.2 — global-scope injection in packed message, non-global/archived exclusion, temporal validity filter (future `valid_from`, past `valid_until`), `summary_generation` exclusion, judgment command turn exclusion (no turn created for `/judgment`/`/judgment_explain`). |
-| `test/judgment/control_gate.test.ts`              | `evaluateTurn` L0/L1/L3 coverage, `evaluateCandidate` L0/L1/L2/L3 coverage, 6 eval fixtures from `docs/JUDGMENT_SYSTEM.md §Eval fixtures`, `recordControlGateDecision` persistence round-trip, and static import boundary check (Phase 1A.8). |
+| `test/judgment/validators.test.ts`                | Pure-TS judgment validator coverage.                                             |
+| `test/judgment/repository.test.ts`                | Judgment repository lifecycle, transaction, query/explain, and retirement coverage. |
+| `test/judgment/tool.test.ts`                      | Typed-tool contracts, executor outcomes, and runtime import-boundary assertions. |
+| `test/context/builder_judgments.test.ts`          | Judgment context slot rendering and priority behavior.                           |
+| `test/queue/control_gate_telemetry.test.ts`       | Worker telemetry writes and system-command exclusions.                           |
+| `test/queue/judgment_commands.test.ts`            | `/judgment` and `/judgment_explain` dispatch/output behavior.                    |
+| `test/queue/judgment_context_injection.test.ts`   | Worker-side active judgment query filters and packed-context injection.          |
+| `test/judgment/control_gate.test.ts`              | Control Gate decisions, fixture coverage, persistence, and import-boundary assertions. |
 | `test/memory/correction.test.ts`                  | Memory correction supersede semantics (AC-MEM-004).                              |
 | `test/memory/summary.test.ts`                     | Summary generation + provenance (AC-MEM-002).                                    |
 | `test/notifications/*.test.ts`                    | Notification chunking, ledger, retry state machine, worker wiring (AC-NOTIF-*). |
