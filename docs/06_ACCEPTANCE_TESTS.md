@@ -599,7 +599,7 @@ Each entry uses:
 
 ## AC-OBS-003 — `/status` output matches the §14.1 contract
 
-- **Maps to**: PRD AC-OBS-003 (legacy AC29 (artifact)); HLD §16.5; DEC-015.
+- **Maps to**: PRD AC-OBS-003 (legacy AC29 (artifact)); PRD §14.1; DEC-015.
 - **Test type**: end-to-end (golden).
 - **Fixture**: A controlled session state with known counts:
   1 `queued`, 1 `running`, N `pending` notifications, M

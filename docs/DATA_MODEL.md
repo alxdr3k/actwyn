@@ -20,8 +20,9 @@
 - `src/storage/objects.ts` — row builders / readers for
   `storage_objects` and `memory_artifact_links`.
 - `docs/PRD.md` Appendix D — original column contract.
-- `docs/02_HLD.md` §5 — writer map, cross-table invariants,
-  idempotency keys.
+- `docs/02_HLD.md` §5 — historical reasoning for writer map and
+  cross-table invariants. The operative single-writer map is the
+  `## Single-writer map` section in this file (below).
 
 If this document and the migrations disagree, the migrations win and
 this document is stale and should be patched.

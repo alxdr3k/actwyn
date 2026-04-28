@@ -474,7 +474,7 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
   A deeper `/status deep` variant is P1+.
 - Alternatives considered: queue-only output; full operational
   dump; JSON.
-- Impacted docs: PRD §7, §8.1; HLD §16.5.
+- Impacted docs: PRD §7, §8.1, §13.3, §14.1.
 - Risks / mitigations: field drift over time — template
   frozen in Phase 10; changes require a new DEC.
 - Review trigger: when a field consistently confuses users or

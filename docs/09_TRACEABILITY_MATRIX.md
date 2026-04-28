@@ -59,7 +59,7 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | Q-016   | Claude Code side effects as chat runtime                           | ADR-0005      | §11, §15                   | §8.1, §8.4       | SP-05; AC-PROV-003                                   |
 | Q-017   | Remember-feedback UX                                               | DEC-011       | §8.4                       | §11              | —                                             |
 | Q-018   | Telegram notification noise budget                                 | DEC-012       | §13.3                      | §6.3, §9.4       | —                                             |
-| Q-019   | `/status` output contract                                          | DEC-015       | §7, §8.1                   | §16.5            | —                                             |
+| Q-019   | `/status` output contract                                          | DEC-015       | §7, §8.1, §14.1            | —                | —                                             |
 | Q-020   | Outbound delivery tracking                                         | DEC-015       | §13.3                      | §6.3, §7.7, §16.1 | 05_RUNBOOK §6                                 |
 | Q-021   | Restart user-notification policy                                   | DEC-016       | §8.5, §13.3                | §6.2, §15        | 05_RUNBOOK §4; AC-JOB-002                           |
 | Q-022   | `/doctor` quick vs deep                                            | DEC-017       | §8.7                       | §16              | AC-OBS-001                                          |
@@ -147,7 +147,7 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | DEC-012 | Notification minimal set                                     | §13.3                    | §6.3, §9.4         | —                            |
 | DEC-013 | P0 success = AC pass + 7-day dogfood                         | §17, §18                 | —                  | Playbook §5.7, §14           |
 | DEC-014 | Required observational data                                  | §14.2                    | §10.3, §13.3       | Appendix D                   |
-| DEC-015 | `/status` output contract                                    | §7, §8.1, §13.3          | §16.5              | 05_RUNBOOK §6                |
+| DEC-015 | `/status` output contract                                    | §7, §8.1, §13.3, §14.1   | —                  | 05_RUNBOOK §6                |
 | DEC-016 | Restart user-notification policy                             | §8.5, §13.3              | §6.2, §15          | 05_RUNBOOK §4; AC-JOB-002          |
 | DEC-017 | `/doctor` single command, typed output                       | §8.7                     | §16                | AC-OBS-001                         |
 | DEC-018 | S3 degraded thresholds                                       | §8.7                     | §12.5, §16.1       | 05_RUNBOOK §7; AC-STO-001, AC-OBS-001    |

@@ -185,7 +185,7 @@ Detailed module / state-machine diagrams live in `docs/02_HLD.md`.
   other module spawns providers.
 - **Storage / DB boundary** — `src/db.ts` owns the SQLite handle;
   `src/storage/*` owns local FS and S3. Each table has a single-writer
-  module (see `docs/02_HLD.md` §5.1 writer map).
+  module (see `docs/DATA_MODEL.md` §Single-writer map; `docs/02_HLD.md` §5.1 has historical reasoning).
 - **Memory boundary** — `src/memory/*` writes `memory_summaries` and
   `memory_items` from session output. Provenance + confidence come
   from this module.

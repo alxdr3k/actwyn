@@ -506,7 +506,7 @@ Ranked by "if we answer this wrong, how painful is it to unwind?"
   the last user-visible issue if any. A deeper
   `/status deep` is P1+.
 - **Decision**: DEC-015.
-- **Impacted docs**: PRD §7 US-02, §8.1; HLD §16.5.
+- **Impacted docs**: PRD §7 US-02, §8.1, §14.1.
 - **Follow-up**: Lock exact field template during Phase 10.
 - **History**: recorded 2026-04-22.
 
