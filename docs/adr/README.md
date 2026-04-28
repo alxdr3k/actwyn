@@ -75,3 +75,4 @@ Register (`DEC-###`), not here.
 | ADR-0012 | Origin/Authority separation and Metacognitive Critique Loop | accepted |
 | ADR-0013 | Critique Lens v0.1 + Tension Generalization + Status Axis Separation | accepted |
 | ADR-0014 | Bun runtime stack confirmation: cautions, principles, roadmap | accepted |
+| ADR-0015 | `control_gate_events` append-only ledger (Phase 1A.8 Control Gate substrate) | accepted |

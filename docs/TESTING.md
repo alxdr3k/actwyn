@@ -92,14 +92,17 @@ Migration shape is asserted by:
 - `test/db/judgment_schema.test.ts` — Judgment System schema
   CHECK / NOT NULL / JSON validity / FTS5 trigger coverage
   (Phase 1A.1).
+- `test/db/control_gate_schema.test.ts` — `control_gate_events`
+  schema CHECK / NOT NULL / JSON validity / append-only trigger
+  coverage including INSERT OR REPLACE block (Phase 1A.8).
 - `test/db/invariants.test.ts` — cross-table invariants from
   HLD §5.2.
 - `src/db/migrator.ts` — refuses missing prior versions at runtime,
   records applied versions in `settings`.
 
 Judgment System proposal, review, source-recording, evidence-linking,
-commit, query, explain, and retirement lifecycle surface tests
-(Phase 1A.2/1A.3/1A.4/1A.5/1A.6/1A.7) live under:
+commit, query, explain, retirement lifecycle, and Control Gate surface
+tests (Phase 1A.2–1A.8) live under:
 
 - `test/judgment/validators.test.ts` — pure-TS validator behavior
   including `validateNonEmptyString` / `validatePlainJsonObject` /
@@ -134,6 +137,10 @@ commit, query, explain, and retirement lifecycle surface tests
   query/explain integration after retirement (superseded/revoked/expired
   rows hidden by default, visible with `include_history=true`, explain
   includes retirement events) (Phase 1A.3/1A.4/1A.5/1A.6/1A.7).
+- `test/judgment/control_gate.test.ts` — `evaluateTurn` (L0/L1/L3),
+  `evaluateCandidate` (L0/L1/L2/L3), 6 eval fixtures from
+  `docs/JUDGMENT_SYSTEM.md §Eval fixtures`, `recordControlGateDecision`
+  persistence round-trip, and static import boundary check (Phase 1A.8).
 - `test/judgment/tool.test.ts` — `executeJudgmentProposeTool` /
   `executeJudgmentApproveTool` / `executeJudgmentRejectTool` /
   `executeJudgmentRecordSourceTool` /
@@ -153,7 +160,7 @@ When you add a migration:
 
 1. Add `migrations/<NNN>_<slug>.sql` (versions contiguous from 001).
 2. Update `expected_schema_version` in `src/main.ts` (currently
-   4) so `/doctor` flags drift.
+   5) so `/doctor` flags drift.
 3. Update `docs/DATA_MODEL.md` and `docs/CODE_MAP.md`.
 4. Re-run `bun run ci`.
 

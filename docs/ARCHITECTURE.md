@@ -101,7 +101,7 @@ but they do **not** mutate any `judgment_*` table, append
 `judgment_events`, or make judgments context-visible. Active /
 eligible rows remain outside runtime request handling.
 
-Phase 1A.7 has added the **retirement lifecycle local surfaces**:
+Phase 1A.7 added the **retirement lifecycle local surfaces**:
 `src/judgment/repository.ts` now also exports `supersedeJudgment`,
 `revokeJudgment`, and `expireJudgment`, and `src/judgment/tool.ts`
 now also exports `JUDGMENT_SUPERSEDE_TOOL` / `JUDGMENT_REVOKE_TOOL` /
@@ -124,9 +124,15 @@ None of these retirement operations make judgments context-visible.
 None register tools, call LLMs, or trigger background processing.
 Runtime context still does not read any judgment rows.
 
-No Control Gate, no Context Compiler, no context/provider runtime
-hookup, and no memory-promotion path exists yet — those remain
-Phase 1A+ work.
+Phase 1A.8 added the **Control Gate substrate**: `src/judgment/control_gate.ts`
+(`evaluateTurn`, `evaluateCandidate`, `recordControlGateDecision`) and
+`migrations/005_control_gate_events.sql` (append-only `control_gate_events`
+table; schema version 5). The gate evaluates TurnInput / JudgmentCandidate →
+ControlGateDecision (L0–L3); `direct_commit_allowed` is always false
+(ADR-0012 invariant). Not wired to any runtime path.
+
+No Context Compiler, no context/provider runtime hookup, and no
+memory-promotion path exists yet — those remain future work.
 
 ## System overview
 
@@ -187,11 +193,11 @@ Detailed module / state-machine diagrams live in `docs/02_HLD.md`.
 - **Active runtime state** — the SQLite database opened by
   `src/db.ts` (path resolved by `ACTWYN_DB_PATH` /
   `/var/lib/actwyn/actwyn.db` on prod).
-- **Architecture decisions** — `docs/adr/*` (ADR-0001 … ADR-0013
-  accepted on `main`; ADR-0009 … ADR-0013 cover the Judgment System
-  direction; Phase 1A.1 through Phase 1A.7 are implemented — full
-  Judgment System runtime is not implemented; runtime wiring remains
-  future work).
+- **Architecture decisions** — `docs/adr/*` (ADR-0001 … ADR-0015
+  accepted on `main`; ADR-0009 … ADR-0013 + ADR-0015 cover the
+  Judgment System direction; Phase 1A.1 through Phase 1A.8 are
+  implemented — full Judgment System runtime is not implemented;
+  runtime wiring remains future work).
 - **Tactical decisions and open questions** —
   `docs/08_DECISION_REGISTER.md`, `docs/07_QUESTIONS_REGISTER.md`
   (DEC-037 records the documentation lifecycle policy this set of
@@ -280,7 +286,7 @@ exists only as local unregistered DB operations:
 
 The DB-native AI-first Judgment System direction (ADR-0009 …
 ADR-0013, `docs/JUDGMENT_SYSTEM.md`) defines the following
-components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4 / 1A.5 / 1A.6 / 1A.7):
+components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4 / 1A.5 / 1A.6 / 1A.7 / 1A.8):
 
 - **Schema skeleton** — `judgment_sources`, `judgment_items`,
   `judgment_evidence_links`, `judgment_edges`, `judgment_events`,
