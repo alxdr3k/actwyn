@@ -13,7 +13,7 @@ authoritative, and what to update when something changes.
 
 1. Code, tests, migrations
 2. Generated docs / schemas produced from those sources
-   (`docs/generated/*` once generators land)
+   (`docs/generated/*`; see `docs/generated/README.md` for active generators)
 3. Thin current-state docs (`docs/ARCHITECTURE.md`, `docs/CODE_MAP.md`,
    `docs/DATA_MODEL.md`, `docs/RUNTIME.md`, `docs/TESTING.md`,
    `docs/OPERATIONS.md`)
@@ -61,13 +61,53 @@ output.
 | -------------------------------------------- | -------------------------------------------------- |
 | Runtime behavior changes                     | update `docs/RUNTIME.md`                           |
 | Module / file layout changes                 | update `docs/CODE_MAP.md`                          |
-| DB / schema / migration changes              | update `docs/DATA_MODEL.md`                        |
+| DB / schema / migration changes              | update `docs/DATA_MODEL.md` + run `bun run docs:generate:schema` |
 | Test / lint / typecheck command changes      | update `docs/TESTING.md`                           |
 | Operational, env, or run-loop changes        | update `docs/OPERATIONS.md`                        |
 | Major architecture decision                  | add a new ADR (or supersede an existing one)       |
 | Tactical / policy decision                   | add an entry in `docs/08_DECISION_REGISTER.md`     |
 | Open question that needs an answer           | add an entry in `docs/07_QUESTIONS_REGISTER.md`    |
 | Historical design context only               | do not update current-state docs unless behavior changed |
+
+## Enforcement mechanisms
+
+These tools make the policy self-enforcing rather than honor-system only.
+
+### Doc Freshness CI
+
+`.github/workflows/doc-freshness.yml` fires on every PR and on every direct
+push to `main`. If code in `src/` or `migrations/` changes without a
+corresponding thin-doc or generated-doc update, the workflow posts a warning
+listing the missing items. The warning is non-blocking (does not prevent
+merge), but should not be ignored.
+
+Temporary: during the early-development period, direct `main` pushes are
+permitted. The workflow covers this via a `push` trigger in addition to
+`pull_request`. See `docs/policies/TEMP_MAIN_PUSH.md` for the graduation
+checklist.
+
+### SHA freshness headers
+
+Thin docs that describe rapidly-evolving logic (LLM calls, judgment pipeline,
+routing decisions) should carry a header on line 3–5:
+
+```
+> Last verified against code: <commit-SHA> (<YYYY-MM-DD>)
+```
+
+**Rule:** any commit that modifies code whose behaviour a SHA-headered doc
+describes must also update that header. Stale headers are treated as a doc
+gap, not a cosmetic issue.
+
+No SHA-headered docs exist yet in this repo. Add the header when a thin doc
+specifically tracks AI/LLM call logic or judgment pipeline behaviour —
+not to every thin doc.
+
+### Generated docs
+
+`docs/generated/schema.md` is produced by `bun run docs:generate:schema` from
+`migrations/*.sql`. Run the command and commit the output whenever a migration
+is added or modified. Do not edit `docs/generated/*` by hand.
 
 ## Relationship to the existing P0 docs
 

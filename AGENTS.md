@@ -138,8 +138,9 @@ Do not read `docs/design/archive/` by default. Those are history.
 - If you add, move, or rename modules, update `docs/CODE_MAP.md`.
 - If you change schema, add a new migration file
   (`migrations/<NNN>_<slug>.sql`, contiguous from 001), bump
-  `expected_schema_version` in `src/main.ts`, and update
-  `docs/DATA_MODEL.md`.
+  `expected_schema_version` in `src/main.ts`, update
+  `docs/DATA_MODEL.md`, and run `bun run docs:generate:schema` then
+  commit `docs/generated/schema.md`.
 - If you change validation commands or `package.json#scripts`,
   update `docs/TESTING.md`.
 - If you change env vars, run paths, or operational steps, update
@@ -148,6 +149,9 @@ Do not read `docs/design/archive/` by default. Those are history.
   supersede an existing one) under `docs/adr/`.
 - Do not rewrite long design docs to reflect implementation
   changes.
+- If the thin doc you are editing carries a `Last verified against
+  code: <SHA> (<date>)` header, update the SHA and date to the
+  current commit before pushing.
 
 ## Validation
 

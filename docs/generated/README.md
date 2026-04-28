@@ -6,31 +6,26 @@ Generated docs are derived from code, schema, migrations, or config.
 fix the generator (or the underlying source); do not patch the
 output.
 
-There are no generation commands defined in this repo today, so this
-directory is currently empty. When generation lands, this README
-will record:
+## Active generators
 
-- Which command produces each generated file.
-- Where the source of the generation lives (script path, migration
-  file, etc.).
-- When the doc is regenerated (CI step, pre-commit hook, manual
-  command).
+| Output | Command | Source | When to regenerate |
+|--------|---------|--------|--------------------|
+| `schema.md` | `bun run docs:generate:schema` | `migrations/*.sql` | Any time a migration is added or modified |
+
+`scripts/generate-schema-doc.ts` is the generator for `schema.md`. Run it and
+commit the output in the same commit as the migration change.
 
 ## Potential future generated docs
 
-These are candidates only — none are committed to.
+These are candidates — not yet committed to.
 
-- **DB schema reference** — generated from `migrations/*.sql` plus
-  the `schema.migrations.<NNN>` keys in `settings`.
 - **API reference** — exported types from `src/providers/types.ts`,
   `src/telegram/types.ts`, and any future external interface.
 - **Provider capability matrix** — generated from the Claude
   adapter and stub providers in `src/providers/`.
-- **Judgment enum / reference** — generate from `migrations/004_judgment_skeleton.sql`
-  and `migrations/005_control_gate_events.sql` (both landed on `main`).
 - **Module graph** — generated from `tsc --listFiles` plus an
   import-walker, so an agent can cheaply skim how `src/` modules
   reference each other.
 
-When you add a generator, update `docs/DOCUMENTATION.md` "What to
-update when" with the rule for keeping the output fresh.
+When you add a generator, add a row to the table above and update
+`docs/DOCUMENTATION.md` "What to update when".
