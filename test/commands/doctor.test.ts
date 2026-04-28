@@ -176,11 +176,11 @@ describe("config_loaded check", () => {
 
 describe("migrations_applied check", () => {
   test("ok when all expected migrations are applied", async () => {
-    // After migrate(db, MIGRATIONS) in beforeEach, 001..004 are applied.
-    const results = await runDoctor({ db, ...BASE_DEPS, expected_schema_version: 4 });
+    // After migrate(db, MIGRATIONS) in beforeEach, 001..005 are applied.
+    const results = await runDoctor({ db, ...BASE_DEPS, expected_schema_version: 5 });
     const check = results.find((r) => r.name === "migrations_applied")!;
     expect(check.status).toBe("ok");
-    expect(check.detail).toContain("applied=4");
+    expect(check.detail).toContain("applied=5");
   });
 
   test("fail when expected version is higher than applied", async () => {
