@@ -44,8 +44,10 @@
   from an env file not committed.
 - A second, **unauthorized** Telegram account is configured for
   AC-TEL-001.
-- A harness repository exists under `test/acceptance/` with a
-  small CLI and per-AC scenario scripts.
+- A dedicated end-to-end acceptance harness under `test/acceptance/` is
+  not yet present. Existing automated coverage lives under `test/`
+  (unit and integration), and missing acceptance plans remain tracked
+  in `## Pending-to-add (backlog)`.
 
 ## Conventions
 

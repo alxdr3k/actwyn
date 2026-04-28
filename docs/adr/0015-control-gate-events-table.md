@@ -43,11 +43,17 @@ types, evaluation logic, and the `control_gate_events` persistence table.
    `lenses_json`, `triggers_json`) with `json_valid()` + `json_type()`
    constraints. Avoids a separate join table for P0.5 cardinality.
 
-6. **No runtime wiring**: `src/judgment/control_gate.ts` is a pure-TS
-   module (per ADR-0014 Bun boundary). `evaluateTurn` and
-   `evaluateCandidate` are not called from any runtime path. The
-   `control_gate_events` table exists and is tested; no turn loop,
-   provider, or context builder imports this module.
+6. **No runtime wiring** *(at Phase 1A.8 acceptance scope)*:
+   `src/judgment/control_gate.ts` is a pure-TS module (per ADR-0014 Bun
+   boundary). `evaluateTurn` and `evaluateCandidate` are not called from
+   any runtime path. The `control_gate_events` table exists and is tested;
+   no turn loop, provider, or context builder imports this module.
+
+   **Later refinement**: DEC-038 (2026-04-28) runtime-wired turn-phase
+   Control Gate telemetry in `src/queue/worker.ts` (Phase 1B.1). Migration
+   006 added `job_id` attribution and a partial UNIQUE index for retry
+   idempotency; the current schema version is 6. This ADR records the
+   original Phase 1A.8 acceptance scope only.
 
 ## Consequences
 
