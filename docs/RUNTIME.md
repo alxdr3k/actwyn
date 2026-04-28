@@ -122,7 +122,11 @@ outbound_notifications (status=pending)
 ```
 
 `status = sent` is terminal; the `notification_retry` handler never
-re-sends a sent notification.
+re-sends a sent notification. Retry reconstruction is ledger-driven:
+stored `outbound_notifications.payload_text` is the source of truth,
+with a legacy `job_completed` fallback to the assistant turn plus the
+job footer. If legacy text cannot be reconstructed, remaining retryable
+chunks are terminalized as failed instead of being rescheduled forever.
 
 ### Storage capacity
 
