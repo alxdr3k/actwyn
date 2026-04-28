@@ -99,9 +99,12 @@ routing decisions) should carry a header on line 3–5:
 describes must also update that header. Stale headers are treated as a doc
 gap, not a cosmetic issue.
 
-No SHA-headered docs exist yet in this repo. Add the header when a thin doc
-specifically tracks AI/LLM call logic or judgment pipeline behaviour —
-not to every thin doc.
+No thin current-state behaviour docs currently carry SHA freshness headers.
+`docs/generated/schema.md` is a generated exception: its `generated_at` /
+SHA header is written automatically by `bun run docs:generate:schema` and
+must not be edited by hand — only update it by re-running the generator.
+Add SHA headers to thin docs only when a doc specifically tracks AI/LLM
+call logic or judgment pipeline behaviour, not to every thin doc.
 
 ### Generated docs
 
