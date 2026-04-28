@@ -86,6 +86,7 @@ deployment shape). Everything else is a `DEC-###`.
 | DEC-036 | `current_truth` → `current_operating_view` 이름 변경          | accepted |
 | DEC-037 | Implementation Documentation Lifecycle Policy                  | accepted |
 | DEC-038 | Judgment System Phase 1B.1–1B.3 Runtime Wiring (2026-04-28)   | accepted |
+| DEC-039 | Claude CLI 2.1.x stream-json format change adaptation           | accepted |
 
 Decisions that were previously `D01`..`D05` in the flat log have
 been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
@@ -1131,6 +1132,20 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
   - Control Gate `job_id` attribution and retry idempotency deferred (issue #45).
 - **Impacted docs**: `docs/ARCHITECTURE.md`, `docs/RUNTIME.md`, `docs/CODE_MAP.md`, `docs/DATA_MODEL.md`, `docs/TESTING.md`, `AGENTS.md`, `docs/07_QUESTIONS_REGISTER.md` (Q-027).
 - **Refs**: AGENTS.md §Source of truth Phase 1B; `feat(judgment): Phase 1B.1-1B.3 runtime wiring` commit.
+
+---
+
+## DEC-039 — Claude CLI 2.1.x stream-json format change adaptation
+
+- **Date**: 2026-04-28
+- **Status**: accepted
+- **Decision**: Two code changes to adapt to breaking changes in Claude Code CLI 2.1.x:
+  1. Add `--verbose` flag to the Claude subprocess argv in `src/providers/claude.ts`. CLI 2.1.x requires `--verbose` alongside `--output-format stream-json`; without it the subprocess exits with `"--output-format=stream-json requires --verbose"` and all runs fail.
+  2. Extend `parseLine` in `src/providers/stream_json.ts` to recognise the new `"type"`-keyed event format (was `"event"`-keyed). Specifically: `{"type":"assistant","message":{"content":[{"type":"text","text":"..."}]}}` extracts text; `{"type":"result","subtype":"success","session_id":"...","usage":{...}}` acts as the end event and carries session_id + usage. Also update `StreamAssembler.push` to read `provider_session_id`/`usage` from `kind:"end"` events (previously only `kind:"meta"`). Old `"event"`-keyed format still handled for backward compatibility.
+- **Context**: Discovered during first local dogfood run. CLI 2.1.119 changed the subprocess output schema. The `--verbose` gap manifested as `non_zero_exit`; the format gap manifested as `fallback_used` + empty `final_text` ("(empty response)" in Telegram).
+- **Risks / mitigations**: If CLI adds further breaking changes, `stream_json.ts` will need re-patching. SP-04 (stream-json parser spike) fixtures may need updating on the next CLI version bump.
+- **Review trigger**: Next Claude Code CLI version bump that changes subprocess output.
+- **Refs**: `src/providers/claude.ts`, `src/providers/stream_json.ts`.
 
 ---
 

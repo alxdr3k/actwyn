@@ -304,7 +304,8 @@ export function buildClaudeArgv(args: {
   // `-p <message>` is print mode: non-interactive, exits when done.
   // Must come before other flags so the adapter contract is easy to
   // assert in tests (argv[1] === "-p").
-  const out: string[] = [args.binary, "-p", args.message, "--output-format", "stream-json"];
+  // --verbose required alongside --output-format stream-json since CLI 2.1.x
+  const out: string[] = [args.binary, "-p", args.message, "--output-format", "stream-json", "--verbose"];
   if (args.context_packing_mode === "resume_mode" && args.provider_session_id) {
     out.push("--resume", args.provider_session_id);
   } else if (args.session_id) {

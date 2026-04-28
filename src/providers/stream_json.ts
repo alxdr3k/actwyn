@@ -90,6 +90,62 @@ export function parseLine(line: string, index: number, stream: LineStream): Pars
   }
 
   const o = obj as Record<string, unknown>;
+
+  // CLI 2.1.x "type" format — handle before the legacy "event" path.
+  const typ = typeof o.type === "string" ? o.type : null;
+  if (typ !== null) {
+    // {"type":"assistant","message":{"content":[{"type":"text","text":"..."}]}}
+    if (typ === "assistant" && isRecord(o.message)) {
+      const msg = o.message as Record<string, unknown>;
+      const content = Array.isArray(msg.content) ? msg.content : [];
+      const sessionId = typeof msg.session_id === "string" ? msg.session_id : undefined;
+      let text = "";
+      for (const block of content) {
+        if (isRecord(block) && block.type === "text" && typeof block.text === "string") {
+          text += block.text;
+        }
+      }
+      if (text.length > 0) {
+        return {
+          parsed: {
+            event: { index, stream, payload: line, parser_status: "parsed" },
+            kind: "text",
+            text_delta: text,
+            ...(sessionId ? { provider_session_id: sessionId } : {}),
+          },
+          text_delta: text,
+        };
+      }
+      // thinking-only or empty content block — skip
+      return {
+        parsed: { event: { index, stream, payload: line, parser_status: "parsed" }, kind: "other" },
+        text_delta: "",
+      };
+    }
+
+    // {"type":"result","subtype":"success","result":"...","session_id":"..."}
+    if (typ === "result" && o.subtype === "success") {
+      const sessionId = typeof o.session_id === "string" ? o.session_id : undefined;
+      const usage = isRecord(o.usage) ? o.usage : undefined;
+      return {
+        parsed: {
+          event: { index, stream, payload: line, parser_status: "parsed" },
+          kind: "end",
+          ...(sessionId ? { provider_session_id: sessionId } : {}),
+          ...(usage ? { usage } : {}),
+        },
+        text_delta: "",
+      };
+    }
+
+    // All other "type" events (system, rate_limit_event, etc.) — skip.
+    return {
+      parsed: { event: { index, stream, payload: line, parser_status: "parsed" }, kind: "other" },
+      text_delta: "",
+    };
+  }
+
+  // Legacy "event" format.
   const evt = typeof o.event === "string" ? o.event : null;
   if (!evt || !PARSED_EVENTS.has(evt)) {
     return {
@@ -178,10 +234,11 @@ export class StreamAssembler {
     const { parsed, text_delta } = parseLine(line, this.lineIndex, stream);
     this.events.push(parsed.event);
     if (text_delta) this.texts.push(text_delta);
-    if (parsed.kind === "meta") {
+    if (parsed.kind === "meta" || parsed.kind === "end") {
       if (parsed.provider_session_id) this._provider_session_id = parsed.provider_session_id;
       if (parsed.usage) this._usage = parsed.usage;
-    } else if (parsed.kind === "end") {
+    }
+    if (parsed.kind === "end") {
       this._saw_end = true;
     }
     this.lineIndex += 1;
