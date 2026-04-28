@@ -21,7 +21,10 @@ this template is a checklist, not a place for long prose.
 - [ ] Updated registers (`docs/07_QUESTIONS_REGISTER.md` /
       `docs/08_DECISION_REGISTER.md` /
       `docs/09_TRACEABILITY_MATRIX.md`)
-- [ ] Updated generated docs (`docs/generated/`)
+- [ ] Regenerated `docs/generated/*` (`bun run docs:generate:schema`) and
+      committed the output
+- [ ] Updated SHA header (`Last verified against code: <SHA> (<date>)`) on any
+      thin doc whose subject area this PR touches
 - [ ] Archived or superseded an old design note
       (`docs/design/archive/`)
 
