@@ -112,8 +112,9 @@ slice:
   + `executeJudgmentExplainTool` from `src/judgment/tool.ts` imported by worker for
   these commands only. Command output not stored as turns.
 
-Pending: Context Compiler, Telegram write commands (propose/approve/commit), resume-mode
-judgment refresh (#44). `control_gate_events` `job_id` attribution resolved (#45, migration 006).
+Pending: Context Compiler, Telegram write commands (propose/approve/commit).
+`control_gate_events` `job_id` attribution resolved (#45, migration 006).
+Resume-mode judgment refresh resolved (#44).
 See `docs/RUNTIME.md` for the full runtime boundary description.
 
 ## Judgment

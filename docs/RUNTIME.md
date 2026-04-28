@@ -203,7 +203,6 @@ a task explicitly authorizes a further Judgment runtime slice.
 - Full Context Compiler / `current_operating_view`; provider context
   still uses `builder.ts` + `packer.ts`.
 - Runtime readers for `judgment_edges`.
-- Resume-mode judgment refresh (issue #44).
 - `Tension` telemetry and the `tensions` table: **not implemented**.
 - `ReflectionTriageEvent` and `reflection_triage_events`: **not implemented**.
 - Vector and graph derived projections: **not implemented**.

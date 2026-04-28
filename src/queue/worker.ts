@@ -426,7 +426,42 @@ async function runOneClaimedInner(
     request = { ...baseRequest, message: ctx.packedMessage };
     snapshotJson = ctx.snapshotJson;
   } else {
-    snapshotJson = JSON.stringify({ mode: packingMode, session_id: job.session_id ?? "" });
+    // Phase 1B.2 — Resume-mode judgment refresh (issue #44).
+    // Claude holds conversation history via --resume; inject a fresh, bounded
+    // judgment_active block so judgments committed after the last replay are visible.
+    // Excludes turns, memory, and summary — only judgment_items + user_message.
+    const resumeJudgments = deps.db
+      .prepare<JudgmentItemSlot, []>(
+        `SELECT id, kind, statement, authority_source, confidence
+         FROM judgment_items
+         WHERE lifecycle_status = 'active'
+           AND activation_state = 'eligible'
+           AND retention_state = 'normal'
+           AND json_extract(scope_json, '$.global') = 1
+           AND (valid_from IS NULL OR valid_from <= strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+           AND (valid_until IS NULL OR valid_until > strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+         ORDER BY importance DESC, created_at DESC
+         LIMIT 20`,
+      )
+      .all();
+    if (resumeJudgments.length > 0) {
+      const snap = buildContext({
+        mode: "resume_mode",
+        user_message: baseRequest.message,
+        system_identity: "actwyn personal agent",
+        judgment_items: resumeJudgments,
+      });
+      try {
+        const packed = pack(snap, { total_budget_tokens: 6000 });
+        request = { ...baseRequest, message: deps.redactor.apply(renderAsMessage(packed)).text };
+        snapshotJson = deps.redactor.apply(serializeForProviderRun(packed)).text;
+      } catch (e) {
+        if (!(e instanceof PromptOverflowError)) throw e;
+        snapshotJson = JSON.stringify({ mode: packingMode, session_id: job.session_id ?? "" });
+      }
+    } else {
+      snapshotJson = JSON.stringify({ mode: packingMode, session_id: job.session_id ?? "" });
+    }
   }
 
   insertProviderRunStart({

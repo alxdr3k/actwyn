@@ -207,3 +207,65 @@ describe("Phase 1B.2 — summary_generation exclusion", () => {
     expect(snapshotSlotsFor("j-sumgen")).not.toContain("judgment_active");
   });
 });
+
+// Seed a resume_mode job by first inserting a succeeded provider_run with a
+// provider_session_id so queryPriorProviderSessionId returns non-null.
+function seedResumeJob(id: string, ikey: string, message = "재개 메시지"): void {
+  const priorJobId = `prior-${id}`;
+  db.prepare<unknown, [string, string, string, string]>(
+    `INSERT INTO jobs
+       (id, status, job_type, session_id, user_id, chat_id, request_json, idempotency_key, provider)
+     VALUES(?, 'succeeded', 'provider_run', ?, 'user-1', 'chat-1', ?, ?, 'fake')`,
+  ).run(priorJobId, "sess-1", JSON.stringify({ text: "이전 메시지" }), `prior-ikey-${id}`);
+  db.prepare<unknown, [string, string]>(
+    `INSERT INTO provider_runs
+       (id, job_id, session_id, provider, context_packing_mode, status,
+        argv_json_redacted, cwd, injected_snapshot_json, parser_status,
+        provider_session_id, finished_at)
+     VALUES(?, ?, 'sess-1', 'fake', 'replay_mode', 'succeeded',
+            '{}', '.', '{}', 'parsed', 'claude-session-xyz',
+            strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
+  ).run(`pr-prior-${id}`, priorJobId);
+  db.prepare<unknown, [string, string, string, string]>(
+    `INSERT INTO jobs
+       (id, status, job_type, session_id, user_id, chat_id, request_json, idempotency_key, provider)
+     VALUES(?, 'queued', 'provider_run', ?, 'user-1', 'chat-1', ?, ?, 'fake')`,
+  ).run(id, "sess-1", JSON.stringify({ text: message, command: null, args: "" }), ikey);
+}
+
+describe("Phase 1B.2 — resume_mode judgment refresh (issue #44)", () => {
+  test("global active judgment appears in resume_mode packed message", async () => {
+    seedActiveScopedJudgment("jdg-resume-global", "재개 시 전역 판단 적용", { global: true });
+    seedResumeJob("j-resume-hit", "k-resume-hit", "재개 질문");
+    await runWorkerOnce(deps());
+    const msg = argvMessageFor("j-resume-hit");
+    expect(msg).toContain("재개 시 전역 판단 적용");
+    expect(snapshotSlotsFor("j-resume-hit")).toContain("judgment_active");
+  });
+
+  test("resume_mode with no qualifying judgments does NOT inject judgment_active", async () => {
+    seedResumeJob("j-resume-empty", "k-resume-empty", "판단 없음");
+    await runWorkerOnce(deps());
+    expect(snapshotSlotsFor("j-resume-empty")).not.toContain("judgment_active");
+  });
+
+  test("non-global judgment does NOT appear in resume_mode message", async () => {
+    seedActiveScopedJudgment("jdg-resume-scoped", "세션 한정 재개 판단", { session: "sess-other" });
+    seedResumeJob("j-resume-scoped", "k-resume-scoped", "재개 질문");
+    await runWorkerOnce(deps());
+    const msg = argvMessageFor("j-resume-scoped");
+    expect(msg).not.toContain("세션 한정 재개 판단");
+    expect(snapshotSlotsFor("j-resume-scoped")).not.toContain("judgment_active");
+  });
+
+  test("past valid_until judgment does NOT appear in resume_mode message", async () => {
+    seedActiveScopedJudgment("jdg-resume-exp", "만료된 재개 판단", { global: true });
+    db.prepare<unknown, [string, string]>(
+      "UPDATE judgment_items SET valid_until = ? WHERE id = ?",
+    ).run("2020-01-01T00:00:00.000Z", "jdg-resume-exp");
+    seedResumeJob("j-resume-exp", "k-resume-exp", "재개 질문");
+    await runWorkerOnce(deps());
+    expect(argvMessageFor("j-resume-exp")).not.toContain("만료된 재개 판단");
+    expect(snapshotSlotsFor("j-resume-exp")).not.toContain("judgment_active");
+  });
+});

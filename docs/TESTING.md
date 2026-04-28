@@ -130,7 +130,8 @@ read commands) tests live under:
 - `test/queue/judgment_commands.test.ts` — `/judgment` and
   `/judgment_explain` dispatch/output behavior.
 - `test/queue/judgment_context_injection.test.ts` — worker-side
-  active judgment query filters and packed-context injection.
+  active judgment query filters and packed-context injection (both
+  replay_mode and resume_mode judgment refresh, issue #44).
 
 When you add a migration:
 

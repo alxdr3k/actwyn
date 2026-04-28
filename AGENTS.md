@@ -131,9 +131,10 @@ Do not read `docs/design/archive/` by default. Those are history.
     `activation_state='eligible'`, `retention_state='normal'`,
     `json_extract(scope_json, '$.global')=1`, temporal validity
     (`valid_from ≤ now OR NULL`, `valid_until > now OR NULL`), `LIMIT 20`
-    — in `buildContextForRun` (replay_mode only; excluded for
-    summary_generation). Active judgments now appear in the packed
-    context sent to Claude.
+    — in `buildContextForRun` (replay_mode) and in the resume-mode
+    judgment refresh path (resume_mode; same filters, no turns/memory/
+    summary injected). Active judgments now appear in the packed context
+    sent to Claude in both modes. Excluded for `summary_generation`.
   - **Phase 1B.3 (landed)**: `/judgment` and `/judgment_explain <id>`
     added to `SYSTEM_COMMANDS` in `worker.ts` and dispatched via
     `dispatchSystemCommand`. Uses `executeJudgmentQueryTool` and
