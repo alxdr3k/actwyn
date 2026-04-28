@@ -215,7 +215,6 @@ See `docs/RUNTIME.md` for the full runtime boundary description.
 | `test/storage/roundtrip.test.ts`                  | Local + S3 roundtrip.                                                            |
 | `test/storage/capacity.test.ts`                   | DEC-018 artifact capacity classification, directory sizing, and sync batch-limit helpers. |
 | `test/storage/state_machine.test.ts`              | `storage_objects.status` transitions.                                            |
-| `test/storage/capacity.test.ts`                   | DEC-018 artifact-capacity classification and sync throttle helpers.              |
 | `test/telegram/*.test.ts`                         | Telegram inbound classifier, poller offset durability, attachment metadata.      |
 
 ## Stale / superseded
