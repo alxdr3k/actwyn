@@ -130,7 +130,7 @@ describe("evaluateCandidate", () => {
     expect(d.direct_commit_allowed).toBe(false);
   });
 
-  test("L1 for assistant_generated + no authority", () => {
+  test("L1 for assistant_generated + no authority — no durable_candidate trigger", () => {
     const d = evaluateCandidate({
       ...base,
       kind: "fact",
@@ -139,7 +139,8 @@ describe("evaluateCandidate", () => {
     });
     expect(d.level).toBe("L1");
     expect(d.probes).toContain("authority");
-    expect(d.triggers).toContain("durable_candidate");
+    expect(d.triggers).not.toContain("durable_candidate");
+    expect(d.triggers).toHaveLength(0);
     expect(d.critic_model_allowed).toBe(false);
   });
 

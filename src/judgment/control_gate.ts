@@ -229,7 +229,7 @@ export function evaluateCandidate(
       phase: "candidate",
       level: "L1",
       probes: ["authority"],
-      triggers: ["durable_candidate"],
+      triggers: [],
       ...(candidate.id != null ? { candidate_id: candidate.id } : {}),
     });
   }
