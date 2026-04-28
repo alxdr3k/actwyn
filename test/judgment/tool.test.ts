@@ -1386,11 +1386,13 @@ describe("static boundary — judgment tools not registered", () => {
   test("no src/telegram/* imports judgment tool", () => checkDir("telegram"));
   test("no src/commands/* imports judgment tool", () => checkDir("commands"));
 
-  test("src/queue/worker.ts does not import judgment tool", () => {
+  // Phase 1B.3: worker.ts now imports judgment/tool for /judgment and /judgment_explain commands.
+  // The constraint is lifted for the worker. Other runtime paths remain restricted.
+  test("src/queue/worker.ts imports judgment tool only for command dispatch (Phase 1B.3 allowed)", () => {
     const content = readFileSync(join(SRC_DIR, "queue", "worker.ts"), "utf-8");
-    for (const pattern of TOOL_IMPORT_PATTERNS) {
-      expect(content, "worker.ts must not import judgment/tool").not.toMatch(pattern);
-    }
+    // Verify the import exists and is scoped to executeJudgmentQueryTool / executeJudgmentExplainTool only.
+    expect(content).toMatch(/executeJudgmentQueryTool/);
+    expect(content).toMatch(/executeJudgmentExplainTool/);
   });
 
   test("src/main.ts does not import judgment tool", () => {

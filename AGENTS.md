@@ -116,19 +116,36 @@ Do not read `docs/design/archive/` by default. Those are history.
     `recordControlGateDecision`. `migrations/005_control_gate_events.sql`
     adds the append-only `control_gate_events` table (schema version 5).
     `direct_commit_allowed` is always 0 (ADR-0012 invariant).
-    These are **local, unregistered** surfaces. Not imported from any
-    runtime module. Future agents must not wire these into runtime paths
-    unless explicitly tasked.
-  - None of the judgment tools or control gate functions are
-    **registered** anywhere in `src/`. They must not be imported from
-    `src/main.ts`, `src/providers/*`, `src/context/*`,
-    `src/queue/worker.ts`, `src/memory/*`, `src/telegram/*`, or
-    `src/commands/*`.
-  - Do **not** implement runtime-wired judgment integration, Tension,
-    ReflectionTriageEvent, `current_operating_view`, Context Compiler,
-    provider/context integration, vector / graph projections, Critique
-    Lens, or any further runtime Judgment surface unless the task
-    explicitly authorizes them.
+  - **Phase 1B.1 (landed)**: `src/queue/worker.ts` calls `evaluateTurn()`
+    and `recordControlGateDecision()` on every `provider_run` job before
+    the provider adapter is invoked. Control gate decisions are persisted
+    to `control_gate_events` as telemetry (append-only, L0 default).
+    `src/judgment/control_gate.ts` is now imported from `worker.ts`.
+  - **Phase 1B.2 (landed)**: `src/context/builder.ts` gains a
+    `judgment_items` slot (`JudgmentItemSlot[]`) at priority 600, between
+    `memory_user_stated` (700) and `recent_turns` (500). `worker.ts`
+    queries `judgment_items WHERE lifecycle_status='active' AND
+    activation_state='eligible'` in `buildContextForRun` and passes the
+    result to `buildContext()`. Active judgments now appear in the packed
+    context sent to Claude.
+  - **Phase 1B.3 (landed)**: `/judgment` and `/judgment_explain <id>`
+    added to `SYSTEM_COMMANDS` in `worker.ts` and dispatched via
+    `dispatchSystemCommand`. Uses `executeJudgmentQueryTool` and
+    `executeJudgmentExplainTool` from `src/judgment/tool.ts`.
+    `src/judgment/tool.ts` is now imported from `worker.ts` (for these
+    two executors only). System commands do not trigger Control Gate
+    evaluation.
+  - Remaining Phase 1A constraints still apply to all modules except
+    `src/queue/worker.ts`:
+    - `src/main.ts`, `src/providers/*`, `src/context/*` (except
+      `builder.ts` which gains `JudgmentItemSlot` type), `src/memory/*`,
+      `src/telegram/*`, and `src/commands/*` must NOT import from
+      `src/judgment/*`.
+  - Do **not** implement Tension, ReflectionTriageEvent,
+    `current_operating_view`, Context Compiler (provider-level),
+    provider/context integration beyond `builder.ts` slot injection,
+    vector / graph projections, Critique Lens, or Claude tool registration
+    for judgment tools unless the task explicitly authorizes them.
 
 ## When changing code
 

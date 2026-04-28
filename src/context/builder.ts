@@ -18,6 +18,10 @@
 //
 // The builder is pure. It does NOT read the DB directly; callers
 // pass the data it needs (typically src/queue/worker.ts).
+//
+// Slots (updated for Phase 1B.2):
+//   ...
+//   5.5 judgment_active (active/eligible judgment_items — Phase 1B.2)
 
 export type PackingMode = "resume_mode" | "replay_mode";
 
@@ -36,6 +40,14 @@ export interface TurnSlot {
   readonly created_at: string;
 }
 
+export interface JudgmentItemSlot {
+  readonly id: string;
+  readonly kind: string;
+  readonly statement: string;
+  readonly authority_source: string;
+  readonly confidence: string;
+}
+
 export interface BuildInput {
   readonly mode: PackingMode;
   readonly user_message: string;
@@ -45,6 +57,7 @@ export interface BuildInput {
   readonly current_session_summary?: string | undefined;
   readonly recent_turns?: readonly TurnSlot[] | undefined;
   readonly memory_items?: readonly MemoryItemSlot[] | undefined;
+  readonly judgment_items?: readonly JudgmentItemSlot[] | undefined;
   readonly verbose_transcript?: string | undefined;
 }
 
@@ -63,6 +76,7 @@ export type SlotKey =
   | "inactive_project_context"
   | "current_session_summary"
   | "memory_user_stated"
+  | "judgment_active"
   | "memory_other"
   | "recent_turns"
   | "verbose_transcript";
@@ -130,6 +144,20 @@ export function buildContext(input: BuildInput): ContextSnapshot {
     });
   }
 
+  // Phase 1B.2 — Active judgments (lifecycle_status=active, activation_state=eligible).
+  // Injected between user-stated preferences and recent turns so durable beliefs
+  // survive context budget pressure longer than volatile conversation history.
+  const activeJudgments = (input.judgment_items ?? []);
+  if (activeJudgments.length > 0) {
+    slots.push({
+      key: "judgment_active",
+      label: "judgment(active/eligible)",
+      text: activeJudgments.map(renderJudgmentItem).join("\n"),
+      priority: 600,
+      droppable: true,
+    });
+  }
+
   if (input.mode === "replay_mode" && input.recent_turns && input.recent_turns.length > 0) {
     slots.push({
       key: "recent_turns",
@@ -177,6 +205,10 @@ export function buildContext(input: BuildInput): ContextSnapshot {
 
 function renderMemoryItem(m: MemoryItemSlot): string {
   return `- (${m.provenance}, conf=${m.confidence.toFixed(2)}) ${m.content}`;
+}
+
+function renderJudgmentItem(j: JudgmentItemSlot): string {
+  return `- [${j.kind}/${j.authority_source}/${j.confidence}] ${j.statement}`;
 }
 
 function renderTurns(turns: readonly TurnSlot[]): string {

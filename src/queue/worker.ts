@@ -48,7 +48,7 @@ import { switchProvider } from "~/commands/provider.ts";
 import { whoamiReply } from "~/commands/whoami.ts";
 import { endSession, enqueueSummaryJob } from "~/commands/summary.ts";
 import { shouldAutoTriggerSummary, writeSummary, SUMMARY_SYSTEM_IDENTITY, type SummaryOutput } from "~/memory/summary.ts";
-import { buildContext, type MemoryItemSlot, type TurnSlot } from "~/context/builder.ts";
+import { buildContext, type JudgmentItemSlot, type MemoryItemSlot, type TurnSlot } from "~/context/builder.ts";
 import { pack, renderAsMessage, serializeForProviderRun, PromptOverflowError } from "~/context/packer.ts";
 import {
   runDeletePass,
@@ -75,6 +75,8 @@ import {
   type NotificationType,
   type OutboundTransport,
 } from "~/telegram/outbound.ts";
+import { evaluateTurn, recordControlGateDecision } from "~/judgment/control_gate.ts";
+import { executeJudgmentExplainTool, executeJudgmentQueryTool } from "~/judgment/tool.ts";
 
 export interface WorkerConfig {
   readonly capture: CaptureConfig;
@@ -354,9 +356,33 @@ async function runOneClaimedInner(
   const providerRunId = deps.newId();
   const packingMode = priorSessionId ? "resume_mode" : "replay_mode";
 
+  // Phase 1B.1 — Control Gate turn evaluation (append-only telemetry, L0-only).
+  // Only for provider_run jobs (user turns). summary_generation is an internal
+  // prompt and must NOT produce control_gate_events rows — those rows are append-only
+  // and false summary entries would pollute gate telemetry irreversibly.
+  // `evaluateTurn` supports escalation via is_explicit_review_request /
+  // is_doubt_signal, but Phase 1B.1 passes neither — signal detection deferred.
+  // direct_commit_allowed is always false per ADR-0012.
+  if (!isSummaryJob) {
+    const cgDecision = evaluateTurn({ text: baseRequest.message });
+    recordControlGateDecision(deps.db, cgDecision);
+    deps.events.debug("queue.control_gate", {
+      job_id: job.id,
+      level: cgDecision.level,
+      phase: cgDecision.phase,
+      budget_class: cgDecision.budget_class,
+    });
+  }
+
   // In replay_mode, inject the full packed context (memory + turns + summary)
   // as the message so Claude receives the conversation history. In resume_mode
   // Claude already has the history via --resume, so just send the user message.
+  // Phase 1B.2 note: active judgment injection only runs in replay_mode (inside
+  // buildContextForRun). In resume_mode, Claude holds cached history so judgments
+  // committed after the last replay are not visible until the next replay (new
+  // session, forced replay, or resume-fallback). This is an accepted Phase 1B.2
+  // limitation; real-time judgment refresh in resume_mode is deferred to a
+  // future sub-phase.
   let request = baseRequest;
   let snapshotJson: string;
   if (packingMode === "replay_mode" && job.session_id) {
@@ -376,6 +402,8 @@ async function runOneClaimedInner(
             ? "이 대화를 위의 JSON 스키마에 따라 요약해 주세요.\n\n반드시 유효한 JSON 객체만 반환하십시오. 마크다운 펜스나 설명 없이 JSON 객체 하나만 출력하세요. 이전 시도에서 스키마를 따르지 않은 것 같습니다."
             : "이 대화를 위의 JSON 스키마에 따라 요약해 주세요."
           : undefined,
+        // Phase 1B.2: skip judgment injection for summary_generation (see skipJudgments doc).
+        skipJudgments: isSummaryJob,
       });
     } catch (e) {
       if (e instanceof PromptOverflowError) {
@@ -938,6 +966,12 @@ function buildContextForRun(args: {
   systemIdentity?: string | undefined;
   /** Override the user_message slot (e.g. schema prompt for summary_generation). */
   userMessage?: string | undefined;
+  /**
+   * When true, skip active-judgment injection (Phase 1B.2).
+   * Set for summary_generation to prevent durable judgments from
+   * contaminating session summaries persisted to memory_summaries.
+   */
+  skipJudgments?: boolean | undefined;
 }): ContextBuildResult {
   const fallback: ContextBuildResult = {
     packedMessage: args.userMessage ?? args.req.message,
@@ -995,12 +1029,39 @@ function buildContextForRun(args: {
     currentSessionSummary = parts.join("\n");
   }
 
+  // Phase 1B.2 — Query active/eligible judgments for context injection.
+  // Skipped for summary_generation (args.skipJudgments) to prevent durable
+  // judgments from being persisted into memory_summaries as if they were
+  // conversation-derived facts.
+  // retention_state = 'normal' excludes archived/deleted rows.
+  // Scope: inject only rows whose scope_json contains "global":true. Full
+  // per-session/chat scope matching is deferred to a later sub-phase when a
+  // scope resolver is available; global-scope judgments are universally
+  // applicable and safe to inject without a resolver.
+  const activeJudgments = args.skipJudgments
+    ? []
+    : args.db
+        .prepare<JudgmentItemSlot, []>(
+          `SELECT id, kind, statement, authority_source, confidence
+           FROM judgment_items
+           WHERE lifecycle_status = 'active'
+             AND activation_state = 'eligible'
+             AND retention_state = 'normal'
+             AND json_extract(scope_json, '$.global') = 1
+             AND (valid_from IS NULL OR valid_from <= strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+             AND (valid_until IS NULL OR valid_until > strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+           ORDER BY importance DESC, created_at DESC
+           LIMIT 20`,
+        )
+        .all();
+
   const snap = buildContext({
     mode: "replay_mode",
     user_message: args.userMessage ?? args.req.message,
     system_identity: args.systemIdentity ?? "actwyn personal agent",
     recent_turns: turns,
     memory_items: memItems,
+    ...(activeJudgments.length > 0 ? { judgment_items: activeJudgments } : {}),
     ...(currentSessionSummary ? { current_session_summary: currentSessionSummary } : {}),
   });
 
@@ -1333,6 +1394,9 @@ const SYSTEM_COMMANDS = new Set([
   "/forget_artifact",
   "/forget_memory",
   "/correct",
+  // Phase 1B.3 — Judgment System commands
+  "/judgment",
+  "/judgment_explain",
 ]);
 
 function isSystemCommand(cmd: string): boolean {
@@ -1364,13 +1428,18 @@ async function runSystemCommandJob(
     return { job_id: job.id, terminal: "failed", turn_id: null, provider_run_id: "" };
   }
 
-  // Persist a turn so the notification retry can reconstruct chunk texts.
+  // Persist a turn for conversational context replay and summaries.
+  // Phase 1B.3: judgment commands (/judgment, /judgment_explain) are EXCLUDED
+  // from turn storage. Their output contains judgment statements that would
+  // flow into context replay and summaries even after revoke/expire. Notification
+  // retry uses outbound_notification_chunks, not turns, so omitting the turn
+  // is safe.
   // Review Medium 11: the redaction_applied flag must reflect whether the
   // stored `content_redacted` was actually rewritten by the redactor, not a
-  // hard-coded zero. Using the redactor's reported `applied` avoids misleading
-  // audit/diagnostic output.
+  // hard-coded zero.
+  const JUDGMENT_COMMANDS_NO_TURN = new Set(["/judgment", "/judgment_explain"]);
   let turnId: string | null = null;
-  if (job.session_id && responseText.length > 0) {
+  if (job.session_id && responseText.length > 0 && !JUDGMENT_COMMANDS_NO_TURN.has(command)) {
     turnId = deps.newId();
     const redactedResult = deps.redactor.apply(responseText);
     deps.db
@@ -1480,6 +1549,8 @@ async function dispatchSystemCommand(
         "/forget_artifact <id> — 특정 아티팩트 삭제",
         "/forget_memory <id> — 특정 메모리 비활성화",
         "/correct <id> <새 내용> — 메모리 정정",
+        "/judgment — 활성 판단(judgment) 목록",
+        "/judgment_explain <id> — 특정 판단 상세 조회",
       ].join("\n");
     }
 
@@ -1666,6 +1737,50 @@ async function dispatchSystemCommand(
       } catch (e) {
         return `수정 실패: ${(e as Error).message}`;
       }
+    }
+
+    // Phase 1B.3 — Judgment System commands
+    case "/judgment": {
+      const result = executeJudgmentQueryTool(deps.db, {
+        lifecycle_status: "active",
+        activation_state: "eligible",
+        limit: 50,
+      });
+      if (!result.ok) return `판단 조회 실패: ${result.error.message}`;
+      // Apply the same temporal validity filter as context injection so the command
+      // and the provider context agree on what is "currently active".
+      const nowIso = new Date().toISOString();
+      const items = result.result.items.filter(
+        (j) =>
+          (j.valid_from == null || j.valid_from <= nowIso) &&
+          (j.valid_until == null || j.valid_until > nowIso),
+      );
+      if (items.length === 0) return "활성 판단(judgment)이 없습니다.";
+      const lines = items.map(
+        (j) => `[${j.id.slice(0, 8)}] (${j.kind}/${j.confidence}) ${j.statement}`,
+      );
+      return `활성 판단 ${items.length}건:\n${lines.join("\n")}`;
+    }
+
+    case "/judgment_explain": {
+      const id = args.trim();
+      if (!id) return "사용법: /judgment_explain <judgment_id>";
+      const result = executeJudgmentExplainTool(deps.db, { judgment_id: id });
+      if (!result.ok) {
+        return result.error.code === "not_found"
+          ? `판단(${id})을 찾을 수 없습니다.`
+          : `설명 조회 실패: ${result.error.message}`;
+      }
+      const j = result.explanation;
+      const sourceCount = j.sources.length;
+      const evidenceCount = j.evidence_links.length;
+      const eventCount = j.events.length;
+      return [
+        `[${j.judgment.kind}] ${j.judgment.statement}`,
+        `상태: ${j.judgment.lifecycle_status} / ${j.judgment.activation_state} / 신뢰도: ${j.judgment.confidence}`,
+        `근원: ${j.judgment.epistemic_origin} / 권위: ${j.judgment.authority_source}`,
+        `소스 ${sourceCount}건 · 증거링크 ${evidenceCount}건 · 이벤트 ${eventCount}건`,
+      ].join("\n");
     }
 
     default:

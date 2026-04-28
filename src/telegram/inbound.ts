@@ -166,6 +166,9 @@ const KNOWN_COMMANDS = new Set<string>([
   "/forget_artifact",
   "/forget_memory",
   "/correct",
+  // Phase 1B.3 — Judgment System commands
+  "/judgment",
+  "/judgment_explain",
 ]);
 
 function parseCommand(text: string): { command: string; args: string } | { unknown: string } | null {

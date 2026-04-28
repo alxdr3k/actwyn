@@ -191,6 +191,25 @@ describe("classifyUpdate — pure", () => {
     if (c.kind === "unknown_command") expect(c.command).toBe("/nothing");
   });
 
+  // Phase 1B.3 — judgment commands must be recognized as known commands.
+  test("/judgment is recognized as a known command (Phase 1B.3)", () => {
+    const c = classifyUpdate(textMessageUpdate(7, "/judgment"), opts);
+    expect(c.kind).toBe("command");
+    if (c.kind === "command") {
+      expect(c.command).toBe("/judgment");
+      expect(c.args).toBe("");
+    }
+  });
+
+  test("/judgment_explain <id> is recognized as a known command with args (Phase 1B.3)", () => {
+    const c = classifyUpdate(textMessageUpdate(8, "/judgment_explain abc-123"), opts);
+    expect(c.kind).toBe("command");
+    if (c.kind === "command") {
+      expect(c.command).toBe("/judgment_explain");
+      expect(c.args).toBe("abc-123");
+    }
+  });
+
   test("unsupported update (no message, no from) → skip/unsupported_type", () => {
     const c = classifyUpdate({ update_id: 7, edited_message: {} } as TelegramUpdate, opts);
     expect(c.kind).toBe("skip");

@@ -1,7 +1,7 @@
 # Architecture
 
 > Status: thin current-state overview · Owner: project lead ·
-> Last updated: 2026-04-27
+> Last updated: 2026-04-28
 >
 > This is a short pointer doc. For why decisions were made, see
 > `docs/adr/` (ADR-0001 … ADR-0015). For acceptance contracts and
@@ -23,7 +23,7 @@
 | Redaction at the persistence boundary             | implemented |
 | Memory summaries with provenance + confidence     | implemented |
 | Telegram attachment two-phase capture             | implemented |
-| DB-native AI-first Judgment System (Phase 1A+)    | Phase 1A.1–1A.8 locally implemented: schema, proposal/review/source/evidence/commit/retirement repositories, query/explain read surfaces, Control Gate substrate + append-only ledger, unregistered tool contracts (none runtime-wired) |
+| DB-native AI-first Judgment System (Phase 1A+)    | Phase 1A.1–1A.8 locally implemented; **Phase 1B.1–1B.3 runtime-wired**: Control Gate telemetry on every provider_run, active judgment context injection in builder, `/judgment` + `/judgment_explain` Telegram commands |
 | Vector / graph derived projections                | planned     |
 | second-brain repo as canonical runtime memory     | not planned (history/seed only) |
 | Obsidian / Markdown active write path             | not planned |
