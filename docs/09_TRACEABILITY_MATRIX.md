@@ -1,6 +1,6 @@
 # Traceability Matrix
 
-> Status: living document · Owner: project lead · Last updated: 2026-04-26
+> Status: living document · Owner: project lead · Last updated: 2026-04-28
 >
 > This matrix is the index that connects questions, decisions, and
 > source-of-truth artifacts. See
@@ -104,6 +104,9 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | Q-061   | Critique Lens v0.1 LLM critic prompt 형식                           | —             | —                          | —                | ADR-0013 §Decision 1                          |
 | Q-062   | Tension target_domain 확장 시점                                     | —             | —                          | —                | ADR-0013 §Decision 2; DEC-032                 |
 | Q-063   | docs-structure follow-up PR scope (current-state docs / AGENTS.md / archive) | —    | —                          | —                | DEC-037 §scope clarification                  |
+| Q-064   | `mayPromoteToLongTerm` gate를 의미별로 split할까?             | —             | —                          | —                | `docs/design/salvage-audit-2026-04.md` §7     |
+| Q-065   | `memory_base_path` JSONL/MD sidecar policy                   | —             | —                          | —                | `docs/design/salvage-audit-2026-04.md` §5.3/§7 |
+| Q-066   | `src/context/builder.ts` 삭제 timing                         | —             | —                          | —                | `docs/design/salvage-audit-2026-04.md` §6 step 9/§7 |
 
 ## Matrix — ADRs → artifacts
 
@@ -122,6 +125,8 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | ADR-0011 | Architecture upgradeability + memory activation lifecycle | §12 (taxonomy 확장 예정) | §11.3                | `docs/JUDGMENT_SYSTEM.md` §Upgradeability & Memory Activation; second-brain Ideation Round 10 + Appendix A.20 |
 | ADR-0012 | Origin/Authority separation + Metacognitive Critique Loop | §12 (taxonomy 확장 예정) | §11.3                | `docs/JUDGMENT_SYSTEM.md` §Authority Source + §Metacognitive Critique Loop; second-brain Ideation Round 12 + Appendix A.22; ADR-0011 §Refs (RETRACT system_authored) |
 | ADR-0013 | Critique Lens v0.1 + Tension Generalization + Status Axis Separation | §12 (taxonomy 확장 예정) | §11.3                | `docs/JUDGMENT_SYSTEM.md` §Critique Lens v0.1 + §Tension Generalization + §Status Axis Separation; second-brain Ideation Round 13 + Appendix A.23; partial retract ADR-0011 status 9 enum / activation_score 통합; rename ADR-0012 DesignTension → Tension; refine ADR-0010 Reflection / Workspace / procedure |
+| ADR-0014 | Bun runtime stack confirmation: cautions, principles, roadmap | —                        | —                       | `docs/RUNTIME.md`; `docs/TESTING.md`; `src/db.ts`; `src/providers/subprocess.ts`; `src/storage/s3.ts` |
+| ADR-0015 | control_gate_events append-only ledger                        | —                        | —                       | `migrations/005_control_gate_events.sql`; `src/judgment/control_gate.ts`; `test/db/control_gate_schema.test.ts`; `test/judgment/control_gate.test.ts` |
 
 ## Matrix — DECs → artifacts
 

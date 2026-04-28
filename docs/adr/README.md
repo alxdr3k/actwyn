@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-> Status: living index · Owner: project lead · Last updated: 2026-04-27
+> Status: living index · Owner: project lead · Last updated: 2026-04-28
 
 This directory holds **architecture-level decisions**: choices that
 are hard to reverse, have broad blast radius, or shape the system's

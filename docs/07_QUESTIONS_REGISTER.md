@@ -1356,7 +1356,7 @@ committed for a later milestone.
   2. Call site 마이그레이션 — `src/memory/items.ts`,
      `src/memory/summary.ts`의 `promoteItems` path.
   3. 테스트 fixture 갱신 — `test/memory/summary.test.ts`,
-     `test/memory/provenance.test.ts`의 expectation.
+     `test/memory/correction.test.ts`의 expectation.
 - **Recommendation**: Q-027 결정 직후 단독 PR
   (`refactor(memory): split provenance gate semantics`)로 처리.
   salvage audit §6 step 7에 대응.
