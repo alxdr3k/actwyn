@@ -1,6 +1,6 @@
 # Documentation Policy
 
-> Status: living policy · Owner: project lead · Last updated: 2026-04-26
+> Status: living policy · Owner: project lead · Last updated: 2026-04-28
 >
 > Codified in **DEC-037** (Implementation Documentation Lifecycle
 > Policy). This file is the operational shape of that policy and the
