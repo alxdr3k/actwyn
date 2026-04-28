@@ -20,7 +20,7 @@ specific file you need.
 | Documentation policy                                                   | [`DOCUMENTATION.md`](./DOCUMENTATION.md)                     |
 | Judgment System Phase 0 / 0.5 design (historical record per DEC-037)   | [`JUDGMENT_SYSTEM.md`](./JUDGMENT_SYSTEM.md)                 |
 | Historical design notes                                                | [`design/`](./design/)                                       |
-| Generated docs (placeholder)                                           | [`generated/`](./generated/)                                 |
+| Generated docs / schema reference                                      | [`generated/`](./generated/)                                 |
 | AI coding agent guidance                                               | [`/AGENTS.md`](../AGENTS.md)                                 |
 
 ## Long P0 design and acceptance docs

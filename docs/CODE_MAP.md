@@ -1,7 +1,7 @@
 # Code Map
 
 > Status: thin current-state map · Owner: project lead ·
-> Last updated: 2026-04-27
+> Last updated: 2026-04-28
 >
 > This file maps the actual files in `src/`, `test/`, `migrations/`,
 > `scripts/`, `config/`, and `deploy/`. It is meant to be skimmed by
@@ -30,11 +30,12 @@ Status legend:
 | --------------------------------- | ----------------------------------------------------------------------- |
 | `src/main.ts`                     | systemd entrypoint and composition root. Wires real transports.        |
 | `src/config.ts`                   | Typed config loader: reads env vars + `config/runtime.json`; fails fast on missing required fields. |
-| `package.json`                    | Bun scripts (`test`, `typecheck`, `lint:redactor`, `ci`, `docs:generate:schema`). |
+| `package.json`                    | Bun scripts (`dev`, `test`, `typecheck`, `lint:redactor`, `ci`, `docs:generate:schema`). `dev` runs `doppler run -- bun run src/main.ts`. |
+| `doppler.yaml`                    | Doppler project/config pin (`actwyn` / `dev`) for local development secret injection. |
 | `bunfig.toml`                     | Bun runtime config.                                                     |
 | `.bun-version`                    | Pinned Bun version.                                                     |
 | `tsconfig.json`                   | TypeScript compiler config (`~/*` path alias to `src/*`).               |
-| `config/runtime.json`             | Tunables (Bun version, log level, redaction config, claude binary).    |
+| `config/runtime.json`             | Tunables (Bun version, log level, redaction config). Optional `claude_binary` field overrides the default `claude` PATH lookup; do not commit machine-local paths. |
 | `.env.example`                    | Required env surface for runtime.                                       |
 
 ## Runtime / Telegram

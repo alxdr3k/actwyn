@@ -1,7 +1,6 @@
 ---
 name: apply-review
-description: Apply all review feedback; split into timeout-safe chunks; do not stop until every item is done
-argument-hint: [review text, PR/comment URL, or path to review notes]
+description: Apply all review feedback in timeout-safe chunks without stopping. Pass review text, a PR URL, or a path to review notes.
 ---
 
 # Apply review
@@ -10,7 +9,9 @@ Apply **every** item of the review below. Work the whole list to completion in t
 
 ## Review content
 
-$ARGUMENTS
+The review content is provided in the current user message or conversation context.
+If the user's message contains a URL, PR number, comment ID, or file path — fetch that content first.
+If the review text is pasted inline, use it directly.
 
 ---
 
@@ -18,7 +19,7 @@ $ARGUMENTS
 
 ### 1. Parse and plan (do this first, always)
 
-- If `$ARGUMENTS` is a URL or a reference (PR number, comment ID, file path), fetch the actual content first.
+- If the review input is a URL or a reference (PR number, comment ID, file path), fetch the actual content first.
 - Extract every distinct actionable item. Keep independent items separate; merge only trivially-related fixes.
 - Write the plan to `TodoWrite` — one todo per discrete change. Include file/area hints in the todo text so you can resume after interruption.
 - If the review is ambiguous, list your interpretation as part of the plan rather than asking up front. Only stop for a question when an item is genuinely undecidable.

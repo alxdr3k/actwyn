@@ -1,11 +1,15 @@
 # Testing
 
 > Status: thin current-state map · Owner: project lead ·
-> Last updated: 2026-04-27
+> Last updated: 2026-04-28
 >
-> Commands listed here are the ones present in `package.json` and
-> `scripts/`. Do not invent commands; if you need a new one, add it
-> to `package.json` first and update this file in the same PR.
+> This file lists verification commands (`test`, `typecheck`, `lint:redactor`,
+> `ci`). The `dev` script (`bun run dev`) is a local service runner, not a
+> test command, and is not part of `bun run ci` — see `docs/OPERATIONS.md`
+> for local dev setup.
+>
+> Do not invent commands; if you need a new one, add it to `package.json`
+> first and update this file in the same PR.
 
 ## Toolchain
 

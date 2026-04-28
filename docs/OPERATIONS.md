@@ -1,7 +1,7 @@
 # Operations
 
 > Status: thin current-state map · Owner: project lead ·
-> Last updated: 2026-04-26
+> Last updated: 2026-04-28
 >
 > This file covers only what is verifiable from `src/`,
 > `config/`, `deploy/`, and `.env.example`. Anything not listed
@@ -52,9 +52,23 @@ their literal contents never appear in logs or persisted rows.
 
 ## Local run
 
-The repo does not include a one-shot dev runner script; running the
-service locally requires the env above plus a local SQLite path.
-The minimal sequence:
+### With Doppler (recommended)
+
+`doppler.yaml` pins project `actwyn` / config `dev`.  Once Doppler is
+configured with the required secrets, a single command starts the service:
+
+```sh
+bun install
+bun run dev          # runs: doppler run -- bun run src/main.ts
+```
+
+Doppler injects all required env vars (including `ACTWYN_DB_PATH`,
+`ACTWYN_MIGRATIONS_PATH`, `ACTWYN_OBJECTS_PATH`, `ACTWYN_MEMORY_PATH`,
+and `AUTHORIZED_TELEGRAM_USER_ID`) from the `dev` config.
+
+### Without Doppler (fallback)
+
+Set env vars manually and start the service:
 
 ```sh
 bun install
