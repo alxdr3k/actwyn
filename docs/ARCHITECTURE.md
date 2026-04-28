@@ -323,19 +323,24 @@ components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4 / 1A.5 / 1A.6 / 1A.
   `judgment.commit`, `judgment.query`, `judgment.explain`,
   `judgment.supersede`, `judgment.revoke`, `judgment.expire`).
   Not imported from any runtime module.
+- **Control Gate substrate** — `src/judgment/control_gate.ts`
+  (`evaluateTurn`, `evaluateCandidate`, `recordControlGateDecision`)
+  and `migrations/005_control_gate_events.sql` (append-only
+  `control_gate_events` table; schema version 5). Evaluates
+  TurnInput / JudgmentCandidate → ControlGateDecision (L0–L3);
+  `direct_commit_allowed` is always false (ADR-0012 invariant).
+  **Not wired to any runtime path** — not called from providers,
+  context, queue, memory, telegram, or commands.
 
-**Not implemented** (beyond Phase 1A.7):
+**Not implemented** (beyond Phase 1A.8):
 
-- `Control Gate` evaluators and the `control_gate_events` /
-  `control_plane_events` ledger (table name open per
-  `docs/JUDGMENT_SYSTEM.md` §Implementation Readiness) — **not
+- `Tension` telemetry and the `tensions` table — **not
   implemented**.
 - `Tension` telemetry and the `tensions` table — **not
   implemented**.
 - `ReflectionTriageEvent` and the `reflection_triage_events` ledger
   — **not implemented**.
-- `current_operating_view` projection (DEC-036) — **not
-  implemented**.
+- `current_operating_view` projection (DEC-036) — **not implemented**.
 - Vector and graph derived projections — **not implemented**.
 - Further typed tools (`update_current_state`) and Critique Lens
   v0.1 integration (ADR-0013) — **not implemented**.
@@ -346,14 +351,15 @@ components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4 / 1A.5 / 1A.6 / 1A.
   are wired into any of these modules.
 
 These are listed so AI coding agents do not mistake design
-documents for implemented behavior. Phase 1A.1 through Phase 1A.7
-have landed. Local commit/activation, local query/explain, and
-local retirement lifecycle (supersede/revoke/expire) exist.
-**Runtime context integration, Control Gate, and Context Compiler
-work remain future scope.** See `docs/RUNTIME.md` and
-`docs/DATA_MODEL.md` for how the implemented slice sits next to
-the runtime, and `docs/JUDGMENT_SYSTEM.md` §Implementation
-Readiness for the broader Phase 1A scope.
+documents for implemented behavior. Phase 1A.1 through Phase 1A.8
+have landed. Local commit/activation, local query/explain, local
+retirement lifecycle (supersede/revoke/expire), and the Control Gate
+substrate (evaluators + append-only ledger) exist.
+**Runtime context integration and Context Compiler work remain future
+scope.** See `docs/RUNTIME.md` and `docs/DATA_MODEL.md` for how the
+implemented slice sits next to the runtime, and
+`docs/JUDGMENT_SYSTEM.md` §Implementation Readiness for the broader
+Phase 1A scope.
 
 ## Existing implementation re-classification (2026-04 salvage audit)
 

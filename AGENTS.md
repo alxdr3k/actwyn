@@ -111,15 +111,24 @@ Do not read `docs/design/archive/` by default. Those are history.
     context-visible or register tools. They are **not runtime-wired**.
     Future agents must not implement context/compiler/provider
     integration unless explicitly tasked.
-  - None of the judgment tools are **registered** anywhere in `src/`.
-    They must not be imported from `src/main.ts`, `src/providers/*`,
-    `src/context/*`, `src/queue/worker.ts`, `src/memory/*`,
-    `src/telegram/*`, or `src/commands/*`.
-  - Do **not** implement runtime-wired judgment integration, Control
-    Gate, Tension, ReflectionTriageEvent, `current_operating_view`,
-    Context Compiler, provider/context integration, vector / graph
-    projections, Critique Lens, or any further runtime Judgment
-    surface unless the task explicitly authorizes them.
+  - **Phase 1A.8 (landed)**: `src/judgment/control_gate.ts` exports
+    `ControlGateDecision`, `evaluateTurn`, `evaluateCandidate`, and
+    `recordControlGateDecision`. `migrations/005_control_gate_events.sql`
+    adds the append-only `control_gate_events` table (schema version 5).
+    `direct_commit_allowed` is always 0 (ADR-0012 invariant).
+    These are **local, unregistered** surfaces. Not imported from any
+    runtime module. Future agents must not wire these into runtime paths
+    unless explicitly tasked.
+  - None of the judgment tools or control gate functions are
+    **registered** anywhere in `src/`. They must not be imported from
+    `src/main.ts`, `src/providers/*`, `src/context/*`,
+    `src/queue/worker.ts`, `src/memory/*`, `src/telegram/*`, or
+    `src/commands/*`.
+  - Do **not** implement runtime-wired judgment integration, Tension,
+    ReflectionTriageEvent, `current_operating_view`, Context Compiler,
+    provider/context integration, vector / graph projections, Critique
+    Lens, or any further runtime Judgment surface unless the task
+    explicitly authorizes them.
 
 ## When changing code
 

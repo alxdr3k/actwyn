@@ -419,7 +419,7 @@ to keep in mind:
 - A schema change is an architecture-level event for the affected
   table. If the table is new or its semantics change, add an ADR.
 
-## Judgment System schema (Phase 1A.7 — retirement lifecycle landed; runtime not wired)
+## Judgment System schema (Phase 1A.8 — Control Gate ledger landed; runtime not wired)
 
 The DB-native AI-first Judgment System direction defines a separate
 schema family. As of migration 004, **the five `judgment_*` tables
@@ -465,7 +465,7 @@ architectural record, not implementation authority).
 | `judgment_edges`                             | Typed relations between judgments (supports, contradicts, refines).  | schema implemented in migration 004; local writer: `src/judgment/repository.ts` via `supersedeJudgment` (Phase 1A.7); no runtime-wired writer. |
 | `judgment_events`                            | Append-only event log for judgment lifecycle changes.                | schema implemented in migration 004; writer: `src/judgment/repository.ts` for `judgment.proposed` / `judgment.approved` / `judgment.rejected` / `judgment.source.recorded` / `judgment.evidence.linked` / `judgment.committed` / `judgment.superseded` / `judgment.revoked` / `judgment.expired` events (Phase 1A.2/1A.3/1A.4/1A.5/1A.7). |
 | `judgment_items_fts`                         | FTS5 external-content index over `judgment_items.statement`.          | schema implemented in migration 004; sync triggers tested; populated by repository inserts. |
-| `control_gate_events` / `control_plane_events` | Control Gate decisions per query (table name itself is open per Phase 1A scope). | **planned** (`docs/JUDGMENT_SYSTEM.md` §Implementation Readiness; ADR-0012). |
+| `control_gate_events` | Append-only ledger of ControlGateDecision rows (level L0–L3, phase, probes, lenses, triggers, budget_class, persist_policy). `direct_commit_allowed` is always 0 (ADR-0012 invariant enforced by CHECK). | schema implemented in migration 005; local unregistered writer: `src/judgment/control_gate.ts` via `recordControlGateDecision` (Phase 1A.8). BEFORE UPDATE / BEFORE DELETE triggers enforce append-only. Not runtime-wired. |
 | `tensions`                                   | Telemetry for unresolved tension between judgments / sources.        | **planned** (`docs/JUDGMENT_SYSTEM.md` §Critique Lens + Tension Generalization; ADR-0013). |
 | `reflection_triage_events`                   | Reflection / triage outcomes feeding back into judgments.            | **planned** (`docs/JUDGMENT_SYSTEM.md` §Metacognitive Critique Loop; ADR-0012, ADR-0013). |
 
@@ -476,13 +476,16 @@ proposal and review transitions. Phase 1A.4 added source recording
 and evidence linking. Phase 1A.5 added commit/activation. Phase 1A.6
 added local read-only query/explain. Phase 1A.7 added local retirement
 lifecycle (supersede/revoke/expire); `supersedeJudgment` is the only
-writer for `judgment_edges`. Active/eligible rows can exist in DB after
+writer for `judgment_edges`. Phase 1A.8 added `src/judgment/control_gate.ts`
+with `evaluateTurn`, `evaluateCandidate`, and `recordControlGateDecision`
+writing to `control_gate_events`. Active/eligible rows can exist in DB after
 `commitApprovedJudgment`, and query/explain can read them locally;
 retired rows (superseded/revoked/expired) also exist in DB. None of
 these rows are read by runtime context — no Context Compiler or
 provider integration exists. Query/explain do not append events.
-Supersede/revoke/expire do not make rows context-visible. No Control
-Gate reads these tables. Do not migrate `memory_summaries` /
+Supersede/revoke/expire do not make rows context-visible. The Control
+Gate evaluators and `control_gate_events` table exist but are not wired
+to any runtime path. Do not migrate `memory_summaries` /
 `memory_items` data into them — Q-027 stays open and ADR-0009 commits
 to the "분리" starting point.
 

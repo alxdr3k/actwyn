@@ -297,7 +297,7 @@ or context building:
   prompt integration, memory-promotion path, worker dispatch hook,
   or Telegram command uses any judgment tool.
 
-Schema version remains **4**.
+Schema version is **5** (migration 005 adds `control_gate_events`).
 
 ### What is not implemented
 
@@ -336,15 +336,18 @@ replace `src/context/builder.ts` + `src/context/packer.ts` are
 
 **Stage 6** — feedback / reflection loop: **not implemented**.
 
-**Cross-cutting control-plane** (all unimplemented):
+**Cross-cutting control-plane**:
 
-- Control Gate evaluators and `control_gate_events` /
-  `control_plane_events` ledger.
-- `Tension` telemetry and the `tensions` table.
-- `ReflectionTriageEvent` and `reflection_triage_events`.
-- Vector and graph derived projections.
-- Memory promotion integration.
-- Telegram command integration for judgment operations.
+- Control Gate evaluators (`evaluateTurn`, `evaluateCandidate`) and
+  `control_gate_events` ledger: **substrate implemented** in
+  `src/judgment/control_gate.ts` and `migrations/005_control_gate_events.sql`
+  (Phase 1A.8). Not runtime-wired. `recordControlGateDecision` writes
+  locally; no runtime path calls it.
+- `Tension` telemetry and the `tensions` table: **not implemented**.
+- `ReflectionTriageEvent` and `reflection_triage_events`: **not implemented**.
+- Vector and graph derived projections: **not implemented**.
+- Memory promotion integration: **not implemented**.
+- Telegram command integration for judgment operations: **not implemented**.
 
 The 6-stage pipeline in `docs/JUDGMENT_SYSTEM.md` remains the
 architectural authority for the Judgment System direction
