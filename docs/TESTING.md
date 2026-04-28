@@ -22,7 +22,8 @@
   `package.json`).
 - **Test runner**: Bun's built-in `bun test`.
 - **No separate ESLint / Prettier in P0** — formatting is
-  hand-maintained, lint is the single-redactor invariant only.
+  hand-maintained. Linting is limited to the single-redactor
+  invariant and the thin-docs guard.
 
 Check the pinned Bun version:
 
