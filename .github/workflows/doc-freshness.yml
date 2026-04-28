@@ -55,16 +55,16 @@ jobs:
           touched_providers=$(printf '%s\n' "$CHANGED" | grep -E '^src/providers/' || true)
           touched_migrations=$(printf '%s\n' "$CHANGED" | grep -E '^migrations/' || true)
 
-          touched_runtime_doc=$(printf '%s\n' "$CHANGED" | grep -E '^docs/(RUNTIME|CODE_MAP|ARCHITECTURE)\.md$' || true)
+          touched_any_thin_doc=$(printf '%s\n' "$CHANGED" | grep -E '^docs/(RUNTIME|CODE_MAP|ARCHITECTURE|DATA_MODEL|OPERATIONS|TESTING)\.md$' || true)
           touched_data_doc=$(printf '%s\n' "$CHANGED" | grep -E '^docs/DATA_MODEL\.md$' || true)
           touched_generated=$(printf '%s\n' "$CHANGED" | grep -E '^docs/generated/' || true)
           touched_adr=$(printf '%s\n' "$CHANGED" | grep -E '^docs/adr/' || true)
 
-          if [ -n "$touched_src" ] && [ -z "$touched_runtime_doc" ] && [ -z "$touched_adr" ]; then
-            missing+=("src/ changed → update one of \`docs/RUNTIME.md\` / \`docs/CODE_MAP.md\` / \`docs/ARCHITECTURE.md\` in the same commit (or add an ADR).")
+          if [ -n "$touched_src" ] && [ -z "$touched_any_thin_doc" ] && [ -z "$touched_adr" ]; then
+            missing+=("src/ changed → update the matching thin doc (\`docs/RUNTIME.md\`, \`CODE_MAP.md\`, \`DATA_MODEL.md\`, \`OPERATIONS.md\`, or \`TESTING.md\`) in the same commit (or add an ADR).")
           fi
 
-          if { [ -n "$touched_judgment" ] || [ -n "$touched_providers" ]; } && [ -z "$touched_runtime_doc" ] && [ -z "$touched_adr" ]; then
+          if { [ -n "$touched_judgment" ] || [ -n "$touched_providers" ]; } && [ -z "$touched_any_thin_doc" ] && [ -z "$touched_adr" ]; then
             missing+=("judgment/ or providers/ changed → if a thin doc carries a \`Last verified against code\` header for this area, update the SHA and date.")
           fi
 

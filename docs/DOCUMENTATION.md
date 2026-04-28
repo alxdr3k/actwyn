@@ -13,7 +13,7 @@ authoritative, and what to update when something changes.
 
 1. Code, tests, migrations
 2. Generated docs / schemas produced from those sources
-   (`docs/generated/*` once generators land)
+   (`docs/generated/*`; see `docs/generated/README.md` for active generators)
 3. Thin current-state docs (`docs/ARCHITECTURE.md`, `docs/CODE_MAP.md`,
    `docs/DATA_MODEL.md`, `docs/RUNTIME.md`, `docs/TESTING.md`,
    `docs/OPERATIONS.md`)
