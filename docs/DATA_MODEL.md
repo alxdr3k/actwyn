@@ -1,7 +1,7 @@
 # Data Model
 
 > Status: thin current-state map · Owner: project lead ·
-> Last updated: 2026-04-27
+> Last updated: 2026-04-28
 >
 > This file is a human-readable map. It is **not** authoritative.
 > The authoritative schema lives in `migrations/*.sql` and the
@@ -498,9 +498,10 @@ Context Compiler stage.
 
 ## Naming notes (Phase 0 / 0.5 final terms)
 
-When the Judgment System schema lands, the terminology below is the
-agreed final shape per the Phase 0 / 0.5 review rounds (ADR-0011 …
-ADR-0013, DEC-029, DEC-033, DEC-036):
+The terminology below is the agreed final shape per the Phase 0 / 0.5
+review rounds (ADR-0011 … ADR-0013, DEC-029, DEC-033, DEC-036).
+
+**Implemented in Phase 1A schema:**
 
 - `epistemic_origin` — **not** `epistemic_status` (ADR-0012,
   ADR-0013).
@@ -512,15 +513,16 @@ ADR-0013, DEC-029, DEC-033, DEC-036):
   candidate (ADR-0013, DEC-033).
 - `retention_state` — durable retention / exposure policy
   (ADR-0013, DEC-033).
-- `current_operating_view` — projection of the active judgment set
-  (DEC-036); **not** "current truth".
-- `Tension` — **not** `DesignTension` (ADR-0013 §Tension
-  Generalization).
 - `Control Gate` — **not** `Exception Probe Gate` (Round 14
   cleanup).
 
-Use these names from the start when implementing Phase 1A schema so
-later renames are not needed.
+**Planned (not yet implemented):**
+
+- `current_operating_view` — projection of the active judgment set
+  (DEC-036); **not** "current truth". Planned derived view; not yet
+  a migrated table or runtime surface.
+- `Tension` — **not** `DesignTension` (ADR-0013 §Tension
+  Generalization). Planned schema surface; not yet migrated.
 
 ## Derived projections (planned)
 
