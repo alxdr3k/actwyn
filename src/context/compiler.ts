@@ -154,29 +154,27 @@ export function compile(input: CompileInput): CompileResult {
 
   if (mode === "resume_mode") {
     // Resume: Claude holds history; inject only fresh judgment_active + user_message.
-    // If no judgments exist or packing overflows, return the bare user message so the
-    // run still proceeds — judgment refresh is optional, not load-bearing.
-    const resumeFallback: CompileResult = {
-      packedMessage: userMessage,
-      injectedSnapshotJson: JSON.stringify({ mode, session_id: sessionId }),
-    };
-    if (judgments.length === 0) return resumeFallback;
+    // judgment_active is droppable — pack() drops it under budget pressure without
+    // throwing. PromptOverflowError only fires when the non-droppable minimum
+    // (user_message + system_identity) itself overflows; that is a genuine budget
+    // violation and must propagate, not be swallowed into a bare-message fallback.
+    if (judgments.length === 0) {
+      return {
+        packedMessage: userMessage,
+        injectedSnapshotJson: JSON.stringify({ mode, session_id: sessionId }),
+      };
+    }
     const snap = buildContext({
       mode: "resume_mode",
       user_message: userMessage,
       system_identity: systemIdentity,
       judgment_items: judgments,
     });
-    try {
-      const packed = pack(snap, { total_budget_tokens: tokenBudget });
-      return {
-        packedMessage: renderAsMessage(packed),
-        injectedSnapshotJson: serializeForProviderRun(packed),
-      };
-    } catch (e) {
-      if (!(e instanceof PromptOverflowError)) throw e;
-      return resumeFallback;
-    }
+    const packed = pack(snap, { total_budget_tokens: tokenBudget });
+    return {
+      packedMessage: renderAsMessage(packed),
+      injectedSnapshotJson: serializeForProviderRun(packed),
+    };
   }
 
   // replay_mode: full context
