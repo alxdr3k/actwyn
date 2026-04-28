@@ -11,7 +11,8 @@
     "test": "bun test",
     "typecheck": "bunx --bun tsc --noEmit",
     "lint:redactor": "bun run scripts/check-single-redactor.ts",
-    "ci": "bun run lint:redactor && bun run typecheck && bun test"
+    "ci": "bun run lint:redactor && bun run typecheck && bun test",
+    "docs:generate:schema": "bun run scripts/generate-schema-doc.ts"
   },
   "devDependencies": {
     "@types/bun": "^1.3.12",
