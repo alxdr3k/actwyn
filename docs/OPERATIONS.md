@@ -179,8 +179,17 @@ Operational invariants encoded in the unit:
   (WAL, busy_timeout, FK enforcement).
 - Migration runner: `src/db/migrator.ts`, forward-only, refuses
   gaps. Applied versions recorded in `settings.schema.migrations.<NNN>`.
-- WAL backup procedure for the running DB: `TODO` (not formalised
-  in scripts; AC-OPS-004 is informational only in P0).
+- WAL-safe local snapshot:
+  ```sh
+  bun run scripts/backup-sqlite.ts \
+    --db "$ACTWYN_DB_PATH" \
+    --out "./backups/actwyn-$(date -u +%Y%m%dT%H%M%SZ).sqlite"
+  ```
+  The script opens the source with `query_only`, uses `bun:sqlite`
+  `serialize()` (SQLite `sqlite3_serialize`) instead of copying the
+  live DB file, normalizes the snapshot to a standalone rollback-journal
+  file, writes with mode `0600`, refuses overwrite unless `--force` is
+  supplied, and verifies the result with `PRAGMA integrity_check`.
 
 Inspecting the live DB:
 
@@ -264,6 +273,6 @@ instant Telegram explanation, and memory snapshot S3 staging is skipped.
   `expected_schema_version` in `src/main.ts` together with the new
   migration, then redeploy.
 
-For anything else — including alerting thresholds, backup automation,
-and DR procedures — `TODO`. Do not invent runbook entries; promote a
-`TODO` here once an owner agrees.
+For anything else — including alerting thresholds, scheduled backup
+automation, and broader DR procedures — `TODO`. Do not invent runbook
+entries; promote a `TODO` here once an owner agrees.
