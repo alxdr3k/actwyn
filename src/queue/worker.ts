@@ -73,13 +73,11 @@ import {
 } from "~/telegram/attachment_capture.ts";
 import {
   createNotificationAndChunks,
-  rollUpParent,
   sendNotification,
-  splitForTelegram,
-  terminalizeExhaustedChunks,
   type NotificationType,
   type OutboundTransport,
 } from "~/telegram/outbound.ts";
+import { retryNotificationFromLedger } from "~/queue/notification_retry.ts";
 import { evaluateTurn, recordControlGateDecision } from "~/judgment/control_gate.ts";
 import { executeJudgmentExplainTool, executeJudgmentQueryTool } from "~/judgment/tool.ts";
 
@@ -828,23 +826,6 @@ function buildNotificationText(
     return "작업이 취소됐습니다.";
   }
   return finalText.length > 0 ? finalText : "작업이 실패했습니다. /status 를 확인하세요.";
-}
-
-function buildJobCompletedFooter(db: DbHandle, jobId: string): string {
-  try {
-    const row = db
-      .prepare<{ provider: string | null; result_json: string | null }, [string]>(
-        "SELECT provider, result_json FROM jobs WHERE id = ?",
-      )
-      .get(jobId);
-    if (!row?.result_json) return "";
-    const r = JSON.parse(row.result_json) as { duration_ms?: number };
-    if (r.duration_ms === undefined) return "";
-    const sec = (r.duration_ms / 1000).toFixed(1);
-    return `\n\n---\n${sec}s · ${row.provider ?? "claude"}`;
-  } catch {
-    return "";
-  }
 }
 
 // ---------------------------------------------------------------
@@ -1862,86 +1843,20 @@ async function runNotificationRetryJob(deps: WorkerDeps, job: ClaimedJob): Promi
     return commitSystemNoop(deps, job);
   }
 
-  const notif = deps.db
-    .prepare<{ job_id: string; notification_type: string; payload_text: string | null; chat_id: string }, [string]>(
-      "SELECT job_id, notification_type, payload_text, chat_id FROM outbound_notifications WHERE id = ?",
-    )
-    .get(req.notification_id);
-  if (!notif) {
+  const retryResult = await retryNotificationFromLedger({
+    db: deps.db,
+    transport: deps.outbound,
+    events: deps.events,
+    chunk_size: deps.config.notifications?.chunk_size,
+    max_attempts_per_chunk: deps.config.notifications?.max_attempts_per_chunk,
+    retry_job_id: job.id,
+  }, req.notification_id);
+  if (!retryResult) {
     return commitSystemNoop(deps, job);
   }
 
-  // Prefer the stored payload_text (added in migration 003). Fall back to
-  // reconstructing from the assistant turn only for job_completed rows
-  // written before the migration.
-  let chunks: string[];
-  if (notif.payload_text !== null) {
-    // Re-split with the same chunk_size config so indices match the existing rows.
-    chunks = splitForTelegram(notif.payload_text, deps.config.notifications?.chunk_size);
-  } else if (notif.notification_type === "job_completed") {
-    const turn = deps.db
-      .prepare<{ content_redacted: string }, [string]>(
-        "SELECT content_redacted FROM turns WHERE job_id = ? AND role = 'assistant' ORDER BY created_at ASC LIMIT 1",
-      )
-      .get(notif.job_id);
-    const footer = buildJobCompletedFooter(deps.db, notif.job_id);
-    chunks = turn ? splitForTelegram(turn.content_redacted + footer) : [];
-  } else {
-    chunks = [];
-  }
-
-  let rollUpStatus: "pending" | "sent" | "failed" = "pending";
-  if (chunks.length > 0) {
-    try {
-      const sendResult = await sendNotification(
-        { db: deps.db, transport: deps.outbound, events: deps.events },
-        req.notification_id,
-        chunks,
-      );
-      rollUpStatus = sendResult.roll_up_status;
-    } catch (e) {
-      deps.events.warn("telegram.outbound.retry_error", {
-        job_id: job.id,
-        notification_id: req.notification_id,
-        error_message: (e as Error).message,
-      });
-    }
-  }
-
-  // Re-enqueue ONLY when the chunk ledger still has a retry-eligible chunk.
-  // A chunk is retry-eligible iff status IN ('pending','failed') AND
-  // attempt_count < max_attempts_per_chunk. If every non-terminal chunk is
-  // exhausted (or all chunks are `sent`), stop — otherwise the queue fills
-  // up with an infinite chain of notification_retry jobs (review Blocker 3).
-  const maxAttemptsPerChunk = deps.config.notifications?.max_attempts_per_chunk ?? 3;
-  const retryableRow = deps.db
-    .prepare<{ n: number }, [string, number]>(
-      `SELECT COUNT(*) AS n
-       FROM outbound_notification_chunks
-       WHERE outbound_notification_id = ?
-         AND status IN ('pending', 'failed')
-         AND attempt_count < ?`,
-    )
-    .get(req.notification_id, maxAttemptsPerChunk);
-  const retryable = retryableRow?.n ?? 0;
-
-  if (retryable === 0 && rollUpStatus !== "sent") {
-    const finalized = terminalizeExhaustedChunks(deps.db, req.notification_id, maxAttemptsPerChunk);
-    if (finalized > 0) {
-      // Re-derive parent status now that exhausted chunks are `failed`.
-      rollUpStatus = rollUpParent(deps.db, req.notification_id);
-    }
-  }
-
-  const retryOutcome: "sent" | "retry_scheduled" | "exhausted" =
-    rollUpStatus === "sent"
-      ? "sent"
-      : retryable > 0
-        ? "retry_scheduled"
-        : "exhausted";
-
-  if (retryOutcome === "retry_scheduled" && notif.chat_id) {
-    enqueueNotificationRetryJob(deps, req.notification_id, notif.chat_id, job.id);
+  if (retryResult.retry_outcome === "retry_scheduled" && retryResult.chat_id) {
+    enqueueNotificationRetryJob(deps, req.notification_id, retryResult.chat_id, job.id);
   }
 
   deps.db
@@ -1955,18 +1870,18 @@ async function runNotificationRetryJob(deps: WorkerDeps, job: ClaimedJob): Promi
     .run(
       JSON.stringify({
         notification_id: req.notification_id,
-        chunks_attempted: chunks.length,
-        roll_up_status: rollUpStatus,
-        retry_outcome: retryOutcome,
-        retryable_chunks: retryable,
+        chunks_attempted: retryResult.chunks_attempted,
+        roll_up_status: retryResult.roll_up_status,
+        retry_outcome: retryResult.retry_outcome,
+        retryable_chunks: retryResult.retryable_chunks,
       }),
       job.id,
     );
   deps.events.info("queue.job.notification_retry", {
     job_id: job.id,
     notification_id: req.notification_id,
-    roll_up_status: rollUpStatus,
-    retry_outcome: retryOutcome,
+    roll_up_status: retryResult.roll_up_status,
+    retry_outcome: retryResult.retry_outcome,
   });
   return { job_id: job.id, terminal: "succeeded", turn_id: null, provider_run_id: "" };
 }
