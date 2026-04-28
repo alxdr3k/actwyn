@@ -346,7 +346,7 @@ components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4 / 1A.5 / 1A.6 / 1A.
   `direct_commit_allowed` is always false (ADR-0012 invariant).
   **Phase 1B.1**: now wired — `src/queue/worker.ts` calls
   `evaluateTurn()` + `recordControlGateDecision()` before each
-  `provider_run`. Not called from providers, context, memory, or
+  non-system `provider_run`. Not called from providers, context, memory, or
   telegram modules (only from worker, for telemetry).
 
 **Phase 1B.1–1B.3 (implemented):**

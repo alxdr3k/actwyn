@@ -549,7 +549,13 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
   - **> 3 GB** or **< 10% free** → refuse new
     `long_term` writes; attachments still accepted as
     `ephemeral` / `session` with a user-visible explanation.
-  Values are configurable in `config/storage.json`.
+  **Implementation status**: threshold policy accepted but not yet
+  implemented. `config/storage.json` does not exist; `/status` and
+  `/doctor` do not enforce these thresholds at runtime
+  (`src/commands/doctor.ts` disk check requires an external hook not
+  wired in `src/main.ts`). See `docs/OPERATIONS.md` §Disk / artifact
+  capacity (TODO). Implement before the first production deploy to a
+  disk-constrained host.
 - Alternatives considered: percentage-only; absolute-only; no
   hard cap.
 - Impacted docs: PRD §8.7, AC-STO-001, AC-OBS-001; HLD §12.5, §16.1;
