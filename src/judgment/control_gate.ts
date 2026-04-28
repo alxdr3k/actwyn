@@ -195,9 +195,8 @@ export function evaluateCandidate(
 
   if (candidate.is_explicit_full_review) {
     const triggers: TriggerCode[] = ["user_review_request"];
-    if (durableKinds.includes(candidate.kind) || candidate.touches_schema) {
-      triggers.push("durable_candidate");
-    }
+    if (durableKinds.includes(candidate.kind)) triggers.push("durable_candidate");
+    if (candidate.touches_schema) triggers.push("schema_change");
     return makeDecision({
       phase: "candidate",
       level: "L3",
@@ -208,7 +207,8 @@ export function evaluateCandidate(
   }
 
   if (durableKinds.includes(candidate.kind) || candidate.touches_schema) {
-    const triggers: TriggerCode[] = ["durable_candidate"];
+    const triggers: TriggerCode[] = [];
+    if (durableKinds.includes(candidate.kind)) triggers.push("durable_candidate");
     if (candidate.touches_schema) triggers.push("schema_change");
     const lenses: LensId[] = ["architecture_critique_lens_v0.1"];
     return makeDecision({

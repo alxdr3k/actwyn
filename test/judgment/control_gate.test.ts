@@ -166,11 +166,19 @@ describe("evaluateCandidate", () => {
     expect(d.triggers).toContain("durable_candidate");
   });
 
-  test("L2 for schema change", () => {
+  test("L2 for schema-only change: schema_change trigger, no durable_candidate", () => {
     const d = evaluateCandidate({ ...base, kind: "fact", touches_schema: true });
     expect(d.level).toBe("L2");
     expect(d.triggers).toContain("schema_change");
+    expect(d.triggers).not.toContain("durable_candidate");
     expect(d.lenses).toContain("architecture_critique_lens_v0.1");
+  });
+
+  test("L2 for durable kind + schema change: both triggers present", () => {
+    const d = evaluateCandidate({ ...base, kind: "decision", touches_schema: true });
+    expect(d.level).toBe("L2");
+    expect(d.triggers).toContain("durable_candidate");
+    expect(d.triggers).toContain("schema_change");
   });
 
   test("L3 for explicit full review on durable kind includes durable_candidate trigger", () => {
@@ -179,13 +187,23 @@ describe("evaluateCandidate", () => {
     expect(d.critic_model_allowed).toBe(true);
     expect(d.triggers).toContain("user_review_request");
     expect(d.triggers).toContain("durable_candidate");
+    expect(d.triggers).not.toContain("schema_change");
     expect(d.budget_class).toBe("audit");
   });
 
-  test("L3 for explicit full review on non-durable kind omits durable_candidate trigger", () => {
+  test("L3 for explicit full review on non-durable kind: only user_review_request", () => {
     const d = evaluateCandidate({ ...base, kind: "fact", is_explicit_full_review: true });
     expect(d.level).toBe("L3");
     expect(d.triggers).toContain("user_review_request");
+    expect(d.triggers).not.toContain("durable_candidate");
+    expect(d.triggers).not.toContain("schema_change");
+  });
+
+  test("L3 for explicit full review on schema-change: user_review_request + schema_change", () => {
+    const d = evaluateCandidate({ ...base, kind: "fact", is_explicit_full_review: true, touches_schema: true });
+    expect(d.level).toBe("L3");
+    expect(d.triggers).toContain("user_review_request");
+    expect(d.triggers).toContain("schema_change");
     expect(d.triggers).not.toContain("durable_candidate");
   });
 
