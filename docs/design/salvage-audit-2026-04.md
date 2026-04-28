@@ -22,8 +22,9 @@ landed on `main` via PR #10 as ADR-0009 … ADR-0013 plus
 `docs/JUDGMENT_SYSTEM.md`. Per **DEC-037** the design is
 architectural authority for *why*, but **not** authority for
 runtime behavior — none of the planned schemas, typed tools,
-Control Gate evaluators, or projections are implemented in
-`src/` or `migrations/` yet.
+Control Gate evaluators, or projections were implemented in
+`src/` or `migrations/` as of this audit (pre-Phase-1A).
+Phase 1A.1–1A.8 have since landed on `main`.
 
 The pre-existing P0 implementation (memory summaries,
 `memory_items` provenance, attachment promotion, slot-based
@@ -66,7 +67,7 @@ Special-focus checks (per the audit brief):
 | Question | Finding |
 |----------|---------|
 | Obsidian / GitHub second-brain runtime assumptions in code | **None.** No source file references obsidian / markdown-vault / second-brain / GitHub repo runtime. Position matches ADR-0009 §2 ("not canonical, seed corpus / export / archive only"). |
-| memory ↔ judgment conflation in code | **None.** No `judgment_*` table, typed tool, `current_operating_view`, `epistemic_origin`, `authority_source`, `Tension`, `Control Gate`, or `Critique Lens` identifier exists in `src/` or `migrations/`. AGENTS.md "Phase 1A out of scope" is honored. |
+| memory ↔ judgment conflation in code | **None** *(as of this audit, pre-Phase-1A).* No `judgment_*` table, typed tool, `current_operating_view`, `epistemic_origin`, `authority_source`, `Tension`, `Control Gate`, or `Critique Lens` identifier existed in `src/` or `migrations/` at audit time. Phase 1A.1–1A.8 have since added these surfaces — intentionally and without memory conflation. |
 | Context packing depends on stale memory semantics | **Partial.** `src/context/builder.ts` accepts `MemoryItemSlot.provenance` / `.status` directly, and `src/queue/worker.ts#buildContextForRun` reads `memory_items WHERE status='active'` + `memory_summaries (latest)` to drive the slot taxonomy. Stage 4 Context Compiler will source from `current_operating_view` (lifecycle_status / activation_state / authority priority) instead. |
 | Memory promotion allows `assistant_generated` / `inferred` durable memory | **Partially yes — under a careful reading.** `src/memory/provenance.ts#mayPromoteToLongTerm` only gates `preference` to `user_stated` / `user_confirmed`. `src/memory/summary.ts#writeSummary` then promotes `facts` / `decisions` / `open_tasks` / `cautions` from any provenance to `memory_items` with `status='active'`. `src/queue/worker.ts#buildContextForRun` injects those rows into the next provider run. `docs/JUDGMENT_SYSTEM.md` §Relationship to memory layer (ADR-0006) and §Authority Source (ADR-0012) > Procedure/policy 권위 결정 패턴 require `assistant_generated` / `inferred` items to remain proposal-only — that gate must be added in the judgment layer, AND the memory→context injection path must be re-evaluated under Q-027 before the gate is meaningful. |
 | Code that must *become* control-plane telemetry | **None forced.** ADR-0012 §6 commits to control-plane / judgment-plane separation as **additive**. `observability/events`, `queue/worker`, `startup/recovery`, `telegram/inbound` all stay as observability / runtime; new control-plane tables (`tensions`, `reflection_triage_events`, etc.) are introduced in their own writers. |

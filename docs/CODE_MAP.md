@@ -109,11 +109,15 @@ landed (see table below):
 - **Phase 1A.7**: retirement lifecycle repository + unregistered `judgment.supersede` /
   `judgment.revoke` / `judgment.expire` tool contracts. Local write surfaces only.
   `supersedeJudgment` inserts a `judgment_edges` row. None expose judgments to runtime.
+- **Phase 1A.8**: Control Gate evaluator (`src/judgment/control_gate.ts`) + `control_gate_events`
+  migration. `evaluateTurn` / `evaluateCandidate` → L0/L1/L2/L3 decisions; persisted via
+  `recordControlGateDecision`. `direct_commit_allowed` always false (ADR-0012 invariant).
+  Not imported from any runtime module — not runtime-wired.
 
-No Control Gate, Context Compiler integration, or provider runtime wiring is implemented.
+No Context Compiler integration or provider runtime wiring is implemented.
 See `docs/DATA_MODEL.md` and `docs/RUNTIME.md`.
 
-## Judgment (Phase 1A.7 — schema + proposal/review/source/evidence/commit/retirement repositories + query/explain read surfaces + typed-tool contracts)
+## Judgment (Phase 1A.8 — schema + proposal/review/source/evidence/commit/retirement repositories + query/explain read surfaces + typed-tool contracts + Control Gate evaluator)
 
 | Path                                  | Purpose                                                                              | Status                                                                       |
 | ------------------------------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |

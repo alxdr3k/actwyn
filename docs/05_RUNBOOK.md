@@ -10,6 +10,13 @@
 > Scope: one operator, one user, one host, one Telegram bot, one
 > S3 bucket. Everything outside that shape is P1+.
 
+> **⚠ Env-var name drift warning:** Some env var names in this
+> document (e.g. `ALLOWED_USER_IDS`, `BOOTSTRAP_WHOAMI`) may
+> differ from the names validated by `.env.example` and
+> `src/config.ts`. Before deploying, cross-reference with
+> `docs/OPERATIONS.md` and `.env.example` for the current
+> canonical names.
+
 ## Conventions
 
 - **Service name**: `actwyn.service` (systemd unit).

@@ -26,8 +26,8 @@ These are candidates only — none are committed to.
   `src/telegram/types.ts`, and any future external interface.
 - **Provider capability matrix** — generated from the Claude
   adapter and stub providers in `src/providers/`.
-- **Judgment enum / reference** — once `judgment_*` migrations
-  exist, generate the enum and field reference.
+- **Judgment enum / reference** — generate from `migrations/004_judgment_skeleton.sql`
+  and `migrations/005_control_gate_events.sql` (both landed on `main`).
 - **Module graph** — generated from `tsc --listFiles` plus an
   import-walker, so an agent can cheaply skim how `src/` modules
   reference each other.

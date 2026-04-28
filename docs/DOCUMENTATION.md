@@ -97,9 +97,10 @@ direction was chosen, but they are not the source of truth for
 implemented runtime behavior and are not edited to chase
 implementation drift.
 
-When Phase 1A implementation begins, the operative reference for
-"what is actually running" is the thin current-state docs in this
-directory (`ARCHITECTURE.md`, `CODE_MAP.md`, `DATA_MODEL.md`,
-`RUNTIME.md`, `TESTING.md`, `OPERATIONS.md`) plus the code, tests,
-and migrations themselves. Phase 0 / 0.5 design specs are not
-rewritten; new ADRs supersede them where the architecture changes.
+The operative reference for "what is actually running" is the thin
+current-state docs in this directory (`ARCHITECTURE.md`,
+`CODE_MAP.md`, `DATA_MODEL.md`, `RUNTIME.md`, `TESTING.md`,
+`OPERATIONS.md`) plus the code, tests, and migrations themselves.
+Phase 1A.1–1A.8 are landed on `main`. Phase 0 / 0.5 design specs
+are not rewritten; new ADRs supersede them where the architecture
+changes.

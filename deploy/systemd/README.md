@@ -22,7 +22,8 @@ Then:
    (`TELEGRAM_BOT_TOKEN`, `S3_*`, `AUTHORIZED_TELEGRAM_USER_ID`).
    File must remain mode `0640 root:actwyn`.
 2. Rsync the application to `/opt/actwyn` (including
-   `bun.lock`, `config/runtime.json`, `migrations/*.sql`,
+   `bun.lock`, `package.json`, `tsconfig.json`,
+   `config/runtime.json`, `migrations/*.sql`,
    `src/*`, `scripts/check-single-redactor.ts`).
 3. As root: `systemctl enable --now actwyn.service`.
 4. Tail logs: `journalctl -u actwyn -f`.

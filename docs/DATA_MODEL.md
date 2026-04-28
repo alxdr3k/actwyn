@@ -492,8 +492,9 @@ to the "분리" starting point.
 
 Q-027 (`memory_items` ↔ `judgment_items` 관계) is open. ADR-0009
 commits to "분리" as the Phase 0 starting point; the implementation
-salvage audit (future task) will decide whether existing memory
-schema is KEEP / ADAPT / REPLACE / DELETE.
+salvage audit (`docs/design/salvage-audit-2026-04.md`, completed pre-Phase-1A)
+concluded KEEP for most P0 runtime; Q-027 resolution deferred to the
+Context Compiler stage.
 
 ## Naming notes (Phase 0 / 0.5 final terms)
 
