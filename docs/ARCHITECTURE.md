@@ -4,12 +4,13 @@
 > Last updated: 2026-04-27
 >
 > This is a short pointer doc. For why decisions were made, see
-> `docs/adr/` (ADR-0001 … ADR-0013). For acceptance contracts and
+> `docs/adr/` (ADR-0001 … ADR-0015). For acceptance contracts and
 > full P0 design rationale, see `docs/PRD.md` and `docs/02_HLD.md`.
 > For the architectural authority of the DB-native AI-first
 > Judgment System direction, see `docs/JUDGMENT_SYSTEM.md` (Phase 0 /
-> 0.5 design record; not implemented). For current schema and code
-> layout, see `docs/DATA_MODEL.md` and `docs/CODE_MAP.md`.
+> 0.5 design record; Phase 1A.1–1A.8 locally implemented, not
+> runtime-wired). For current schema and code layout, see
+> `docs/DATA_MODEL.md` and `docs/CODE_MAP.md`.
 
 ## Status
 
@@ -22,13 +23,14 @@
 | Redaction at the persistence boundary             | implemented |
 | Memory summaries with provenance + confidence     | implemented |
 | Telegram attachment two-phase capture             | implemented |
-| DB-native AI-first Judgment System (Phase 1A+)    | schema skeleton + proposal/review/source/evidence/commit/retirement repositories + local query/explain read surfaces + unregistered tool contracts (not runtime-wired) |
+| DB-native AI-first Judgment System (Phase 1A+)    | Phase 1A.1–1A.8 locally implemented: schema, proposal/review/source/evidence/commit/retirement repositories, query/explain read surfaces, Control Gate substrate + append-only ledger, unregistered tool contracts (none runtime-wired) |
 | Vector / graph derived projections                | planned     |
 | second-brain repo as canonical runtime memory     | not planned (history/seed only) |
 | Obsidian / Markdown active write path             | not planned |
 
 The Phase 0 / 0.5 Judgment System architectural design has landed on
-`main` as ADR-0009 through ADR-0013 plus `docs/JUDGMENT_SYSTEM.md`.
+`main` as ADR-0009 through ADR-0013 plus `docs/JUDGMENT_SYSTEM.md`;
+ADR-0015 covers the Phase 1A.8 Control Gate ledger.
 Per **DEC-037** (Implementation Documentation Lifecycle Policy),
 those documents are the architectural authority for *why* the
 direction was chosen but are **not** the source of truth for

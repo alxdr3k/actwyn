@@ -156,9 +156,11 @@ Phase 1A.1 (schema skeleton + types + validators), Phase 1A.2
 (proposal-only write surface), Phase 1A.3 (proposal review
 local surface), Phase 1A.4 (source/evidence-link local surface),
 Phase 1A.5 (commit/activation local surface), Phase 1A.6
-(query/explain local read surfaces), and Phase 1A.7 (retirement
-lifecycle local surfaces — supersede/revoke/expire) have landed on
-`main`. **Runtime request handling is unchanged.** The implemented
+(query/explain local read surfaces), Phase 1A.7 (retirement
+lifecycle local surfaces — supersede/revoke/expire), and Phase 1A.8
+(Control Gate substrate — `evaluateTurn`, `evaluateCandidate`,
+`recordControlGateDecision`, append-only `control_gate_events` ledger)
+have landed on `main`. **Runtime request handling is unchanged.** The implemented
 runtime stages above — Telegram inbound, `provider_run`,
 `summary_generation`, `storage_sync`, `notification_retry`, and
 outbound delivery — do not call any judgment tool. Provider context

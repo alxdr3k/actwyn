@@ -423,10 +423,10 @@ to keep in mind:
 ## Judgment System schema (Phase 1A.8 — Control Gate ledger landed; runtime not wired)
 
 The DB-native AI-first Judgment System direction defines a separate
-schema family. As of migration 004, **the five `judgment_*` tables
-and the FTS5 virtual table exist in `migrations/`**; the remaining
-control-plane / tensions / reflection rows below are still
-documentation only.
+schema family. Migration 004 added the five `judgment_*` tables and
+the FTS5 virtual table. Migration 005 (Phase 1A.8) added the
+append-only `control_gate_events` table. The `tensions` and
+`reflection_triage_events` rows remain documentation only.
 
 Phase 1A.2 added `src/judgment/repository.ts` as the proposal-only
 writer for `judgment_items` and `judgment_events`. Phase 1A.3 added
