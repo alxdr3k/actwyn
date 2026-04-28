@@ -171,6 +171,7 @@ See `docs/RUNTIME.md` for the full runtime boundary description.
 | ------------------------------------------ | ------------------------------------------------------------------------------------ |
 | `scripts/check-single-redactor.ts`         | Lint that enforces the single-redactor invariant (HLD §13.1).                        |
 | `scripts/check-thin-docs.ts`               | Lint that enforces thin current-state doc line budgets and role notes.               |
+| `scripts/backup-sqlite.ts`                 | WAL-safe local SQLite snapshot helper; uses `bun:sqlite` serialization + integrity check. |
 | `scripts/generate-schema-doc.ts`           | Generates `docs/generated/schema.md` from migration SQL files. Run via `bun run docs:generate:schema` after any migration change. |
 
 ## Deploy
@@ -190,6 +191,7 @@ See `docs/RUNTIME.md` for the full runtime boundary description.
 | `test/context/packer.test.ts`                     | Context packer drop-order + token budget.                                        |
 | `test/context/token_estimator.test.ts`            | CJK-safer token estimator behavior (DEC-021).                                    |
 | `test/db/invariants.test.ts`                      | Cross-table invariants from HLD §5.2.                                            |
+| `test/db/backup_sqlite.test.ts`                   | WAL-safe SQLite backup script behavior.                                         |
 | `test/db/schema.test.ts`                          | Schema / migration shape assertions.                                             |
 | `test/db/judgment_schema.test.ts`                 | Judgment schema CHECK / NOT NULL / JSON / FTS5 trigger coverage (Phase 1A.1).    |
 | `test/db/control_gate_schema.test.ts`             | `control_gate_events` schema CHECK / NOT NULL / JSON / append-only trigger coverage (Phase 1A.8). |
