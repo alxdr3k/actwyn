@@ -227,10 +227,8 @@ a task explicitly authorizes a further Judgment runtime slice.
   output.
 - Telegram write commands (propose/approve/commit) and provider tool
   registration for any Judgment write path.
-- Full Context Compiler runtime wiring: `src/context/compiler.ts` (Stage 4 v0)
-  exists locally but is **not yet wired** into `worker.ts`; provider context
-  still uses `builder.ts` + `packer.ts`. Worker swap is salvage PR #5.
-- `current_operating_view` and `current_operating_view`-sourced Compiler input.
+- `current_operating_view` and `current_operating_view`-sourced Compiler input
+  (`src/context/compiler.ts` is now wired; `builder.ts` remains in tree for regression parity).
 - Runtime readers for `judgment_edges`.
 - `Tension` telemetry and the `tensions` table: **not implemented**.
 - `ReflectionTriageEvent` and `reflection_triage_events`: **not implemented**.

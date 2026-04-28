@@ -48,8 +48,7 @@ import { switchProvider } from "~/commands/provider.ts";
 import { whoamiReply } from "~/commands/whoami.ts";
 import { endSession, enqueueSummaryJob } from "~/commands/summary.ts";
 import { shouldAutoTriggerSummary, writeSummary, SUMMARY_SYSTEM_IDENTITY, type SummaryOutput } from "~/memory/summary.ts";
-import { buildContext, type JudgmentItemSlot, type MemoryItemSlot, type TurnSlot } from "~/context/builder.ts";
-import { pack, renderAsMessage, serializeForProviderRun, PromptOverflowError } from "~/context/packer.ts";
+import { compile, PromptOverflowError } from "~/context/compiler.ts";
 import {
   runDeletePass,
   runRetryScheduler,
@@ -380,73 +379,44 @@ async function runOneClaimedInner(
   }
 
   // In replay_mode, inject the full packed context (memory + turns + summary)
-  // as the message so Claude receives the conversation history. In resume_mode
-  // Claude already has the history via --resume, so inject only a fresh,
-  // bounded judgment_active block plus the user message.
+  // Compile and pack context via the Stage 4 Compiler.
+  // replay_mode: full context (turns + memory + summary + judgments).
+  // resume_mode: judgment_active refresh only (Claude holds history via --resume).
+  // PromptOverflowError in either mode means minimum floor exceeds budget → fail job.
   let request = baseRequest;
   let snapshotJson: string;
-  if (packingMode === "replay_mode" && job.session_id) {
-    let ctx: ContextBuildResult;
-    try {
-      ctx = buildContextForRun({
-        db: deps.db,
-        sessionId: job.session_id,
-        req: baseRequest,
-        redactor: deps.redactor,
-        // advisory profile: replace system_identity with schema instruction
-        systemIdentity: isSummaryJob ? SUMMARY_SYSTEM_IDENTITY : undefined,
-        // summary user message instructs Claude to produce structured output.
-        // On retry (attempts >= 2), append a stricter schema reminder per HLD §7.5 failure modes.
-        userMessage: isSummaryJob
-          ? job.attempts >= 2
-            ? "이 대화를 위의 JSON 스키마에 따라 요약해 주세요.\n\n반드시 유효한 JSON 객체만 반환하십시오. 마크다운 펜스나 설명 없이 JSON 객체 하나만 출력하세요. 이전 시도에서 스키마를 따르지 않은 것 같습니다."
-            : "이 대화를 위의 JSON 스키마에 따라 요약해 주세요."
-          : undefined,
-        // Phase 1B.2: skip judgment injection for summary_generation (see skipJudgments doc).
-        skipJudgments: isSummaryJob,
+  try {
+    const ctx = compile({
+      db: deps.db,
+      sessionId: job.session_id ?? null,
+      mode: packingMode,
+      userMessage: isSummaryJob
+        ? job.attempts >= 2
+          ? "이 대화를 위의 JSON 스키마에 따라 요약해 주세요.\n\n반드시 유효한 JSON 객체만 반환하십시오. 마크다운 펜스나 설명 없이 JSON 객체 하나만 출력하세요. 이전 시도에서 스키마를 따르지 않은 것 같습니다."
+          : "이 대화를 위의 JSON 스키마에 따라 요약해 주세요."
+        : baseRequest.message,
+      // advisory profile: replace system_identity with schema instruction for summary_generation.
+      systemIdentity: isSummaryJob ? SUMMARY_SYSTEM_IDENTITY : undefined,
+      // skip judgment injection for summary_generation (Phase 1B.2).
+      skipJudgments: isSummaryJob,
+    });
+    request = { ...baseRequest, message: deps.redactor.apply(ctx.packedMessage).text };
+    snapshotJson = deps.redactor.apply(ctx.injectedSnapshotJson).text;
+  } catch (e) {
+    if (e instanceof PromptOverflowError) {
+      // HLD §10.3 rule 2: minimum prompt doesn't fit; fail the job explicitly.
+      deps.db.tx<void>(() => {
+        deps.db
+          .prepare<unknown, [string, string]>(
+            `UPDATE jobs SET status = 'failed', finished_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+             error_json = ? WHERE id = ? AND status = 'running'`,
+          )
+          .run(JSON.stringify({ error_type: "prompt_overflow", detail: e.message }), job.id);
       });
-    } catch (e) {
-      if (e instanceof PromptOverflowError) {
-        // HLD §10.3 rule 2: minimum prompt doesn't fit; fail the job explicitly.
-        deps.db.tx<void>(() => {
-          deps.db
-            .prepare<unknown, [string, string]>(
-              `UPDATE jobs SET status = 'failed', finished_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-               error_json = ? WHERE id = ? AND status = 'running'`,
-            )
-            .run(JSON.stringify({ error_type: "prompt_overflow", detail: e.message }), job.id);
-        });
-        deps.events.warn("queue.job.prompt_overflow", { job_id: job.id, detail: e.message });
-        return { job_id: job.id, terminal: "failed", turn_id: null, provider_run_id: providerRunId };
-      }
-      throw e;
+      deps.events.warn("queue.job.prompt_overflow", { job_id: job.id, detail: e.message });
+      return { job_id: job.id, terminal: "failed", turn_id: null, provider_run_id: providerRunId };
     }
-    request = { ...baseRequest, message: ctx.packedMessage };
-    snapshotJson = ctx.snapshotJson;
-  } else {
-    // Phase 1B.2 — Resume-mode judgment refresh (issue #44).
-    // Claude holds conversation history via --resume; inject a fresh, bounded
-    // judgment_active block so judgments committed after the last replay are visible.
-    // Excludes turns, memory, and summary — only judgment_items + user_message.
-    const resumeJudgments = queryActiveGlobalJudgmentSlots(deps.db);
-    if (resumeJudgments.length > 0) {
-      const snap = buildContext({
-        mode: "resume_mode",
-        user_message: baseRequest.message,
-        system_identity: "actwyn personal agent",
-        judgment_items: resumeJudgments,
-      });
-      try {
-        const packed = pack(snap, { total_budget_tokens: 6000 });
-        request = { ...baseRequest, message: deps.redactor.apply(renderAsMessage(packed)).text };
-        snapshotJson = deps.redactor.apply(serializeForProviderRun(packed)).text;
-      } catch (e) {
-        if (!(e instanceof PromptOverflowError)) throw e;
-        snapshotJson = JSON.stringify({ mode: packingMode, session_id: job.session_id ?? "" });
-      }
-    } else {
-      snapshotJson = JSON.stringify({ mode: packingMode, session_id: job.session_id ?? "" });
-    }
+    throw e;
   }
 
   insertProviderRunStart({
@@ -944,145 +914,6 @@ function queryPriorProviderSessionId(db: DbHandle, session_id: string): string |
     )
     .get(session_id);
   return row?.provider_session_id ?? null;
-}
-
-interface ContextBuildResult {
-  /** Full packed message text: used as the actual prompt in replay_mode. */
-  readonly packedMessage: string;
-  /** JSON metadata for provider_runs.injected_snapshot_json. */
-  readonly snapshotJson: string;
-}
-
-/**
- * Build and pack the full replay_mode context for a provider run.
- *
- * Returns both the full rendered message (to pass to Claude) and the
- * observability snapshot (to persist in injected_snapshot_json).
- * Resume-mode judgment refresh is handled separately in runOneClaimedInner.
- */
-function buildContextForRun(args: {
-  db: DbHandle;
-  sessionId: string;
-  req: AgentRequest;
-  redactor: Redactor;
-  /** Override the system_identity slot (e.g. advisory profile for summary_generation). */
-  systemIdentity?: string | undefined;
-  /** Override the user_message slot (e.g. schema prompt for summary_generation). */
-  userMessage?: string | undefined;
-  /**
-   * When true, skip active-judgment injection (Phase 1B.2).
-   * Set for summary_generation to prevent durable judgments from
-   * contaminating session summaries persisted to memory_summaries.
-   */
-  skipJudgments?: boolean | undefined;
-}): ContextBuildResult {
-  const fallback: ContextBuildResult = {
-    packedMessage: args.userMessage ?? args.req.message,
-    snapshotJson: JSON.stringify({ mode: "replay_mode", session_id: args.sessionId ?? "" }),
-  };
-
-  if (!args.sessionId) return fallback;
-
-  const turns = args.db
-    .prepare<TurnSlot, [string]>(
-      `SELECT id, role, content_redacted, created_at
-       FROM turns
-       WHERE session_id = ?
-       ORDER BY created_at DESC
-       LIMIT 20`,
-    )
-    .all(args.sessionId)
-    .reverse();
-
-  const memItems = args.db
-    .prepare<MemoryItemSlot, [string]>(
-      `SELECT id, content, provenance, confidence, status
-       FROM memory_items
-       WHERE session_id = ? AND status = 'active'
-       ORDER BY created_at DESC
-       LIMIT 50`,
-    )
-    .all(args.sessionId);
-
-  const latestSummary = args.db
-    .prepare<{ facts_json: string | null; open_tasks_json: string | null; created_at: string }, [string]>(
-      `SELECT facts_json, open_tasks_json, created_at
-       FROM memory_summaries
-       WHERE session_id = ?
-       ORDER BY created_at DESC
-       LIMIT 1`,
-    )
-    .get(args.sessionId);
-
-  let currentSessionSummary: string | undefined;
-  if (latestSummary) {
-    const parts: string[] = [`[요약 기준: ${latestSummary.created_at}]`];
-    if (latestSummary.facts_json) {
-      try {
-        const facts = JSON.parse(latestSummary.facts_json) as Array<{ content: string }>;
-        if (facts.length > 0) parts.push(`사실: ${facts.map((f) => f.content).join("; ")}`);
-      } catch { /* ignore malformed JSON */ }
-    }
-    if (latestSummary.open_tasks_json) {
-      try {
-        const tasks = JSON.parse(latestSummary.open_tasks_json) as Array<{ content: string }>;
-        if (tasks.length > 0) parts.push(`미결: ${tasks.map((t) => t.content).join("; ")}`);
-      } catch { /* ignore */ }
-    }
-    currentSessionSummary = parts.join("\n");
-  }
-
-  // Phase 1B.2 — Query active/eligible judgments for context injection.
-  // Skipped for summary_generation (args.skipJudgments) to prevent durable
-  // judgments from being persisted into memory_summaries as if they were
-  // conversation-derived facts.
-  // retention_state = 'normal' excludes archived/deleted rows.
-  // Scope: inject only rows whose scope_json contains "global":true. Full
-  // per-session/chat scope matching is deferred to a later sub-phase when a
-  // scope resolver is available; global-scope judgments are universally
-  // applicable and safe to inject without a resolver.
-  const activeJudgments = args.skipJudgments ? [] : queryActiveGlobalJudgmentSlots(args.db);
-
-  const snap = buildContext({
-    mode: "replay_mode",
-    user_message: args.userMessage ?? args.req.message,
-    system_identity: args.systemIdentity ?? "actwyn personal agent",
-    recent_turns: turns,
-    memory_items: memItems,
-    ...(activeJudgments.length > 0 ? { judgment_items: activeJudgments } : {}),
-    ...(currentSessionSummary ? { current_session_summary: currentSessionSummary } : {}),
-  });
-
-  try {
-    const packed = pack(snap, { total_budget_tokens: 6000 });
-    return {
-      packedMessage: args.redactor.apply(renderAsMessage(packed)).text,
-      snapshotJson: args.redactor.apply(serializeForProviderRun(packed)).text,
-    };
-  } catch (e) {
-    // HLD §10.3 rule 2: PromptOverflowError must propagate so the caller can
-    // fail the job with a user-visible error. All other packing errors fall back
-    // to bare user message to avoid blocking the queue.
-    if (e instanceof PromptOverflowError) throw e;
-    return fallback;
-  }
-}
-
-function queryActiveGlobalJudgmentSlots(db: DbHandle): JudgmentItemSlot[] {
-  return db
-    .prepare<JudgmentItemSlot, []>(
-      `SELECT id, kind, statement, authority_source, confidence
-       FROM judgment_items
-       WHERE lifecycle_status = 'active'
-         AND activation_state = 'eligible'
-         AND retention_state = 'normal'
-         AND json_extract(scope_json, '$.global') = 1
-         AND (valid_from IS NULL OR valid_from <= strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-         AND (valid_until IS NULL OR valid_until > strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-       ORDER BY importance DESC, created_at DESC
-       LIMIT 20`,
-    )
-    .all();
 }
 
 function insertProviderRunStart(args: {

@@ -89,7 +89,7 @@ Status legend:
 | `src/memory/summary.ts`           | `/summary` and `/end` summary generation; provenance + confidence per PRD §12.2.            | implemented · salvage:ADAPT (auto-promotion of fact / decision / open_task / caution → `memory_items.status='active'` re-injects via worker; Q-027) |
 | `src/memory/items.ts`             | Atomic `memory_items` rows with supersede semantics.                                        | implemented · salvage:ADAPT-light (writer invariants KEEP; insert path only gates `preference` provenance — baseline-eligibility moves to judgment layer per Q-027) |
 | `src/memory/provenance.ts`        | Provenance / confidence helpers shared by summary + items.                                  | implemented · salvage:ADAPT (`Provenance` enum KEEP; `mayPromoteToLongTerm` semantics must split — `mayPersistAsMemoryItem` / `mayBecomeBehaviorBaseline` / `mayProposeJudgment`) |
-| `src/context/compiler.ts`         | Stage 4 Context Compiler v0 — centralizes DB retrieval (turns, memory_items, memory_summaries, judgment_items) and packing for replay/resume modes. Not yet wired into worker.ts. | implemented · not runtime-wired |
+| `src/context/compiler.ts`         | Stage 4 Context Compiler v0 — centralizes DB retrieval (turns, memory_items, memory_summaries, judgment_items) and packing for replay/resume modes. Wired into worker.ts. | implemented · runtime-wired |
 | `src/context/builder.ts`          | Assembles prompt inputs (resume vs replay decision, recent turns, memory snapshot).         | implemented · salvage:REPLACE (slot taxonomy + `MemoryItemSlot.provenance` / `.status` input incompatible with `current_operating_view` / `lifecycle_status` / `activation_state` — superseded by Stage 4 Context Compiler) |
 | `src/context/packer.ts`           | Token-budget aware packer per PRD §12.5–§12.6.                                              | implemented · salvage:ADAPT (drop-by-priority + `injected_snapshot_json` shape KEEP; input type re-defined to Compiler output) |
 | `src/context/token_estimator.ts`  | CJK-safer token estimator (DEC-021).                                                        | implemented · salvage:KEEP                   |
@@ -115,7 +115,7 @@ slice:
   + `executeJudgmentExplainTool` from `src/judgment/tool.ts` imported by worker for
   these commands only. Command output not stored as turns.
 
-Pending: worker wiring for Context Compiler (salvage PR #5), Telegram write commands (propose/approve/commit).
+Pending: Telegram write commands (propose/approve/commit).
 `control_gate_events` `job_id` attribution resolved (#45, migration 006).
 Resume-mode judgment refresh resolved (#44).
 See `docs/RUNTIME.md` for the full runtime boundary description.
