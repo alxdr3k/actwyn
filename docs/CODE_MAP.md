@@ -200,6 +200,7 @@ See `docs/RUNTIME.md` for the full runtime boundary description.
 | `test/providers/*.test.ts`                        | Claude adapter, fake provider, stream-json parser, subprocess lifecycle.         |
 | `test/queue/*.test.ts`                            | Job claim atomicity, attachment capture, queue state machine.                    |
 | `test/redaction.test.ts`                          | Redaction pattern coverage (DEC-010, AC-SEC-001).                                |
+| `test/skills/*.test.ts`                           | Codex skill contract/static compatibility checks.                                |
 | `test/single-redactor.test.ts`                    | Asserts the single-redactor lint catches violations.                             |
 | `test/startup/recovery.test.ts`                   | Boot-time reconciliation behavior (AC-JOB-002).                                  |
 | `test/storage/roundtrip.test.ts`                  | Local + S3 roundtrip.                                                            |
