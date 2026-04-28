@@ -34,6 +34,43 @@ description: "전체 개발 사이클: sync -> doc audit -> implement -> verify 
 - direct push는 사용자가 명시적으로 요청한 경우에만 한다.
 - stage는 항상 의도한 파일만 명시한다.
 
+## Review / PR base 결정
+
+리뷰와 PR 생성에 사용할 base는 매번 명시적으로 계산한다.
+
+```bash
+REPO_NAME="$(basename "$(git rev-parse --show-toplevel)")"
+case "$REPO_NAME" in
+  actwyn|concluv|boilerplate|statistics-for-data-science)
+    REVIEW_BASE=main
+    ;;
+  *)
+    REVIEW_BASE="$(gh pr view --json baseRefName -q .baseRefName 2>/dev/null || true)"
+    if [ -z "$REVIEW_BASE" ]; then
+      if git show-ref --verify --quiet refs/remotes/origin/dev; then
+        REVIEW_BASE=dev
+      else
+        REVIEW_BASE="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)"
+        if [ -z "$REVIEW_BASE" ]; then
+          REVIEW_BASE="$(git remote show origin 2>/dev/null | sed -n '/HEAD branch/s/.*: //p' || true)"
+        fi
+        [ -z "$REVIEW_BASE" ] && REVIEW_BASE=main
+      fi
+    fi
+    ;;
+esac
+echo "Review base: $REVIEW_BASE"
+```
+
+판단 기준:
+
+- Direct-push 리포는 항상 `main`을 base로 사용하고, review command에도 `--base main`을 직접 쓴다.
+- 현재 브랜치에 PR이 있으면 그 PR의 base branch를 사용한다.
+- PR이 없고 `origin/dev`가 있으면 `dev`를 사용한다.
+- 둘 다 없으면 원격 default branch를 사용하고, 감지 실패 시 `main`으로 fallback한다.
+- Claude plugin 환경에서 `/codex:review` 또는 `/codex:adversarial-review`를 호출할 때는
+  계산된 base를 `--base <branch>`로 명시한다.
+
 ## Step 1 - Sync
 
 1. repo와 현재 브랜치를 확인한다.
@@ -59,14 +96,12 @@ description: "전체 개발 사이클: sync -> doc audit -> implement -> verify 
 
 읽기 순서:
 
-1. `AGENTS.md`
-2. `docs/ARCHITECTURE.md`
-3. `docs/CODE_MAP.md`
-4. `docs/TESTING.md`
-5. task/phase와 직접 관련된 `src/`, `test/`, thin docs
+1. `AGENTS.md`, `CLAUDE.md`, README, repo-local guidance 중 존재하는 파일
+2. `docs/ARCHITECTURE.md`, `docs/CODE_MAP.md`, `docs/TESTING.md` 등 얇은 핵심 문서
+3. task/phase와 직접 관련된 소스, 테스트, 문서
 
-긴 P0 설계 문서, `docs/JUDGMENT_SYSTEM.md`, `docs/design/archive/`는 기본으로 열지
-않는다. `--phase <id>`가 지정된 경우 해당 Phase 범위에 필요한 문서와 코드만 읽는다.
+긴 설계 문서, archive, generated file은 기본으로 열지 않는다. `--phase <id>`가
+지정된 경우 해당 Phase 범위에 필요한 문서와 코드만 읽는다.
 
 감사 항목:
 
@@ -107,8 +142,8 @@ description: "전체 개발 사이클: sync -> doc audit -> implement -> verify 
 - `update_plan`으로 작은 작업 단위를 만든다.
 - 기존 코드 스타일과 repo 경계를 따른다.
 - 수동 편집은 `apply_patch`를 사용한다.
-- 런타임 동작, schema, env, validation command를 바꾸면 AGENTS.md의 문서 갱신 규칙을
-  따른다.
+- 런타임 동작, schema, env, validation command를 바꾸면 repo guidance의 문서
+  갱신 규칙을 따른다.
 - `--phase <id>`가 지정된 경우 범위를 벗어난 작업은 하지 않는다.
 
 ## Step 5 - Verify
@@ -118,11 +153,12 @@ description: "전체 개발 사이클: sync -> doc audit -> implement -> verify 
 - 요구사항을 체크리스트로 재분해한다.
 - 구현/테스트/문서 누락을 찾는다.
 - 누락이 있으면 수정하고 관련 검증을 다시 실행한다.
-- 최종적으로 `docs/TESTING.md`의 pre-PR 검증 명령을 실행한다.
+- 최종적으로 repo가 정의한 full/pre-PR 검증 명령을 실행한다.
 
 ## Step 6 - Code Review Pass
 
-로컬 code-review stance로 자체 리뷰를 수행한다. 결과는 findings first로 정리한다.
+`REVIEW_BASE`를 계산한 뒤 로컬 code-review stance로 자체 리뷰를 수행한다. Direct-push
+리포에서는 `REVIEW_BASE=main`이어야 한다. 결과는 findings first로 정리한다.
 
 집중 기준:
 
@@ -133,15 +169,14 @@ description: "전체 개발 사이클: sync -> doc audit -> implement -> verify 
 
 루프 절차:
 
-1. 현재 diff를 리뷰한다.
+1. `$REVIEW_BASE...HEAD` 기준의 현재 diff를 리뷰한다.
 2. actionable finding이 있으면 수정하고 관련 테스트를 실행한다.
 3. 최대 5회 반복한다.
 4. 5회 초과 후에도 남은 항목은 GitHub issue로 남기고 Step 7로 진행한다.
 
 ## Step 7 - 로컬 테스트 & CI 검증
 
-프로젝트의 문서화된 검증 명령을 실행한다. 이 repo의 pre-PR bundle은
-`docs/TESTING.md`에 정의된 `bun run ci`다.
+프로젝트의 문서화된 검증 명령을 실행한다.
 
 일반 자동 감지 순서:
 
@@ -163,7 +198,7 @@ description: "전체 개발 사이클: sync -> doc audit -> implement -> verify 
 2. 의도한 파일만 stage한다.
 3. commit한다.
 4. push한다.
-5. GitHub app 또는 `gh pr create`로 PR을 연다.
+5. GitHub app 또는 `gh pr create --base "$REVIEW_BASE"`로 PR을 연다.
 6. review 대기가 필요하면 `codex-loop` 절차를 수행한다.
 7. 사용자가 merge까지 요청했고 checks/review가 통과하면 PR을 merge한다.
 
