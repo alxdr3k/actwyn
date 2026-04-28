@@ -317,6 +317,24 @@ describe("import boundary", () => {
 // --- prompt-overflow ---
 
 describe("prompt overflow", () => {
+  test("resume_mode with active judgments and over-budget userMessage falls back to bare message", () => {
+    // Worker behavior: overflow during optional judgment refresh falls back silently.
+    seedJudgment("재개 overflow 판단", { global: true });
+    const longMessage = "긴 재개 메시지 ".repeat(400);
+    const result = compile({
+      db,
+      sessionId: SESSION,
+      mode: "resume_mode",
+      userMessage: longMessage,
+      tokenBudget: 1,
+    });
+    // Must NOT throw; falls back to bare user message
+    expect(result.packedMessage).toBe(longMessage);
+    const snap = JSON.parse(result.injectedSnapshotJson) as { mode: string; session_id: string };
+    expect(snap.mode).toBe("resume_mode");
+    expect(snap.session_id).toBe(SESSION);
+  });
+
   test("throws PromptOverflowError when minimum slots exceed budget", () => {
     // Tiny budget forces overflow when system_identity + user_message can't fit.
     expect(() =>

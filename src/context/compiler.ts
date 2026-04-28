@@ -154,23 +154,29 @@ export function compile(input: CompileInput): CompileResult {
 
   if (mode === "resume_mode") {
     // Resume: Claude holds history; inject only fresh judgment_active + user_message.
-    if (judgments.length === 0) {
-      return {
-        packedMessage: userMessage,
-        injectedSnapshotJson: JSON.stringify({ mode, session_id: sessionId }),
-      };
-    }
+    // If no judgments exist or packing overflows, return the bare user message so the
+    // run still proceeds — judgment refresh is optional, not load-bearing.
+    const resumeFallback: CompileResult = {
+      packedMessage: userMessage,
+      injectedSnapshotJson: JSON.stringify({ mode, session_id: sessionId }),
+    };
+    if (judgments.length === 0) return resumeFallback;
     const snap = buildContext({
       mode: "resume_mode",
       user_message: userMessage,
       system_identity: systemIdentity,
       judgment_items: judgments,
     });
-    const packed = pack(snap, { total_budget_tokens: tokenBudget });
-    return {
-      packedMessage: renderAsMessage(packed),
-      injectedSnapshotJson: serializeForProviderRun(packed),
-    };
+    try {
+      const packed = pack(snap, { total_budget_tokens: tokenBudget });
+      return {
+        packedMessage: renderAsMessage(packed),
+        injectedSnapshotJson: serializeForProviderRun(packed),
+      };
+    } catch (e) {
+      if (!(e instanceof PromptOverflowError)) throw e;
+      return resumeFallback;
+    }
   }
 
   // replay_mode: full context
