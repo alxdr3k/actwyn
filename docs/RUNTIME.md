@@ -1,7 +1,7 @@
 # Runtime Flow
 
 > Status: thin current-state map · Owner: project lead ·
-> Last updated: 2026-04-28
+> Last updated: 2026-04-29
 >
 > This file describes the implemented runtime as it exists in
 > `src/`. The fuller, design-level state-machine specifications
@@ -157,166 +157,29 @@ promotes a `session` attachment to `long_term`.
 
 ## Judgment System: current state and runtime boundary
 
-Phase 1A.1–1A.8 (schema skeleton, proposal/review/source/evidence/commit/retirement
-repositories, query/explain read surfaces, typed-tool contracts, and Control Gate
-substrate) landed earlier and are described below.
+The Judgment System has local schema/repository/tool-contract
+substrate under `src/judgment/*`, but runtime access is intentionally
+limited. Provider context still uses `src/context/builder.ts` +
+`src/context/packer.ts`; the write path
+(propose → approve → link → commit) is not exposed through Telegram,
+provider tools, or background workers.
 
-**Phase 1B.1–1B.3 are now runtime-wired** (`feat(judgment): Phase 1B.1-1B.3 runtime wiring`):
-
-- **Phase 1B.1**: `src/queue/worker.ts` calls `evaluateTurn()` +
-  `recordControlGateDecision()` before non-system `provider_run` job
-  (not `summary_generation`). All turns are recorded at L0; signal
-  detection is deferred. `job_id` attribution is now implemented (migration 006, issue #45).
-- **Phase 1B.2**: `src/context/builder.ts` gains a `judgment_items`
-  slot (priority 600, between `memory_user_stated` and `recent_turns`).
-  `src/queue/worker.ts` queries `judgment_items` with filters
-  `lifecycle_status=active`, `activation_state=eligible`,
-  `retention_state=normal`, `scope_json.global=1`,
-  `valid_from ≤ now`, `valid_until > now` (or NULL) before building
-  context, and passes results to `buildContext()`. Excluded for
-  `summary_generation` to prevent contamination of `memory_summaries`.
-  Active judgments injected only in `replay_mode`; resume-mode
-  staleness tracked in issue #44.
-- **Phase 1B.3**: `/judgment` (list active) and `/judgment_explain <id>`
-  (show one judgment's detail) added to `KNOWN_COMMANDS` in
-  `src/telegram/inbound.ts` and `SYSTEM_COMMANDS` in
-  `src/queue/worker.ts`. Output is delivered via outbound notification
-  only — **not** stored as conversation turns, to prevent judgment
-  statements from flowing into context replay or summaries.
-
-Provider context still uses `src/context/builder.ts` +
-`src/context/packer.ts`. The write-path (propose → approve → link →
-commit) is not yet accessible from Telegram.
-
-### What is implemented
-
-**Phase 1A.1** — judgment schema skeleton:
-
-- `migrations/004_judgment_skeleton.sql` — 5 tables + FTS5
-  virtual table: `judgment_sources`, `judgment_items`,
-  `judgment_evidence_links`, `judgment_edges`, `judgment_events`,
-  `judgment_items_fts`.
-- `src/judgment/types.ts` — typed enumerations and interfaces.
-- `src/judgment/validators.ts` — input validators.
-
-**Phase 1A.2** — proposal-only write surface:
-
-- `src/judgment/repository.ts` (`proposeJudgment`) — writes
-  `judgment_items` and `judgment_events` in a single transaction,
-  forced to `lifecycle_status=proposed` / `approval_state=pending`
-  / `activation_state=history_only`. Appends `judgment.proposed`
-  events.
-- `src/judgment/tool.ts` (`JUDGMENT_PROPOSE_TOOL`,
-  `executeJudgmentProposeTool`) — local unregistered typed-tool
-  contract.
-
-**Phase 1A.3** — proposal review local surface:
-
-- `src/judgment/repository.ts` (`approveProposedJudgment`,
-  `rejectProposedJudgment`) — approve sets `approval_state=approved`
-  but does **not** activate (`lifecycle_status` stays `proposed`,
-  `activation_state` stays `history_only`). Reject sets
-  `approval_state=rejected` / `lifecycle_status=rejected` /
-  `activation_state=excluded`. Both write one `judgment_events`
-  row in the same transaction.
-- `src/judgment/tool.ts` (`JUDGMENT_APPROVE_TOOL`,
-  `executeJudgmentApproveTool`, `JUDGMENT_REJECT_TOOL`,
-  `executeJudgmentRejectTool`) — local unregistered typed-tool
-  contracts.
-
-**Phase 1A.4** — source recording and evidence-link local surface:
-
-- `src/judgment/repository.ts` (`recordJudgmentSource`) — inserts
-  one `judgment_sources` row and appends a
-  `judgment.source.recorded` event (`judgment_id = NULL`). Does
-  not create or mutate `judgment_items`.
-- `src/judgment/repository.ts` (`linkJudgmentEvidence`) — inserts
-  one `judgment_evidence_links` row, updates the denormalized
-  `source_ids_json` / `evidence_ids_json` arrays on
-  `judgment_items`, and appends a `judgment.evidence.linked` event.
-  **Does not activate, approve, commit, or make a judgment
-  context-visible.** Only links proposed/history_only judgments.
-- `src/judgment/tool.ts` (`JUDGMENT_RECORD_SOURCE_TOOL`,
-  `executeJudgmentRecordSourceTool`, `JUDGMENT_LINK_EVIDENCE_TOOL`,
-  `executeJudgmentLinkEvidenceTool`) — local unregistered
-  typed-tool contracts.
-
-**Phase 1A.5** — commit/activation local surface:
-
-- `src/judgment/repository.ts` (`commitApprovedJudgment`) — requires
-  `lifecycle_status=proposed`, `approval_state=approved`,
-  `activation_state=history_only`, `retention_state=normal`, and at
-  least one `judgment_evidence_links` row. Sets `lifecycle_status=active`,
-  `activation_state=eligible`, `authority_source=user_confirmed`, syncs
-  denormalized `source_ids_json` / `evidence_ids_json` from canonical
-  link rows, and appends a `judgment.committed` event — all in one
-  transaction. **Active/eligible judgment rows now exist in the DB and are
-  injected into runtime context via Phase 1B.2 context injection.**
-- `src/judgment/tool.ts` (`JUDGMENT_COMMIT_TOOL`,
-  `executeJudgmentCommitTool`) — local unregistered typed-tool
-  contract.
-
-**Phase 1A.6** — query/explain local read surfaces:
-
-- `src/judgment/repository.ts` (`queryJudgments`) — read-only local
-  query surface over `judgment_items`, optionally using the
-  `judgment_items_fts` index and optionally including compact
-  evidence/source metadata. By default it returns only
-  `lifecycle_status=active` / `activation_state=eligible` /
-  `retention_state=normal` rows unless `include_history=true`.
-- `src/judgment/repository.ts` (`explainJudgment`) — read-only local
-  audit surface for one judgment plus linked evidence, linked
-  sources, and relevant lifecycle events. Deleted rows are not
-  explainable in the current implementation.
-- `src/judgment/tool.ts` (`JUDGMENT_QUERY_TOOL`,
-  `executeJudgmentQueryTool`, `JUDGMENT_EXPLAIN_TOOL`,
-  `executeJudgmentExplainTool`) — local unregistered typed-tool
-  contracts.
-
-**Phase 1A.7** — retirement lifecycle local surfaces:
-
-- `src/judgment/repository.ts` (`supersedeJudgment`) — transitions
-  an `active/eligible/approved/normal` judgment to
-  `lifecycle_status=superseded` / `activation_state=excluded`.
-  Also updates `supersedes_json` / `superseded_by_json` arrays and
-  inserts one `judgment_edges` row (`relation=supersedes`, direction
-  replacement→old). Appends a `judgment.superseded` event.
-- `src/judgment/repository.ts` (`revokeJudgment`) — transitions an
-  `active/eligible/approved/normal` judgment to
-  `lifecycle_status=revoked` / `activation_state=excluded`. Appends
-  a `judgment.revoked` event.
-- `src/judgment/repository.ts` (`expireJudgment`) — transitions an
-  `active/eligible/approved/normal` judgment to
-  `lifecycle_status=expired` / `activation_state=excluded`.
-  Optionally sets `valid_until`. Appends a `judgment.expired` event.
-- `src/judgment/tool.ts` (`JUDGMENT_SUPERSEDE_TOOL`,
-  `executeJudgmentSupersedeTool`, `JUDGMENT_REVOKE_TOOL`,
-  `executeJudgmentRevokeTool`, `JUDGMENT_EXPIRE_TOOL`,
-  `executeJudgmentExpireTool`) — local unregistered typed-tool
-  contracts.
-
-The proposal, review, source-recording, evidence-linking, commit,
-supersede, revoke, and expire surfaces can only be exercised by
-tests or direct local code. They are **not** exposed via Telegram,
-provider dispatch, or context building. Write-path tool contracts
-(`judgment.propose`, `judgment.approve`, `judgment.reject`,
-`judgment.record_source`, `judgment.link_evidence`, `judgment.commit`,
-`judgment.supersede`, `judgment.revoke`, `judgment.expire`) are not
-registered in `src/main.ts` or any runtime module.
-
-**Runtime access summary (Phase 1B):**
+Runtime access:
 
 - `src/judgment/control_gate.ts` — imported by `src/queue/worker.ts`
-  (Phase 1B.1). `evaluateTurn` + `recordControlGateDecision` called
-  per non-system `provider_run`. **Not** imported by providers, context, memory,
-  telegram, or commands.
+  for telemetry. `evaluateTurn` + `recordControlGateDecision` run
+  before non-system `provider_run` jobs, not `summary_generation`.
+  `job_id` attribution is present in schema version 6. Signal
+  detection is still deferred; current worker telemetry records L0.
 - `src/judgment/tool.ts` — `executeJudgmentQueryTool` +
   `executeJudgmentExplainTool` imported by `src/queue/worker.ts`
-  (Phase 1B.3, for `/judgment` + `/judgment_explain` dispatch only).
-  All other executors remain unregistered.
+  for `/judgment` and `/judgment_explain <id>` only. Output is sent
+  through outbound notifications and is not stored as conversation
+  turns.
 - `src/context/builder.ts` — gains `judgment_items` slot type
-  (Phase 1B.2). The slot data is populated by `worker.ts`, not by
-  `builder.ts` directly.
+  (priority 600). `src/queue/worker.ts` populates it with
+  active/eligible/normal/global/time-valid rows in `replay_mode`;
+  it is excluded from `summary_generation`.
 - `src/providers/*`, `src/memory/*`, `src/telegram/*`,
   `src/commands/*`, and `src/main.ts` do **not** import from
   `src/judgment/`.
@@ -330,60 +193,18 @@ Schema version is **6** (migration 005 adds `control_gate_events`; migration 006
 The following are not implemented. Do not wire any of these until
 a task explicitly authorizes a further Judgment runtime slice.
 
-**Stage 2** — automatic AI extraction of candidate `JudgmentItem`
-rows from provider output: **not implemented**.
-
-**Stage 3** — Judgment Store lifecycle:
-
-- A partial persistence substrate exists: schema, FTS5 index,
-  proposal + review writers, source recording, evidence linking,
-  commit/activation, retirement lifecycle (supersede/revoke/expire),
-  local query/explain read surfaces, and
-  `judgment.proposed` / `judgment.approved` /
-  `judgment.rejected` / `judgment.source.recorded` /
-  `judgment.evidence.linked` / `judgment.committed` /
-  `judgment.superseded` / `judgment.revoked` / `judgment.expired`
-  events.
-- Partially implemented (Phase 1B): active/eligible judgment rows
-  are now injected into the provider prompt (global scope,
-  `replay_mode` only). Read surfaces (`queryJudgments`,
-  `explainJudgment`) are accessible via Telegram commands
-  `/judgment` and `/judgment_explain`. Control Gate telemetry
-  written on non-system `provider_run`.
-- Not implemented: automatic extraction, full Context Compiler,
-  Telegram write commands (propose/approve/commit). `judgment_edges`
-  has no runtime-wired reader. Resume-mode judgment refresh is
-  pending (issue #44). `control_gate_events` `job_id` attribution
-  is now implemented (migration 006, issue #45).
-
-**Stage 4** — Context Compiler: `current_operating_view`
-projection (DEC-036) and the Stage 4 Context Compiler that would
-replace `src/context/builder.ts` + `src/context/packer.ts` are
-**not implemented**.
-
-**Stage 5** — judgment-driven agent runtime: **not implemented**.
-
-**Stage 6** — feedback / reflection loop: **not implemented**.
-
-**Cross-cutting control-plane**:
-
-- Control Gate evaluators (`evaluateTurn`, `evaluateCandidate`) and
-  `control_gate_events` ledger: **implemented and runtime-wired**
-  (Phase 1B.1). `src/queue/worker.ts` calls `evaluateTurn()` +
-  `recordControlGateDecision(db, decision, job.id)` per non-system `provider_run`.
-  `job_id` attribution implemented (migration 006, issue #45).
-- Judgment context injection: **implemented and runtime-wired**
-  (Phase 1B.2). `src/queue/worker.ts` queries active/eligible/normal/global/
-  time-valid rows and injects them into `buildContext()`. Pending: resume-mode
-  refresh (issue #44).
-- Telegram read commands (`/judgment`, `/judgment_explain`): **implemented
-  and runtime-wired** (Phase 1B.3). Dispatched in `src/queue/worker.ts`.
+- Automatic extraction of candidate `JudgmentItem` rows from provider
+  output.
+- Telegram write commands (propose/approve/commit) and provider tool
+  registration for any Judgment write path.
+- Full Context Compiler / `current_operating_view`; provider context
+  still uses `builder.ts` + `packer.ts`.
+- Runtime readers for `judgment_edges`.
+- Resume-mode judgment refresh (issue #44).
 - `Tension` telemetry and the `tensions` table: **not implemented**.
 - `ReflectionTriageEvent` and `reflection_triage_events`: **not implemented**.
 - Vector and graph derived projections: **not implemented**.
 - Memory promotion integration: **not implemented**.
-- Telegram **write** commands (propose/approve/commit): **not implemented**.
-- Full Context Compiler (`current_operating_view`): **not implemented**.
 
 The 6-stage pipeline in `docs/JUDGMENT_SYSTEM.md` remains the
 architectural authority for the Judgment System direction

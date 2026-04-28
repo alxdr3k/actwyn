@@ -1,7 +1,7 @@
 # Testing
 
 > Status: thin current-state map · Owner: project lead ·
-> Last updated: 2026-04-28
+> Last updated: 2026-04-29
 >
 > This file lists verification commands (`test`, `typecheck`, `lint:redactor`,
 > `ci`). The `dev` script (`bun run dev`) is a local service runner, not a
@@ -109,74 +109,21 @@ evidence-linking, commit, query, explain, retirement lifecycle, Control
 Gate) and Phase 1B.1–1B.3 (runtime telemetry, context injection, Telegram
 read commands) tests live under:
 
-- `test/judgment/validators.test.ts` — pure-TS validator behavior
-  including `validateNonEmptyString` / `validatePlainJsonObject` /
-  `validateTrustLevel` / `validateOptionalNonEmptyString`, plus
-  query/explain helper validators for booleans, enum filters,
-  pagination, ordering, and `scope_contains` (Phase 1A.3/1A.4/1A.6).
-- `test/judgment/repository.test.ts` — `proposeJudgment` DB
-  integration: insert, defaults, validation rejections, FTS trigger,
-  transaction rollback; `approveProposedJudgment` /
-  `rejectProposedJudgment` transitions, event payloads, state guards,
-  rollback; `recordJudgmentSource` insert, defaults, trimming, event,
-  rollback; `linkJudgmentEvidence` insert, state guards (including
-  non-normal `retention_state` — archived/deleted target judgments
-  fail with `JudgmentStateError` and no side effects), trimming,
-  event, denormalized JSON array updates, rollback;
-  `commitApprovedJudgment` success (state transition, event payload,
-  evidence requirement, denormalized array sync), invalid state guards,
-  malformed denormalized array element guards (invalid element types
-  [123]/[null]/[{}]/[""] fail before update), validation rejections,
-  transaction rollback; `queryJudgments` filters, FTS query,
-  `scope_contains`, ordering, pagination, evidence metadata, and
-  read-only behavior; `explainJudgment` evidence/source/event output,
-  parsed JSON metadata, malformed persisted JSON handling, and
-  no-mutation/no-event-append assertions; `supersedeJudgment` state
-  transitions, `judgment_edges` insertion, `supersedes_json` /
-  `superseded_by_json` JSON array updates, event payloads, invalid
-  state guards (proposed/rejected/superseded/revoked/expired/archived),
-  duplicate supersede guard, rollback on event/edge failure;
-  `revokeJudgment` state transition, event payload, invalid state guards,
-  rollback; `expireJudgment` state transition, `valid_until` logic,
-  event payload, invalid state guards, rollback; and
-  query/explain integration after retirement (superseded/revoked/expired
-  rows hidden by default, visible with `include_history=true`, explain
-  includes retirement events) (Phase 1A.3/1A.4/1A.5/1A.6/1A.7).
-- `test/judgment/control_gate.test.ts` — `evaluateTurn` (L0/L1/L3),
-  `evaluateCandidate` (L0/L1/L2/L3), 6 eval fixtures from
-  `docs/JUDGMENT_SYSTEM.md §Eval fixtures`, `recordControlGateDecision`
-  persistence round-trip, and static import boundary check (Phase 1A.8).
-- `test/judgment/tool.test.ts` — `executeJudgmentProposeTool` /
-  `executeJudgmentApproveTool` / `executeJudgmentRejectTool` /
-  `executeJudgmentRecordSourceTool` /
-  `executeJudgmentLinkEvidenceTool` / `executeJudgmentCommitTool` /
-  `executeJudgmentQueryTool` / `executeJudgmentExplainTool` /
-  `executeJudgmentSupersedeTool` / `executeJudgmentRevokeTool` /
-  `executeJudgmentExpireTool`
-  contracts + static boundary assertions (no bun:* import or `Bun`
-  global use in `src/judgment/*`; write-path tools not imported by
-  runtime modules; Phase 1B.3 exception: worker is allowed to import
-  `executeJudgmentQueryTool` + `executeJudgmentExplainTool`);
-  `invalid_state` and `not_found` error paths for all lifecycle
-  executors; no-mutation/no-event-append checks for failed
-  supersede/revoke/expire calls; and `not_found` / `invalid_state`
-  coverage for `executeJudgmentSupersedeTool` no-edge-insert check
-  (Phase 1A.3/1A.4/1A.5/1A.6/1A.7).
-- `test/context/builder_judgments.test.ts` — Phase 1B.2 `judgment_active`
-  slot: priority ordering, `droppable=true`, empty-array produces no slot,
-  multi-item rendering, `skipJudgments` behavior.
-- `test/queue/control_gate_telemetry.test.ts` — Phase 1B.1: one
-  `control_gate_events` row per non-system `provider_run`; excluded for system
-  commands and `summary_generation`; L0 default for all turns;
-  ADR-0012 `direct_commit_allowed=0` invariant.
-- `test/queue/judgment_commands.test.ts` — Phase 1B.3: `/judgment` and
-  `/judgment_explain` command dispatch; output via outbound notification
-  (not turns); empty/not-found/valid responses; no `control_gate_events`
-  row for system commands.
-- `test/queue/judgment_context_injection.test.ts` — Phase 1B.2: global-scope
-  judgment in packed message; non-global/archived/temporally-invalid
-  excluded; `summary_generation` excluded; judgment command turns not
-  created.
+- `test/judgment/validators.test.ts` — pure-TS judgment validator coverage.
+- `test/judgment/repository.test.ts` — judgment repository lifecycle,
+  transaction, query/explain, and retirement coverage.
+- `test/judgment/control_gate.test.ts` — Control Gate decisions,
+  fixture coverage, persistence, and import-boundary assertions.
+- `test/judgment/tool.test.ts` — typed-tool contracts, executor
+  outcomes, and runtime import-boundary assertions.
+- `test/context/builder_judgments.test.ts` — judgment context slot
+  rendering and priority behavior.
+- `test/queue/control_gate_telemetry.test.ts` — worker telemetry writes
+  and system-command exclusions.
+- `test/queue/judgment_commands.test.ts` — `/judgment` and
+  `/judgment_explain` dispatch/output behavior.
+- `test/queue/judgment_context_injection.test.ts` — worker-side
+  active judgment query filters and packed-context injection.
 
 When you add a migration:
 
