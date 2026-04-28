@@ -8,7 +8,7 @@
 > full P0 design rationale, see `docs/PRD.md` and `docs/02_HLD.md`.
 > For the architectural authority of the DB-native AI-first
 > Judgment System direction, see `docs/JUDGMENT_SYSTEM.md` (Phase 0 /
-> 0.5 design record; Phase 1A.1–1A.8 locally implemented, not
+> 0.5 design record; Phase 1A.1–1A.8 implemented; Phase 1B.1–1B.3
 > runtime-wired). For current schema and code layout, see
 > `docs/DATA_MODEL.md` and `docs/CODE_MAP.md`.
 
@@ -23,7 +23,7 @@
 | Redaction at the persistence boundary             | implemented |
 | Memory summaries with provenance + confidence     | implemented |
 | Telegram attachment two-phase capture             | implemented |
-| DB-native AI-first Judgment System (Phase 1A+)    | Phase 1A.1–1A.8 locally implemented; **Phase 1B.1–1B.3 runtime-wired**: Control Gate telemetry on every provider_run, active judgment context injection in builder, `/judgment` + `/judgment_explain` Telegram commands |
+| DB-native AI-first Judgment System (Phase 1A+)    | Phase 1A.1–1A.8 locally implemented; **Phase 1B.1–1B.3 runtime-wired**: Control Gate telemetry on non-system provider_run, active judgment context injection in builder, `/judgment` + `/judgment_explain` Telegram commands |
 | Vector / graph derived projections                | planned     |
 | second-brain repo as canonical runtime memory     | not planned (history/seed only) |
 | Obsidian / Markdown active write path             | not planned |
@@ -86,11 +86,11 @@ least one row in `judgment_evidence_links`. On success it sets
 `authority_source=user_confirmed`, syncs the denormalized
 `source_ids_json` / `evidence_ids_json` arrays from canonical link
 rows, and appends a `judgment.committed` event — all in one
-transaction. **Active/eligible rows can now exist in the DB, but
-runtime context still does not read them: no Context Compiler, no
-provider prompt integration, no Telegram command, and no memory
-promotion path exists yet.** The commit tool is not registered
-anywhere in the runtime.
+transaction. **Active/eligible rows now exist in the DB and are
+read by `src/queue/worker.ts` for context injection (Phase 1B.2)
+and via Telegram read commands `/judgment` / `/judgment_explain`
+(Phase 1B.3).** The commit tool is not registered anywhere in the
+runtime (write-path tools remain unregistered).
 
 Phase 1A.6 has added the **query / explain local read surfaces**:
 `src/judgment/repository.ts` now also exports `queryJudgments`
@@ -100,8 +100,8 @@ and `explainJudgment`, and `src/judgment/tool.ts` now also exports
 These are local, unregistered, read-only surfaces only:
 they query or explain committed or historical judgment rows,
 but they do **not** mutate any `judgment_*` table, append
-`judgment_events`, or make judgments context-visible. Active /
-eligible rows remain outside runtime request handling.
+`judgment_events`. Active/eligible rows are now injected into
+runtime context via Phase 1B.2; see Phase 1B section below.
 
 Phase 1A.7 added the **retirement lifecycle local surfaces**:
 `src/judgment/repository.ts` now also exports `supersedeJudgment`,
@@ -122,19 +122,28 @@ now also exports `JUDGMENT_SUPERSEDE_TOOL` / `JUDGMENT_REVOKE_TOOL` /
   to `lifecycle_status=expired` / `activation_state=excluded`;
   optionally sets `valid_until`; appends one `judgment.expired` event.
 
-None of these retirement operations make judgments context-visible.
-None register tools, call LLMs, or trigger background processing.
-Runtime context still does not read any judgment rows.
+None of these retirement operations register tools, call LLMs, or
+trigger background processing. Retired (excluded) rows are filtered
+out of the Phase 1B.2 context injection query.
 
 Phase 1A.8 added the **Control Gate substrate**: `src/judgment/control_gate.ts`
 (`evaluateTurn`, `evaluateCandidate`, `recordControlGateDecision`) and
 `migrations/005_control_gate_events.sql` (append-only `control_gate_events`
 table; schema version 5). The gate evaluates TurnInput / JudgmentCandidate →
 ControlGateDecision (L0–L3); `direct_commit_allowed` is always false
-(ADR-0012 invariant). Not wired to any runtime path.
+(ADR-0012 invariant).
+**Phase 1B.1**: `src/queue/worker.ts` now imports `control_gate.ts` and calls
+`evaluateTurn()` + `recordControlGateDecision()` before non-system `provider_run`.
 
-No Context Compiler, no context/provider runtime hookup, and no
-memory-promotion path exists yet — those remain future work.
+**Phase 1B.2**: `src/context/builder.ts` gains a `judgment_items` slot;
+`src/queue/worker.ts` queries active/eligible/normal/global/time-valid
+judgments and injects them into `buildContext()` in `replay_mode`.
+
+**Phase 1B.3**: `/judgment` and `/judgment_explain` Telegram read commands
+dispatched via `src/queue/worker.ts`.
+
+Full Context Compiler, provider tool registration, memory-promotion path,
+and Telegram write commands remain future work.
 
 ## System overview
 
@@ -197,9 +206,9 @@ Detailed module / state-machine diagrams live in `docs/02_HLD.md`.
   `/var/lib/actwyn/actwyn.db` on prod).
 - **Architecture decisions** — `docs/adr/*` (ADR-0001 … ADR-0015
   accepted on `main`; ADR-0009 … ADR-0013 + ADR-0015 cover the
-  Judgment System direction; Phase 1A.1 through Phase 1A.8 are
-  implemented — full Judgment System runtime is not implemented;
-  runtime wiring remains future work).
+  Judgment System direction; Phase 1A.1–1A.8 and Phase 1B.1–1B.3
+  implemented — DEC-038 records the Phase 1B runtime wiring decision;
+  full Context Compiler and Telegram write commands remain future work).
 - **Tactical decisions and open questions** —
   `docs/08_DECISION_REGISTER.md`, `docs/07_QUESTIONS_REGISTER.md`
   (DEC-037 records the documentation lifecycle policy this set of
@@ -248,15 +257,12 @@ A short summary; the full file map lives in `docs/CODE_MAP.md`.
 - `src/judgment/*` — Phase 1A types, validators, proposal + proposal
   review + source/evidence-link + commit/activation + query/explain +
   retirement lifecycle (supersede/revoke/expire) repository surfaces,
-  and unregistered `judgment.propose` / `judgment.approve` /
-  `judgment.reject` / `judgment.record_source` /
-  `judgment.link_evidence` / `judgment.commit` /
-  `judgment.query` / `judgment.explain` /
-  `judgment.supersede` / `judgment.revoke` / `judgment.expire`
-  tool contracts. Not wired into any runtime module; see §Phase 1A
-  below.
+  and typed-tool contracts. **Phase 1B**: `control_gate.ts` imported
+  by worker (telemetry); `tool.ts` query/explain executors imported by
+  worker (Telegram commands); context builder gains `judgment_items`
+  slot. See §Phase 1A–1B below.
 
-## Phase 1A current slice and planned architecture
+## Phase 1A–1B current slice and planned architecture
 
 Phase 1A.1 landed the **judgment schema skeleton** (5 tables + FTS5
 virtual table in `migrations/004_judgment_skeleton.sql`) plus
@@ -284,7 +290,7 @@ exists only as local unregistered DB operations:
   `activation_state = excluded`.
 - Active/eligible write path exists only through local unregistered
   `commitApprovedJudgment` (Phase 1A.5). Active/eligible rows are
-  not context-visible because runtime context does not read them.
+  now injected into runtime context via Phase 1B.2.
 
 The DB-native AI-first Judgment System direction (ADR-0009 …
 ADR-0013, `docs/JUDGMENT_SYSTEM.md`) defines the following
@@ -312,9 +318,8 @@ components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4 / 1A.5 / 1A.6 / 1A.
   (`commitApprovedJudgment`). Requires approved+evidence, sets
   `lifecycle_status=active` / `activation_state=eligible` /
   `authority_source=user_confirmed`, syncs denormalized arrays,
-  appends `judgment.committed`. Active/eligible rows can now exist
-  in DB, but runtime context does not read them — no Context
-  Compiler or provider integration exists.
+  appends `judgment.committed`. Active/eligible rows exist in DB
+  and are injected into runtime context via Phase 1B.2.
 - **Query / explain read surfaces** — `src/judgment/repository.ts`
   (`queryJudgments`, `explainJudgment`). Read-only local query and
   audit/explain surfaces over judgment rows, evidence, sources, and
@@ -322,52 +327,58 @@ components. **Implemented** (Phase 1A.1 / 1A.2 / 1A.3 / 1A.4 / 1A.5 / 1A.6 / 1A.
 - **Retirement lifecycle surfaces** — `src/judgment/repository.ts`
   (`supersedeJudgment`, `revokeJudgment`, `expireJudgment`). Local
   unregistered write operations that transition `active/eligible`
-  judgments to non-active/excluded states. `supersedeJudgment` can
-  write `judgment_edges`. None make judgments context-visible.
-  Runtime context still does not read any judgment rows.
-- **Unregistered typed-tool contracts** — `src/judgment/tool.ts`
-  (`judgment.propose`, `judgment.approve`, `judgment.reject`,
-  `judgment.record_source`, `judgment.link_evidence`,
-  `judgment.commit`, `judgment.query`, `judgment.explain`,
-  `judgment.supersede`, `judgment.revoke`, `judgment.expire`).
-  Not imported from any runtime module.
+  judgments to `activation_state=excluded`. `supersedeJudgment` can
+  write `judgment_edges`. Excluded rows are filtered out of the Phase
+  1B.2 context injection query.
+- **Typed-tool contracts** — `src/judgment/tool.ts` (propose /
+  approve / reject / record_source / link_evidence / commit /
+  query / explain / supersede / revoke / expire). Write-path contracts
+  not imported from any runtime module. `executeJudgmentQueryTool` +
+  `executeJudgmentExplainTool` imported by `src/queue/worker.ts`
+  (Phase 1B.3, for Telegram read commands only).
 - **Control Gate substrate** — `src/judgment/control_gate.ts`
   (`evaluateTurn`, `evaluateCandidate`, `recordControlGateDecision`)
   and `migrations/005_control_gate_events.sql` (append-only
   `control_gate_events` table; schema version 5). Evaluates
   TurnInput / JudgmentCandidate → ControlGateDecision (L0–L3);
   `direct_commit_allowed` is always false (ADR-0012 invariant).
-  **Not wired to any runtime path** — not called from providers,
-  context, queue, memory, telegram, or commands.
+  **Phase 1B.1**: now wired — `src/queue/worker.ts` calls
+  `evaluateTurn()` + `recordControlGateDecision()` before each
+  `provider_run`. Not called from providers, context, memory, or
+  telegram modules (only from worker, for telemetry).
 
-**Not implemented** (beyond Phase 1A.8):
+**Phase 1B.1–1B.3 (implemented):**
 
-- `Tension` telemetry and the `tensions` table — **not
-  implemented**.
-- `Tension` telemetry and the `tensions` table — **not
-  implemented**.
+- **Phase 1B.1** — Control Gate telemetry wired: `src/queue/worker.ts`
+  calls `evaluateTurn()` + `recordControlGateDecision()` per non-system `provider_run`.
+- **Phase 1B.2** — Active judgment context injection: worker queries
+  active/eligible/normal/global/time-valid rows and passes them to
+  `buildContext()` as `judgment_items` slot (priority 600). Excluded
+  from `summary_generation`. Resume-mode staleness tracked in issue #44.
+- **Phase 1B.3** — Telegram read commands: `/judgment` and
+  `/judgment_explain <id>` added. Output via notification only (not turns).
+
+**Not implemented** (beyond Phase 1B.3):
+
+- `Tension` telemetry and the `tensions` table — **not implemented**.
 - `ReflectionTriageEvent` and the `reflection_triage_events` ledger
   — **not implemented**.
 - `current_operating_view` projection (DEC-036) — **not implemented**.
 - Vector and graph derived projections — **not implemented**.
 - Further typed tools (`update_current_state`) and Critique Lens
   v0.1 integration (ADR-0013) — **not implemented**.
-- Provider / context / memory-promotion runtime integration —
-  **not implemented**. The judgment tables are not read or written
-  by `src/providers/*`, `src/context/*`, `src/queue/worker.ts`,
-  `src/memory/*`, or `src/telegram/*`. None of the judgment tools
-  are wired into any of these modules.
+- Telegram write commands (propose/approve/commit) — **not implemented**.
+- Resume-mode judgment refresh (issue #44) — **not implemented**.
+- `control_gate_events` job_id attribution (issue #45) — **not implemented**.
+- Full Context Compiler (`current_operating_view`) — **not implemented**.
+- `src/providers/*`, `src/memory/*`, and `src/telegram/*` do not
+  import from `src/judgment/*`.
 
 These are listed so AI coding agents do not mistake design
-documents for implemented behavior. Phase 1A.1 through Phase 1A.8
-have landed. Local commit/activation, local query/explain, local
-retirement lifecycle (supersede/revoke/expire), and the Control Gate
-substrate (evaluators + append-only ledger) exist.
-**Runtime context integration and Context Compiler work remain future
-scope.** See `docs/RUNTIME.md` and `docs/DATA_MODEL.md` for how the
-implemented slice sits next to the runtime, and
-`docs/JUDGMENT_SYSTEM.md` §Implementation Readiness for the broader
-Phase 1A scope.
+documents for implemented behavior. Phase 1A.1–1A.8 and Phase 1B.1–1B.3
+have landed. Full Context Compiler and write-path Telegram commands
+remain future scope. See `docs/RUNTIME.md` and `docs/DATA_MODEL.md`
+for the current runtime boundary.
 
 ## Existing implementation re-classification (2026-04 salvage audit)
 

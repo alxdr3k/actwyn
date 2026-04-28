@@ -100,9 +100,10 @@ Migration shape is asserted by:
 - `src/db/migrator.ts` — refuses missing prior versions at runtime,
   records applied versions in `settings`.
 
-Judgment System proposal, review, source-recording, evidence-linking,
-commit, query, explain, retirement lifecycle, and Control Gate surface
-tests (Phase 1A.2–1A.8) live under:
+Judgment System Phase 1A.2–1A.8 (proposal, review, source-recording,
+evidence-linking, commit, query, explain, retirement lifecycle, Control
+Gate) and Phase 1B.1–1B.3 (runtime telemetry, context injection, Telegram
+read commands) tests live under:
 
 - `test/judgment/validators.test.ts` — pure-TS validator behavior
   including `validateNonEmptyString` / `validatePlainJsonObject` /
@@ -149,12 +150,29 @@ tests (Phase 1A.2–1A.8) live under:
   `executeJudgmentSupersedeTool` / `executeJudgmentRevokeTool` /
   `executeJudgmentExpireTool`
   contracts + static boundary assertions (no bun:* import or `Bun`
-  global use in `src/judgment/*`; all eleven tools not imported by
-  runtime modules); `invalid_state` and `not_found` error paths for
-  all lifecycle executors; no-mutation/no-event-append checks for
-  failed supersede/revoke/expire calls; and `not_found` / `invalid_state`
+  global use in `src/judgment/*`; write-path tools not imported by
+  runtime modules; Phase 1B.3 exception: worker is allowed to import
+  `executeJudgmentQueryTool` + `executeJudgmentExplainTool`);
+  `invalid_state` and `not_found` error paths for all lifecycle
+  executors; no-mutation/no-event-append checks for failed
+  supersede/revoke/expire calls; and `not_found` / `invalid_state`
   coverage for `executeJudgmentSupersedeTool` no-edge-insert check
   (Phase 1A.3/1A.4/1A.5/1A.6/1A.7).
+- `test/context/builder_judgments.test.ts` — Phase 1B.2 `judgment_active`
+  slot: priority ordering, `droppable=true`, empty-array produces no slot,
+  multi-item rendering, `skipJudgments` behavior.
+- `test/queue/control_gate_telemetry.test.ts` — Phase 1B.1: one
+  `control_gate_events` row per non-system `provider_run`; excluded for system
+  commands and `summary_generation`; L0 default for all turns;
+  ADR-0012 `direct_commit_allowed=0` invariant.
+- `test/queue/judgment_commands.test.ts` — Phase 1B.3: `/judgment` and
+  `/judgment_explain` command dispatch; output via outbound notification
+  (not turns); empty/not-found/valid responses; no `control_gate_events`
+  row for system commands.
+- `test/queue/judgment_context_injection.test.ts` — Phase 1B.2: global-scope
+  judgment in packed message; non-global/archived/temporally-invalid
+  excluded; `summary_generation` excluded; judgment command turns not
+  created.
 
 When you add a migration:
 

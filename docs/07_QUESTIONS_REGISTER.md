@@ -727,8 +727,13 @@ committed for a later milestone.
     unification policy unresolved.
   - 2026-04-27 Phase 1A.6 implementation: local unregistered
     `judgment.query` / `judgment.explain` read surfaces landed.
-    `memory_items` and `judgment_items` remain separate, and runtime
-    context is still not wired to judgment rows.
+    `memory_items` and `judgment_items` remain separate schemas.
+  - 2026-04-28 Phase 1B.2 implementation: runtime context is now
+    wired — `src/queue/worker.ts` queries active/eligible/normal/global
+    `judgment_items` rows and injects them into `buildContext()` as a
+    `judgment_active` slot (priority 600, below `memory_user_stated`).
+    `memory_items` and `judgment_items` remain separate schemas;
+    promotion/migration policy still unresolved (broader Q-027 scope).
 
 ### Q-028 — `JudgmentItem.kind` v1 enum 범위는 어디까지인가?
 

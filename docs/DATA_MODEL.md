@@ -213,10 +213,9 @@ eleven operations:
   `lifecycle_status=active`, `activation_state=eligible`,
   `authority_source=user_confirmed`. Syncs `source_ids_json` /
   `evidence_ids_json` to canonical arrays from `judgment_evidence_links`.
-  Appends a `judgment.committed` event. **This is a local,
-  unregistered operation. Active/eligible rows are not read by
-  runtime context — no Context Compiler or provider integration
-  exists yet.**
+  Appends a `judgment.committed` event. Active/eligible rows are
+  now injected into runtime context (Phase 1B.2). The write path
+  (`commitApprovedJudgment`) remains a local, unregistered operation.
 - **Supersede** (`supersedeJudgment`) — marks an existing
   `active/eligible/approved/normal` judgment as superseded by another
   `active/eligible/approved/normal` judgment. Sets old judgment to
@@ -257,16 +256,20 @@ The `src/judgment/tool.ts` typed-tool contracts (`judgment.propose`,
 any runtime module.
 
 Commit requires approval and at least one evidence link. After commit,
-`active/eligible` rows exist in DB but are **not** read by runtime
-context. Supersede, revoke, and expire remove judgments from the
-`active/eligible` set by setting `activation_state=excluded`; none of
-these operations make judgments context-visible. No Context Compiler
-exists yet, no provider prompt integration exists yet, and no Telegram
-command exists for any judgment tool.
+`active/eligible` rows exist in DB. **Phase 1B.2**: `src/queue/worker.ts`
+now reads active/eligible/normal/global/time-valid rows and injects them
+into the packed context for `provider_run` jobs in `replay_mode`.
+Supersede, revoke, and expire remove judgments from the `active/eligible`
+set by setting `activation_state=excluded`. No full Context Compiler
+exists yet; Telegram write commands (propose/approve/commit) are not
+implemented yet.
 
-No Control Gate or Context Compiler reads from these tables. Future
-runtime writers must route through `src/judgment/repository.ts` (or a
-successor) per the single-writer policy.
+**Phase 1B.1**: `control_gate_events` is now written on every
+**non-system** `provider_run` job by `src/queue/worker.ts` (via
+`recordControlGateDecision` from `src/judgment/control_gate.ts`). System
+commands (e.g. `/status`, `/judgment`) are dispatched before the gate
+path and produce no gate row. Future runtime writers must route through
+`src/judgment/control_gate.ts` per the single-writer policy.
 
 #### `judgment_sources`
 
@@ -366,7 +369,7 @@ reasoning.
 | `judgment_items` (approve transition) | `src/judgment/repository.ts` (`approveProposedJudgment`) — sets `approval_state=approved` only. Does not activate. |
 | `judgment_items` (reject transition)  | `src/judgment/repository.ts` (`rejectProposedJudgment`) — sets `approval_state=rejected` / `lifecycle_status=rejected` / `activation_state=excluded`. |
 | `judgment_items` (evidence arrays)    | `src/judgment/repository.ts` (`linkJudgmentEvidence`) — updates `source_ids_json` / `evidence_ids_json` denormalized arrays only. No activation. |
-| `judgment_items` (commit transition)  | `src/judgment/repository.ts` (`commitApprovedJudgment`) — sets `lifecycle_status=active` / `activation_state=eligible` / `authority_source=user_confirmed`, syncs denormalized arrays. Local unregistered. Active/eligible rows not read by runtime context. |
+| `judgment_items` (commit transition)  | `src/judgment/repository.ts` (`commitApprovedJudgment`) — sets `lifecycle_status=active` / `activation_state=eligible` / `authority_source=user_confirmed`, syncs denormalized arrays. Local unregistered write. Active/eligible rows now read by `src/queue/worker.ts` for context injection (Phase 1B.2) and Telegram read commands (Phase 1B.3). |
 | `judgment_items` (supersede transition) | `src/judgment/repository.ts` (`supersedeJudgment`) — sets `lifecycle_status=superseded` / `activation_state=excluded` on old; updates `supersedes_json` / `superseded_by_json` arrays on both. Local unregistered. |
 | `judgment_items` (revoke transition)  | `src/judgment/repository.ts` (`revokeJudgment`) — sets `lifecycle_status=revoked` / `activation_state=excluded`. Local unregistered. |
 | `judgment_items` (expire transition)  | `src/judgment/repository.ts` (`expireJudgment`) — sets `lifecycle_status=expired` / `activation_state=excluded`, optionally sets `valid_until`. Local unregistered. |
@@ -374,6 +377,7 @@ reasoning.
 | `judgment_evidence_links` (insert)    | `src/judgment/repository.ts` (`linkJudgmentEvidence`) — local unregistered writer. No runtime path. |
 | `judgment_edges` (insert)             | `src/judgment/repository.ts` (`supersedeJudgment`) — inserts one edge with `relation=supersedes` (from=replacement, to=old). Local unregistered. |
 | `judgment_events` (insert)            | `src/judgment/repository.ts` — `judgment.proposed`, `judgment.approved`, `judgment.rejected`, `judgment.source.recorded`, `judgment.evidence.linked`, `judgment.committed`, `judgment.superseded`, `judgment.revoked`, `judgment.expired` events only. |
+| `control_gate_events` (insert)        | `src/judgment/control_gate.ts` (`recordControlGateDecision`) — append-only; BEFORE UPDATE/DELETE/INSERT triggers block mutation. Runtime caller: `src/queue/worker.ts` (Phase 1B.1, non-system `provider_run` only). Pending: `job_id` attribution (#45). |
 
 Read-surface note: `src/judgment/repository.ts` also owns the local
 unregistered read-only `queryJudgments` and `explainJudgment`
@@ -397,9 +401,16 @@ to keep in mind:
   `instant_response`, and intentionally **does not** insert a
   `jobs` row (`job_id = null`). When debugging or backfilling, do
   not assume every `enqueued` update joins to a `telegram:*` job.
-- A `jobs` row with `job_type = provider_run` reaching
-  `status = succeeded` has at least one `provider_runs.status = succeeded`
-  and at least one assistant `turns` row.
+- A **conversational** `jobs` row with `job_type = provider_run`
+  reaching `status = succeeded` has at least one
+  `provider_runs.status = succeeded` and at least one assistant `turns`
+  row. **Exception (system commands)**: `provider_run` jobs whose
+  `request_json.command` matches a system command (e.g. `/status`,
+  `/judgment`, `/judgment_explain`) are dispatched before
+  `insertProviderRunStart` and produce no `provider_runs` row. Judgment
+  commands additionally skip turn storage — their output is delivered
+  via `outbound_notifications` only. Do not treat missing `provider_runs`
+  or `turns` rows as corruption for these jobs.
 - `memory_artifact_links` with `memory_summary_id != null` requires
   the linked `storage_objects` row to satisfy
   `retention_class = 'long_term' AND status = 'uploaded'`.
@@ -420,7 +431,7 @@ to keep in mind:
 - A schema change is an architecture-level event for the affected
   table. If the table is new or its semantics change, add an ADR.
 
-## Judgment System schema (Phase 1A.8 — Control Gate ledger landed; runtime not wired)
+## Judgment System schema (Phase 1B.3 — runtime wired: Control Gate telemetry, context injection, Telegram read commands)
 
 The DB-native AI-first Judgment System direction defines a separate
 schema family. Migration 004 added the five `judgment_*` tables and
@@ -444,29 +455,32 @@ Phase 1A.7 added `supersedeJudgment`, `revokeJudgment`, and
 judgments into excluded states. `supersedeJudgment` inserts one
 `judgment_edges` row with `relation=supersedes`. None of these
 retirement operations make judgments context-visible.
-The tool contracts in `src/judgment/tool.ts` (`judgment.propose`,
-`judgment.approve`, `judgment.reject`, `judgment.record_source`,
-`judgment.link_evidence`, `judgment.commit`, `judgment.query`,
-`judgment.explain`, `judgment.supersede`, `judgment.revoke`,
+The write-path tool contracts (`judgment.propose`, `judgment.approve`,
+`judgment.reject`, `judgment.record_source`, `judgment.link_evidence`,
+`judgment.commit`, `judgment.supersede`, `judgment.revoke`,
 `judgment.expire`) are not registered in any runtime module.
-Query/explain are read-only: they do not append events and do not
-make judgments context-visible. Supersede/revoke/expire are local
-write transitions only and do not make rows context-visible.
-No runtime context use, runtime extraction, Control Gate, or provider
-integration is wired. Names and constraints come from the Phase 0/0.5
-design records that landed on `main` as ADR-0009 … ADR-0013 plus
-`docs/JUDGMENT_SYSTEM.md` (per DEC-037, that spec is a historical
-architectural record, not implementation authority).
+`judgment.query` and `judgment.explain` executors are imported by
+`src/queue/worker.ts` for the `/judgment` / `/judgment_explain` Telegram
+commands (Phase 1B.3). Query/explain are read-only: they do not append
+events.
+
+**Phase 1B runtime wiring (DEC-038)**: `control_gate_events` rows written
+per non-system `provider_run` via `src/queue/worker.ts`; active/eligible/normal/global
+`judgment_items` read by worker for context injection in `replay_mode`.
+Telegram write commands, full Context Compiler, memory-promotion, and
+provider tool registration remain future work. Names and constraints come
+from ADR-0009 … ADR-0013 plus `docs/JUDGMENT_SYSTEM.md` (per DEC-037,
+historical architectural record, not implementation authority).
 
 | Table                                        | Purpose                                                              | Status (2026-04-27)                                                          |
 | -------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | `judgment_sources`                           | Source of a judgment fragment (turn, attachment, external).          | schema implemented in migration 004; local unregistered writer: `src/judgment/repository.ts` via `recordJudgmentSource` (Phase 1A.4). Not runtime-wired. |
-| `judgment_items`                             | Atomic judgment rows (the Judgment System analogue of memory_items). | schema implemented in migration 004; writer: `src/judgment/repository.ts` for propose/approve/reject (Phase 1A.2/1A.3); `linkJudgmentEvidence` updates denormalized arrays (Phase 1A.4); `commitApprovedJudgment` sets lifecycle=active/activation=eligible/authority=user_confirmed (Phase 1A.5); `queryJudgments` / `explainJudgment` read rows locally without mutation (Phase 1A.6); `supersedeJudgment` / `revokeJudgment` / `expireJudgment` set activation=excluded on retirement (Phase 1A.7). Active/eligible and retired rows exist in DB; not read by runtime context. |
+| `judgment_items`                             | Atomic judgment rows (the Judgment System analogue of memory_items). | schema implemented in migration 004; writer: `src/judgment/repository.ts` for propose/approve/reject (Phase 1A.2/1A.3); `linkJudgmentEvidence` updates denormalized arrays (Phase 1A.4); `commitApprovedJudgment` sets lifecycle=active/activation=eligible/authority=user_confirmed (Phase 1A.5); `queryJudgments` / `explainJudgment` read rows locally without mutation (Phase 1A.6); `supersedeJudgment` / `revokeJudgment` / `expireJudgment` set activation=excluded on retirement (Phase 1A.7). **Phase 1B.2**: active/eligible/normal/global rows now read by `src/queue/worker.ts` (`buildContextForRun`) for context injection. Phase 1B.3: read via `/judgment` + `/judgment_explain` Telegram commands. |
 | `judgment_evidence_links`                    | Links between judgments and supporting evidence rows.                | schema implemented in migration 004; local unregistered writer: `src/judgment/repository.ts` via `linkJudgmentEvidence` (Phase 1A.4). Not runtime-wired. |
 | `judgment_edges`                             | Typed relations between judgments (supports, contradicts, refines).  | schema implemented in migration 004; local writer: `src/judgment/repository.ts` via `supersedeJudgment` (Phase 1A.7); no runtime-wired writer. |
 | `judgment_events`                            | Append-only event log for judgment lifecycle changes.                | schema implemented in migration 004; writer: `src/judgment/repository.ts` for `judgment.proposed` / `judgment.approved` / `judgment.rejected` / `judgment.source.recorded` / `judgment.evidence.linked` / `judgment.committed` / `judgment.superseded` / `judgment.revoked` / `judgment.expired` events (Phase 1A.2/1A.3/1A.4/1A.5/1A.7). |
 | `judgment_items_fts`                         | FTS5 external-content index over `judgment_items.statement`.          | schema implemented in migration 004; sync triggers tested; populated by repository inserts. |
-| `control_gate_events` | Append-only ledger of ControlGateDecision rows (level L0–L3, phase, probes, lenses, triggers, budget_class, persist_policy). `direct_commit_allowed` is always 0 (ADR-0012 invariant enforced by CHECK). | schema implemented in migration 005; local unregistered writer: `src/judgment/control_gate.ts` via `recordControlGateDecision` (Phase 1A.8). BEFORE UPDATE / BEFORE DELETE triggers enforce append-only. Not runtime-wired. |
+| `control_gate_events` | Append-only ledger of ControlGateDecision rows (level L0–L3, phase, probes, lenses, triggers, budget_class, persist_policy). `direct_commit_allowed` is always 0 (ADR-0012 invariant enforced by CHECK). | schema implemented in migration 005; writer: `src/judgment/control_gate.ts` via `recordControlGateDecision`. BEFORE UPDATE / BEFORE DELETE triggers enforce append-only. **Phase 1B.1**: now runtime-wired — `src/queue/worker.ts` calls `recordControlGateDecision` on non-system `provider_run`. Pending: `job_id` attribution (#45). |
 | `tensions`                                   | Telemetry for unresolved tension between judgments / sources.        | **planned** (`docs/JUDGMENT_SYSTEM.md` §Critique Lens + Tension Generalization; ADR-0013). |
 | `reflection_triage_events`                   | Reflection / triage outcomes feeding back into judgments.            | **planned** (`docs/JUDGMENT_SYSTEM.md` §Metacognitive Critique Loop; ADR-0012, ADR-0013). |
 
@@ -481,14 +495,17 @@ writer for `judgment_edges`. Phase 1A.8 added `src/judgment/control_gate.ts`
 with `evaluateTurn`, `evaluateCandidate`, and `recordControlGateDecision`
 writing to `control_gate_events`. Active/eligible rows can exist in DB after
 `commitApprovedJudgment`, and query/explain can read them locally;
-retired rows (superseded/revoked/expired) also exist in DB. None of
-these rows are read by runtime context — no Context Compiler or
-provider integration exists. Query/explain do not append events.
-Supersede/revoke/expire do not make rows context-visible. The Control
-Gate evaluators and `control_gate_events` table exist but are not wired
-to any runtime path. Do not migrate `memory_summaries` /
-`memory_items` data into them — Q-027 stays open and ADR-0009 commits
-to the "분리" starting point.
+retired rows (superseded/revoked/expired) also exist in DB.
+**Phase 1B**: active/eligible/normal/global rows are now read by
+`src/queue/worker.ts` for context injection (Phase 1B.2); Telegram read
+commands `/judgment`/`/judgment_explain` access them via worker dispatch
+(Phase 1B.3); `control_gate_events` written per non-system `provider_run` (Phase 1B.1).
+Query/explain do not append events. Supersede/revoke/expire set
+`activation_state=excluded`; excluded rows are filtered from context injection.
+Full Context Compiler, write-path Telegram commands, and Tension/ReflectionTriageEvent
+remain future work. Do not migrate `memory_summaries` /
+`memory_items` data into `judgment_*` — Q-027 stays open and ADR-0009
+commits to the "분리" starting point.
 
 Q-027 (`memory_items` ↔ `judgment_items` 관계) is open. ADR-0009
 commits to "분리" as the Phase 0 starting point; the implementation

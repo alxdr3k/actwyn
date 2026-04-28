@@ -1117,6 +1117,22 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
 - Supersedes / superseded by: —
 - Refs: ADR README §Promotion rules; Q-063 (follow-up docs-structure PR).
 
+## DEC-038 — Judgment System Phase 1B.1–1B.3 Runtime Wiring
+
+- **Date**: 2026-04-28
+- **Status**: decided
+- **Decision**: Wire Phase 1A judgment surfaces into the live runtime in three incremental steps. Phase 1B.1: `evaluateTurn()` + `recordControlGateDecision()` called per non-system `provider_run` in `src/queue/worker.ts` (L0-only telemetry). Phase 1B.2: active/eligible/normal/global/time-valid `judgment_items` injected into `buildContext()` as `judgment_active` slot (priority 600) in `replay_mode`; excluded from `summary_generation`. Phase 1B.3: `/judgment` and `/judgment_explain <id>` Telegram commands dispatched in worker; output via outbound notification only (not stored as turns).
+- **Context**: Phase 1A.1–1A.8 implemented all judgment surfaces as local, unregistered modules. Phase 1B was the first runtime integration step — authorised explicitly by the operator on 2026-04-28.
+- **Key constraints preserved**:
+  - Write-path tool contracts (propose/approve/commit/…) remain unregistered in runtime.
+  - `src/providers/*`, `src/memory/*`, `src/telegram/*`, and `src/main.ts` do not import from `src/judgment/*`.
+  - Context injection scoped to `global` scope and `retention_state=normal` rows only; resume-mode staleness deferred (issue #44).
+  - Control Gate `job_id` attribution and retry idempotency deferred (issue #45).
+- **Impacted docs**: `docs/ARCHITECTURE.md`, `docs/RUNTIME.md`, `docs/CODE_MAP.md`, `docs/DATA_MODEL.md`, `docs/TESTING.md`, `AGENTS.md`, `docs/07_QUESTIONS_REGISTER.md` (Q-027).
+- **Refs**: AGENTS.md §Source of truth Phase 1B; `feat(judgment): Phase 1B.1-1B.3 runtime wiring` commit.
+
+---
+
 ### 본 PR에서 의도적으로 하지 않은 것 (DEC-037 scope clarification)
 
 다음은 후속 docs-structure PR로 분리한다 (Q-063):
