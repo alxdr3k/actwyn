@@ -3,6 +3,9 @@
 > Status: thin current-state map · Owner: project lead ·
 > Last updated: 2026-04-29
 >
+> This file is an index, not an implementation log. Replace
+> current-state summaries; do not append phase history.
+>
 > This file is a human-readable map. It is **not** authoritative.
 > The authoritative schema lives in `migrations/*.sql` and the
 > code under `src/db/` and `src/storage/`. PRD Appendix D records
