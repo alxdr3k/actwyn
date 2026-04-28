@@ -180,7 +180,9 @@ When you add a migration:
 2. Update `expected_schema_version` in `src/main.ts` (currently
    5) so `/doctor` flags drift.
 3. Update `docs/DATA_MODEL.md` and `docs/CODE_MAP.md`.
-4. Re-run `bun run ci`.
+4. Regenerate the schema doc: `bun run docs:generate:schema` and commit
+   `docs/generated/schema.md`.
+5. Re-run `bun run ci`.
 
 ## Eval fixtures
 

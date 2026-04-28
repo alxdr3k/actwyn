@@ -29,7 +29,8 @@ Status legend:
 | Path                              | Purpose                                                                 |
 | --------------------------------- | ----------------------------------------------------------------------- |
 | `src/main.ts`                     | systemd entrypoint and composition root. Wires real transports.        |
-| `package.json`                    | Bun scripts (`test`, `typecheck`, `lint:redactor`, `ci`).              |
+| `src/config.ts`                   | Typed config loader: reads env vars + `config/runtime.json`; fails fast on missing required fields. |
+| `package.json`                    | Bun scripts (`test`, `typecheck`, `lint:redactor`, `ci`, `docs:generate:schema`). |
 | `bunfig.toml`                     | Bun runtime config.                                                     |
 | `.bun-version`                    | Pinned Bun version.                                                     |
 | `tsconfig.json`                   | TypeScript compiler config (`~/*` path alias to `src/*`).               |
@@ -161,6 +162,7 @@ See `docs/RUNTIME.md` for the full runtime boundary description.
 | Path                                       | Purpose                                                                              |
 | ------------------------------------------ | ------------------------------------------------------------------------------------ |
 | `scripts/check-single-redactor.ts`         | Lint that enforces the single-redactor invariant (HLD §13.1).                        |
+| `scripts/generate-schema-doc.ts`           | Generates `docs/generated/schema.md` from migration SQL files. Run via `bun run docs:generate:schema` after any migration change. |
 
 ## Deploy
 

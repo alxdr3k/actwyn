@@ -88,11 +88,11 @@ Do not read `docs/design/archive/` by default. Those are history.
     `lifecycle_status=active` / `activation_state=eligible` /
     `authority_source=user_confirmed`. `src/judgment/tool.ts` now also
     exports `JUDGMENT_COMMIT_TOOL` / `executeJudgmentCommitTool`.
-    These are **not runtime-wired**. Active/eligible judgment rows may
-    now exist in the DB, but **runtime must not read them unless
-    explicitly tasked** — no Context Compiler, no provider prompt
-    integration, no Telegram command, and no memory-promotion path for
-    judgments exists yet.
+    These are **not runtime-wired** (write path). Active/eligible rows
+    are now read by `src/queue/worker.ts` for context injection (Phase
+    1B.2) and via `/judgment` / `/judgment_explain` Telegram commands
+    (Phase 1B.3). Full Context Compiler and write-path commands remain
+    future work.
   - **Phase 1A.6 (landed)**: `src/judgment/repository.ts` now also
     exports `queryJudgments` and `explainJudgment`, and
     `src/judgment/tool.ts` now also exports `JUDGMENT_QUERY_TOOL` /
@@ -117,16 +117,21 @@ Do not read `docs/design/archive/` by default. Those are history.
     adds the append-only `control_gate_events` table (schema version 5).
     `direct_commit_allowed` is always 0 (ADR-0012 invariant).
   - **Phase 1B.1 (landed)**: `src/queue/worker.ts` calls `evaluateTurn()`
-    and `recordControlGateDecision()` on every `provider_run` job before
-    the provider adapter is invoked. Control gate decisions are persisted
-    to `control_gate_events` as telemetry (append-only, L0 default).
-    `src/judgment/control_gate.ts` is now imported from `worker.ts`.
+    and `recordControlGateDecision()` on every **non-system**
+    `provider_run` job (system commands are dispatched before the gate
+    block and produce no gate row). Control gate decisions are persisted
+    to `control_gate_events` as telemetry (append-only, L0-only; signal
+    detection deferred). `src/judgment/control_gate.ts` is now imported
+    from `worker.ts`.
   - **Phase 1B.2 (landed)**: `src/context/builder.ts` gains a
     `judgment_items` slot (`JudgmentItemSlot[]`) at priority 600, between
     `memory_user_stated` (700) and `recent_turns` (500). `worker.ts`
-    queries `judgment_items WHERE lifecycle_status='active' AND
-    activation_state='eligible'` in `buildContextForRun` and passes the
-    result to `buildContext()`. Active judgments now appear in the packed
+    queries `judgment_items` with filters `lifecycle_status='active'`,
+    `activation_state='eligible'`, `retention_state='normal'`,
+    `json_extract(scope_json, '$.global')=1`, temporal validity
+    (`valid_from ≤ now OR NULL`, `valid_until > now OR NULL`), `LIMIT 20`
+    — in `buildContextForRun` (replay_mode only; excluded for
+    summary_generation). Active judgments now appear in the packed
     context sent to Claude.
   - **Phase 1B.3 (landed)**: `/judgment` and `/judgment_explain <id>`
     added to `SYSTEM_COMMANDS` in `worker.ts` and dispatched via

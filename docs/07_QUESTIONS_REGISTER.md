@@ -1314,31 +1314,26 @@ committed for a later milestone.
 
 ### Q-063 — docs-structure follow-up PR scope
 
-- **Status**: open.
+- **Status**: partially resolved.
 - **Owner**: project lead.
 - **Context**: DEC-037이 Implementation Documentation Lifecycle Policy를
-  commit했지만, 구체적 docs 구조 (current-state docs / `AGENTS.md` /
-  archive location)는 본 PR scope 밖으로 분리. Phase 1A 첫 implementation
-  PR 또는 별도 docs-structure PR에서 결정 필요.
-- **Required follow-up items**:
-  1. **Thin current-state docs 도입** — `docs/JUDGMENT_SYSTEM_CURRENT.md`
-     또는 동등한 위치에 implementation 시점의 동작·schema·tool contract를
-     얇게 기록. design spec과 별개로 유지.
-  2. **`AGENTS.md` 생성 또는 갱신** — 새 contributor / agent가 어디를
-     source of truth로 봐야 할지 onboarding. code = source of truth /
-     ADR = historical / current-state docs = thin behavior 명시.
-  3. **Phase 0 design specs archive location 결정** — `docs/design/`
-     vs `docs/archive/phase-0/` vs in-place 유지 + ADR README의 retired
-     marker. 후보 비교 + 결정.
-  4. **Drift detection mechanism** — design spec과 implementation이
-     drift할 때 감지 방법 (CI grep / eval fixture / manual review
-     cadence).
-- **Recommendation**: Phase 1A 첫 implementation PR 머지 후 별도
-  docs-structure PR로 처리. 본 PR scope 밖.
-- **Trigger**: Phase 1A 첫 implementation PR이 열릴 때 또는 docs
-  drift가 감지될 때.
-- **History**: 2026-04-26 (DEC-037 §scope clarification으로 follow-up
-  분리).
+  commit했고, Q-063이 요청한 docs-structure 항목들이 Phase 1A + Phase 1B
+  구현 과정에서 대부분 처리됐다.
+- **Resolved items**:
+  1. **Thin current-state docs** — `docs/ARCHITECTURE.md`, `docs/RUNTIME.md`,
+     `docs/CODE_MAP.md`, `docs/DATA_MODEL.md`, `docs/TESTING.md`가 Phase 1B
+     까지의 구현 상태를 반영 (2026-04-28, commit `a7345e9`).
+  2. **`AGENTS.md`** — 존재하고 onboarding 포인터, source-of-truth 구분,
+     Phase 1B 런타임 경계까지 업데이트됨.
+  3. **Drift detection** — doc-freshness CI (`.github/workflows/doc-freshness.yml`),
+     schema generator (`scripts/generate-schema-doc.ts`), PR 템플릿 도입
+     (commit `089f33b`, `9fc5102`).
+- **Remaining open items**:
+  - Phase 0 design specs archive location (`docs/JUDGMENT_SYSTEM.md` 이동
+    여부, `docs/design/archive/` 정리) — 아직 미결.
+- **History**:
+  - 2026-04-26: DEC-037 §scope clarification으로 follow-up 분리.
+  - 2026-04-28: Phase 1B docs sync으로 1-3항 처리됨.
 
 ### Q-064 — `mayPromoteToLongTerm` gate를 의미별로 split할까?
 
