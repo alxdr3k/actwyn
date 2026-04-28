@@ -15,3 +15,6 @@ dist/
 /artifacts/
 /transcripts/
 .DS_Store
+
+# Dev-cycle workflow control: keep user-local, not repo state
+.claude/direct-push-repos.txt
