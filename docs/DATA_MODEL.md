@@ -274,7 +274,7 @@ reasoning.
 | `jobs` (insert)                       | `src/telegram/inbound.ts` (`provider_run`); `src/commands/summary.ts` (`summary_generation`); `src/commands/save.ts`, `src/commands/forget.ts` (`storage_sync` for save / delete); `src/telegram/attachment_capture.ts` (`storage_sync` post-capture); `src/queue/worker.ts` (`storage_sync` for memory_snapshot, `notification_retry`); `src/startup/recovery.ts` (`storage_sync` recovery sweep, `notification_retry` for restart-recovery turn). `src/telegram/outbound.ts` does **not** write `jobs`. |
 | `jobs.status` (transitions)           | `src/queue/worker.ts`, `src/startup/recovery.ts`, `src/commands/cancel.ts`        |
 | `sessions`                            | `src/telegram/inbound.ts` (create), `src/memory/summary.ts` (`/end`)              |
-| `turns`                               | `src/queue/worker.ts` (provider turns + injected context turns); `src/startup/recovery.ts` (recovery assistant turn) |
+| `turns`                               | `src/queue/worker.ts` (raw user/assistant provider turns + non-Judgment system-command assistant turns); `src/startup/recovery.ts` (recovery assistant turn) |
 | `provider_runs`                       | `src/queue/worker.ts`                                                             |
 | `provider_raw_events`                 | `src/queue/worker.ts`                                                             |
 | `memory_summaries`                    | `src/memory/summary.ts`                                                           |

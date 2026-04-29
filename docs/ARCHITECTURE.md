@@ -164,14 +164,15 @@ A short summary; the full file map lives in `docs/CODE_MAP.md`.
   `notification_retry` job_type, called from the worker loop.
 - `src/providers/*` — Claude adapter, fake adapter, stream-json
   parsing, subprocess lifecycle.
-- `src/context/*` — prompt builder + packer (read-only).
+- `src/context/*` — context compiler, slot builder, and packer
+  (read-only).
 - `src/memory/*` — summary, items, provenance.
 - `src/storage/*` — local FS, S3 transport, sync handler (driven by
   `storage_sync` jobs from the worker), MIME probe.
 - `src/observability/*` — events emitter and the single redactor.
-- `src/commands/*` — `/cancel`, `/correct`, `/doctor`, `/forget`,
+- `src/commands/*` — `/cancel`, `/correct`, `/doctor`, `/forget_*`,
   `/provider`, `/save_last_attachment`, `/status`, `/summary`,
-  `/whoami`.
+  `/end`, `/whoami`.
 - `src/startup/recovery.ts` — boot-time reconciliation of stale
   `running` jobs (force `interrupted`, requeue if `safe_retry`, kill
   orphan PIDs); offset fast-forward; one-shot `storage_sync` for

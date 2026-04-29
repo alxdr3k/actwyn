@@ -33,7 +33,7 @@ Status legend:
 | --------------------------------- | ----------------------------------------------------------------------- |
 | `src/main.ts`                     | systemd entrypoint and composition root. Wires real transports.        |
 | `src/config.ts`                   | Typed config loader: reads env vars + `config/runtime.json`; fails fast on missing required fields. |
-| `package.json`                    | Bun scripts (`dev`, `test`, `typecheck`, `lint:redactor`, `lint:thin-docs`, `ci`, `docs:generate:schema`). `dev` runs `doppler run -- bun run src/main.ts`. |
+| `package.json`                    | Bun scripts (`dev`, `test`, `typecheck`, `lint:redactor`, `lint:thin-docs`, `ci`, `docs:generate:schema`, `bench:context`). `dev` runs `doppler run -- bun run src/main.ts`. |
 | `doppler.yaml`                    | Doppler project/config pin (`actwyn` / `dev`) for local development secret injection. |
 | `bunfig.toml`                     | Bun runtime config.                                                     |
 | `.bun-version`                    | Pinned Bun version.                                                     |

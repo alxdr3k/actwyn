@@ -81,7 +81,7 @@ Gate status:
 | ----- | ------- | ------------ | ------ | ----- |
 | `P0` | Single-user Telegram + Claude personal agent vertical | `P0-M5` | `landed` | Implementation is on `main`; staging acceptance and dogfood gates are not run. |
 | `JDG` | DB-native Judgment System and memory-to-judgment convergence | `JDG-1C` | `landed` | Runtime foundation is landed; automatic proposal/extraction remains future. |
-| `DOC` | Documentation source-of-truth and roadmap/status migration | `DOC-1A` | `landed` | DEC-040/Q-068 define the migration; `DOC-1A.3` closes the current docs/code consistency loop. |
+| `DOC` | Documentation source-of-truth and roadmap/status migration | `DOC-1A` | `landed` | DEC-040/Q-068 define the migration; `DOC-1A.4` closes the full-scope docs/code consistency loop. |
 | `OPS` | Deployment, staging acceptance, dogfood evidence | `OPS-1A` | `planned` | Acceptance files still show many `pending` rows because staging gates have not been executed. |
 
 ### Phases / slices
@@ -99,6 +99,7 @@ Gate status:
 | `DOC-1A.1` | Project docs | `DOC` | `DOC-1A` | Adopt roadmap/status taxonomy and create compressed current-state entrypoint | Boilerplate migration checklist | `bun run ci` | `passing` | `landed` | Q-068; DEC-040; this file; `docs/context/current-state.md`; `AGENTS.md`; `bun run ci` (2026-04-29) | Keep future roadmap/status inventory in this ledger. |
 | `DOC-1A.2` | Project docs | `DOC` | `DOC-1A` | Tighten maintenance drift workflow around roadmap/status, current-state, and acceptance gates | `DOC-1A.1`; `../boilerplate` commit `24b47f1` | `bun run ci` | `passing` | `landed` | `.codex/skills/*`; `.github/pull_request_template.md`; `.github/workflows/doc-freshness.yml`; `docs/DOCUMENTATION.md`; `bun run ci` (2026-04-29) | Keep workflow warnings aligned with docs policy when doc ownership changes. |
 | `DOC-1A.3` | Project docs | `DOC` | `DOC-1A` | Review current code against updated docs and patch consistency gaps | `DOC-1A.2`; current implementation docs | `bun run ci` | `passing` | `landed` | `.github/pull_request_template.md`; `docs/DOCUMENTATION.md`; `docs/CODE_MAP.md`; `docs/RUNTIME.md`; `bun run ci` (2026-04-29) | No remaining consistency findings from the current loop. |
+| `DOC-1A.4` | Project docs | `DOC` | `DOC-1A` | Expand consistency review to full repo docs/code/test/migration scope | `DOC-1A.3`; full repo scan | `bun run ci` | `passing` | `landed` | `docs/ARCHITECTURE.md`; `docs/CODE_MAP.md`; `docs/DATA_MODEL.md`; `docs/generated/schema.md`; `bun run docs:generate:schema`; `bun run ci` (2026-04-29) | No remaining full-scope consistency findings from the current loop. |
 
 ### Gates / acceptance
 
