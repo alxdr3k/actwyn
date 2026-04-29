@@ -13,8 +13,8 @@ Write stdout to a temp file, then move it into place; redirecting directly to
 the target path creates/truncates the file before safety checks run.
 
 Set MY_SKILL_MIGRATE_CODEX_SKILLS=1 only during a one-time migration. With that
-set, a legacy direct-edited target may be replaced by generated output, but only
-when a non-empty .codex/skill-overrides/<skill-name>.md already exists.
+set, a legacy unmarked target may be replaced by generated output. Move any
+repo-specific delta to .codex/skill-overrides/<skill-name>.md before migrating.
 EOF
 }
 
@@ -151,14 +151,18 @@ if [[ -f "$target" ]]; then
       exit 1
     fi
   elif ! cmp -s "$target" "$tmp_body"; then
-    if has_nonempty_overlay && migration_enabled; then
-      echo "Migrating legacy direct-edited skill with repo override: $target" >&2
+    if migration_enabled; then
+      if has_nonempty_overlay; then
+        echo "Migrating legacy direct-edited skill with repo override: $target" >&2
+      else
+        echo "Migrating legacy direct-edited skill without repo override: $target" >&2
+      fi
     else
       echo "Legacy direct-edited skill without generated marker: $target" >&2
       if has_nonempty_overlay; then
         echo "Review .codex/skill-overrides/$skill.md, then rerun deploy with --migrate-codex-skills." >&2
       else
-        echo "Move the repo-specific delta to .codex/skill-overrides/$skill.md before deploy." >&2
+        echo "Rerun deploy with --migrate-codex-skills after confirming there is no repo-specific delta to preserve." >&2
       fi
       exit 2
     fi
