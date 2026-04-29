@@ -147,6 +147,31 @@ When you add a migration:
    `docs/generated/schema.md`.
 5. Re-run `bun run ci`.
 
+## Performance benchmark
+
+```sh
+bun run bench:context
+bun run bench:context --iterations 200
+bun run bench:context --json
+```
+
+Runs `scripts/bench-context-compiler.ts`. Seeds a deterministic temp SQLite DB
+with 20 turns, 50 memory items, 1 summary, and 20 global judgments, then times
+the DB-read and packing phases separately. Reports p50/p95/max and compares
+against ADR-0014 P4 budgets:
+
+| Phase     | p95 budget | hard cap |
+| --------- | ---------- | -------- |
+| db_read   | 50ms       | 150ms    |
+| packing   | 50ms       | —        |
+
+Exit code 0 = all budgets met, 1 = at least one exceeded. The benchmark is
+**not** part of `bun run ci` — run it manually before Judgment System work or
+when context latency regressions are suspected.
+
+Benchmark tests live in `test/context/bench_context_compiler.test.ts` and run
+under `bun test`.
+
 ## Eval fixtures
 
 No eval-harness command currently defined. Stream-json parser

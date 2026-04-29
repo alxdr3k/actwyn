@@ -174,6 +174,7 @@ See `docs/RUNTIME.md` for the full runtime boundary description.
 | `scripts/check-thin-docs.ts`               | Lint that enforces thin current-state doc line budgets and role notes.               |
 | `scripts/backup-sqlite.ts`                 | WAL-safe local SQLite snapshot helper; uses `bun:sqlite` serialization + integrity check. |
 | `scripts/generate-schema-doc.ts`           | Generates `docs/generated/schema.md` from migration SQL files. Run via `bun run docs:generate:schema` after any migration change. |
+| `scripts/bench-context-compiler.ts`        | ADR-0014 P4 performance benchmark for Context Compiler DB-read and packing phases. Run via `bun run bench:context [--iterations N] [--json]`. |
 
 ## Deploy
 

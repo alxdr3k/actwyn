@@ -14,7 +14,8 @@
     "lint:redactor": "bun run scripts/check-single-redactor.ts",
     "lint:thin-docs": "bun run scripts/check-thin-docs.ts",
     "ci": "bun run lint:redactor && bun run lint:thin-docs && bun run typecheck && bun test",
-    "docs:generate:schema": "bun run scripts/generate-schema-doc.ts"
+    "docs:generate:schema": "bun run scripts/generate-schema-doc.ts",
+    "bench:context": "bun run scripts/bench-context-compiler.ts"
   },
   "devDependencies": {
     "@types/bun": "^1.3.12",

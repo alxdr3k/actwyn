@@ -1,7 +1,7 @@
-// Context Compiler v0 — Stage 4 (not yet wired into worker.ts).
+// Context Compiler v0 — Stage 4.
 //
-// Centralizes read-only DB retrieval and packing that currently
-// lives in worker.ts buildContextForRun / resume-mode judgment refresh.
+// Centralizes read-only DB retrieval and packing for worker.ts
+// buildContextForRun and resume-mode judgment refresh.
 // The compiler is pure aside from DB reads; callers apply redaction.
 //
 // replay_mode: fetches turns + memory_items + latest summary + global
