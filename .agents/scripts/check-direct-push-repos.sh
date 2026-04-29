@@ -3,9 +3,28 @@
 
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-source_file="$repo_root/direct-push-repos.txt"
-helper="$repo_root/scripts/dev-cycle-helper.sh"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+source_file=""
+for candidate in "$script_dir/direct-push-repos.txt" "$script_dir/../direct-push-repos.txt"; do
+  if [[ -f "$candidate" ]]; then
+    source_file="$candidate"
+    break
+  fi
+done
+
+helper=""
+for candidate in "$script_dir/dev-cycle-helper.sh" "$script_dir/../scripts/dev-cycle-helper.sh"; do
+  if [[ -x "$candidate" ]]; then
+    helper="$candidate"
+    break
+  fi
+done
+
+if [[ -z "$source_file" || -z "$helper" ]]; then
+  echo "Missing direct-push helper files" >&2
+  exit 1
+fi
 
 expected_list() {
   sed 's/^[[:space:]]*//; s/[[:space:]]*$//; /^[[:space:]]*$/d; /^#/d' "$source_file" | sort
