@@ -78,7 +78,17 @@ import {
 } from "~/telegram/outbound.ts";
 import { retryNotificationFromLedger } from "~/queue/notification_retry.ts";
 import { evaluateTurn, recordControlGateDecision } from "~/judgment/control_gate.ts";
-import { executeJudgmentExplainTool, executeJudgmentQueryTool } from "~/judgment/tool.ts";
+import {
+  executeJudgmentApproveTool,
+  executeJudgmentCommitTool,
+  executeJudgmentExplainTool,
+  executeJudgmentLinkEvidenceTool,
+  executeJudgmentProposeTool,
+  executeJudgmentQueryTool,
+  executeJudgmentRecordSourceTool,
+  executeJudgmentRejectTool,
+} from "~/judgment/tool.ts";
+import { JUDGMENT_KINDS } from "~/judgment/types.ts";
 
 export interface WorkerConfig {
   readonly capture: CaptureConfig;
@@ -1283,9 +1293,16 @@ const SYSTEM_COMMANDS = new Set([
   "/forget_artifact",
   "/forget_memory",
   "/correct",
-  // Phase 1B.3 — Judgment System commands
+  // Phase 1B.3 — Judgment System read commands
   "/judgment",
   "/judgment_explain",
+  // Phase 1B.4 — Judgment System write commands
+  "/judgment_propose",
+  "/judgment_approve",
+  "/judgment_reject",
+  "/judgment_source",
+  "/judgment_link",
+  "/judgment_commit",
 ]);
 
 function isSystemCommand(cmd: string): boolean {
@@ -1326,7 +1343,16 @@ async function runSystemCommandJob(
   // Review Medium 11: the redaction_applied flag must reflect whether the
   // stored `content_redacted` was actually rewritten by the redactor, not a
   // hard-coded zero.
-  const JUDGMENT_COMMANDS_NO_TURN = new Set(["/judgment", "/judgment_explain"]);
+  const JUDGMENT_COMMANDS_NO_TURN = new Set([
+    "/judgment",
+    "/judgment_explain",
+    "/judgment_propose",
+    "/judgment_approve",
+    "/judgment_reject",
+    "/judgment_source",
+    "/judgment_link",
+    "/judgment_commit",
+  ]);
   let turnId: string | null = null;
   if (job.session_id && responseText.length > 0 && !JUDGMENT_COMMANDS_NO_TURN.has(command)) {
     turnId = deps.newId();
@@ -1440,6 +1466,12 @@ async function dispatchSystemCommand(
         "/correct <id> <새 내용> — 메모리 정정",
         "/judgment — 활성 판단(judgment) 목록",
         "/judgment_explain <id> — 특정 판단 상세 조회",
+        "/judgment_propose <statement> — 새 판단 제안 (kind=decision, kind:<type> <statement> 형식으로 kind 지정 가능)",
+        "/judgment_approve <id> [reason] — 제안된 판단 승인",
+        "/judgment_reject <id> <reason> — 제안된 판단 거부",
+        "/judgment_source <kind> <locator> — 소스 기록",
+        "/judgment_link <judgment_id> <source_id> <relation> — 증거 연결",
+        "/judgment_commit <id> [reason] — 승인된 판단 활성화",
       ].join("\n");
     }
 
@@ -1679,6 +1711,117 @@ async function dispatchSystemCommand(
         `근원: ${j.judgment.epistemic_origin} / 권위: ${j.judgment.authority_source}`,
         `소스 ${sourceCount}건 · 증거링크 ${evidenceCount}건 · 이벤트 ${eventCount}건`,
       ].join("\n");
+    }
+
+    // Phase 1B.4 — Judgment System write commands
+    case "/judgment_propose": {
+      const raw = args.trim();
+      if (!raw) return "사용법: /judgment_propose <statement>  또는  /judgment_propose kind:<kind> <statement>";
+      // Optional kind prefix: `kind:<value>` (unambiguous sigil).
+      let kind = "decision";
+      let statement = raw;
+      const kindPrefix = raw.match(/^kind:(\S+)\s+(.+)$/s);
+      if (kindPrefix) {
+        kind = kindPrefix[1]!;
+        statement = kindPrefix[2]!.trim();
+      }
+      const result = executeJudgmentProposeTool(deps.db, {
+        kind,
+        statement,
+        epistemic_origin: "user_stated",
+        confidence: "medium",
+        scope: { global: true },
+        importance: 3,
+      }, { actor: job.user_id ?? "user" });
+      if (!result.ok) return `제안 실패: ${result.error.message}`;
+      return `제안됨: [${result.judgment.id.slice(0, 8)}] (${result.judgment.kind}) ${result.judgment.statement}`;
+    }
+
+    case "/judgment_approve": {
+      const parts = args.trim().split(/\s+/);
+      const judgmentId = parts[0];
+      if (!judgmentId) return "사용법: /judgment_approve <judgment_id> [reason]";
+      const reason = parts.slice(1).join(" ").trim() || undefined;
+      const result = executeJudgmentApproveTool(deps.db, {
+        judgment_id: judgmentId,
+        reviewer: job.user_id ?? "user",
+        ...(reason ? { reason } : {}),
+      }, { nowIso: () => deps.now().toISOString() });
+      if (!result.ok) {
+        return result.error.code === "not_found"
+          ? `판단(${judgmentId})을 찾을 수 없습니다.`
+          : `승인 실패: ${result.error.message}`;
+      }
+      return `승인됨: [${result.judgment.id.slice(0, 8)}] (${result.judgment.approval_state})`;
+    }
+
+    case "/judgment_reject": {
+      const parts = args.trim().split(/\s+/);
+      const judgmentId = parts[0];
+      if (!judgmentId) return "사용법: /judgment_reject <judgment_id> <reason>";
+      const reason = parts.slice(1).join(" ").trim();
+      if (!reason) return "사용법: /judgment_reject <judgment_id> <reason>";
+      const result = executeJudgmentRejectTool(deps.db, {
+        judgment_id: judgmentId,
+        reviewer: job.user_id ?? "user",
+        reason,
+      }, { nowIso: () => deps.now().toISOString() });
+      if (!result.ok) {
+        return result.error.code === "not_found"
+          ? `판단(${judgmentId})을 찾을 수 없습니다.`
+          : `거부 실패: ${result.error.message}`;
+      }
+      return `거부됨: [${result.judgment.id.slice(0, 8)}] (${result.judgment.approval_state})`;
+    }
+
+    case "/judgment_source": {
+      const parts = args.trim().split(/\s+/);
+      const sourceKind = parts[0];
+      if (!sourceKind) return "사용법: /judgment_source <kind> <locator>";
+      const locator = parts.slice(1).join(" ").trim();
+      if (!locator) return "사용법: /judgment_source <kind> <locator>";
+      const result = executeJudgmentRecordSourceTool(deps.db, { kind: sourceKind, locator }, { actor: job.user_id ?? "user" });
+      if (!result.ok) return `소스 기록 실패: ${result.error.message}`;
+      return `소스 기록됨: [${result.source.id.slice(0, 8)}] (${result.source.kind}) ${result.source.locator}`;
+    }
+
+    case "/judgment_link": {
+      const parts = args.trim().split(/\s+/);
+      const judgmentId = parts[0];
+      const sourceId = parts[1];
+      const relation = parts[2];
+      if (!judgmentId || !sourceId || !relation) {
+        return "사용법: /judgment_link <judgment_id> <source_id> <relation>";
+      }
+      const result = executeJudgmentLinkEvidenceTool(deps.db, {
+        judgment_id: judgmentId,
+        source_id: sourceId,
+        relation,
+      }, { actor: job.user_id ?? "user" });
+      if (!result.ok) {
+        return result.error.code === "not_found"
+          ? `판단(${judgmentId}) 또는 소스(${sourceId})를 찾을 수 없습니다.`
+          : `증거 연결 실패: ${result.error.message}`;
+      }
+      return `증거 연결됨: [${result.evidence_link.id.slice(0, 8)}] ${result.evidence_link.judgment_id.slice(0, 8)} ← ${result.evidence_link.source_id.slice(0, 8)} (${result.evidence_link.relation})`;
+    }
+
+    case "/judgment_commit": {
+      const parts = args.trim().split(/\s+/);
+      const judgmentId = parts[0];
+      if (!judgmentId) return "사용법: /judgment_commit <judgment_id> [reason]";
+      const reason = parts.slice(1).join(" ").trim() || "user_confirmed";
+      const result = executeJudgmentCommitTool(deps.db, {
+        judgment_id: judgmentId,
+        committer: job.user_id ?? "user",
+        reason,
+      }, { nowIso: () => deps.now().toISOString() });
+      if (!result.ok) {
+        return result.error.code === "not_found"
+          ? `판단(${judgmentId})을 찾을 수 없습니다.`
+          : `커밋 실패: ${result.error.message}`;
+      }
+      return `커밋됨: [${result.judgment.id.slice(0, 8)}] (${result.judgment.lifecycle_status}/${result.judgment.activation_state})`;
     }
 
     default:

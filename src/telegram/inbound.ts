@@ -167,9 +167,16 @@ const KNOWN_COMMANDS = new Set<string>([
   "/forget_artifact",
   "/forget_memory",
   "/correct",
-  // Phase 1B.3 — Judgment System commands
+  // Phase 1B.3 — Judgment System read commands
   "/judgment",
   "/judgment_explain",
+  // Phase 1B.4 — Judgment System write commands
+  "/judgment_propose",
+  "/judgment_approve",
+  "/judgment_reject",
+  "/judgment_source",
+  "/judgment_link",
+  "/judgment_commit",
 ]);
 
 function parseCommand(text: string): { command: string; args: string } | { unknown: string } | null {

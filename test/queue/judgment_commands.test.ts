@@ -167,3 +167,223 @@ describe("Phase 1B.3 — /judgment_explain command", () => {
     expect(text).toContain("active");
   });
 });
+
+describe("Phase 1B.4 — /judgment_propose command", () => {
+  test("/judgment_propose with no args returns usage hint", async () => {
+    seedCommandJob("j-jp-noarg", "k-jp-noarg", "/judgment_propose", "");
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    expect(lastSentText()).toContain("사용법");
+  });
+
+  test("/judgment_propose creates a proposed judgment with default kind=decision", async () => {
+    seedCommandJob("j-jp-ok", "k-jp-ok", "/judgment_propose", "SQLite WAL 모드를 항상 활성화한다");
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    const text = lastSentText();
+    expect(text).toContain("제안됨");
+    expect(text).toContain("decision");
+  });
+
+  test("/judgment_propose with kind: prefix creates judgment with that kind", async () => {
+    seedCommandJob("j-jp-kind", "k-jp-kind", "/judgment_propose", "kind:preference 코드 리뷰를 PR 제출 전에 실행한다");
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    const text = lastSentText();
+    expect(text).toContain("제안됨");
+    expect(text).toContain("preference");
+  });
+
+  test("/judgment_propose does NOT store a turn", async () => {
+    seedCommandJob("j-jp-turn", "k-jp-turn", "/judgment_propose", "테스트 판단");
+    await runWorkerOnce(deps());
+    const turns = db.prepare<{ c: number }, []>("SELECT COUNT(*) AS c FROM turns").get()!.c;
+    expect(turns).toBe(0);
+  });
+
+  test("/judgment_propose does NOT insert a control_gate_events row", async () => {
+    seedCommandJob("j-jp-cg", "k-jp-cg", "/judgment_propose", "테스트 판단");
+    await runWorkerOnce(deps());
+    const cgCount = db.prepare<{ c: number }, []>("SELECT COUNT(*) AS c FROM control_gate_events").get()!.c;
+    expect(cgCount).toBe(0);
+  });
+});
+
+describe("Phase 1B.4 — /judgment_approve and /judgment_reject commands", () => {
+  test("/judgment_approve with no id returns usage hint", async () => {
+    seedCommandJob("j-ja-noarg", "k-ja-noarg", "/judgment_approve", "");
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    expect(lastSentText()).toContain("사용법");
+  });
+
+  test("/judgment_approve with unknown id returns not-found", async () => {
+    seedCommandJob("j-ja-unknown", "k-ja-unknown", "/judgment_approve", "nonexistent-id");
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    expect(lastSentText()).toContain("찾을 수 없습니다");
+  });
+
+  test("/judgment_approve approves a proposed judgment", async () => {
+    const proposed = proposeJudgment(db, {
+      kind: "decision",
+      statement: "TypeScript strict mode를 활성화한다",
+      epistemic_origin: "user_stated",
+      confidence: "high",
+      scope: { global: true },
+    }, { newId: () => "jdg-approve-1" });
+    seedCommandJob("j-ja-ok", "k-ja-ok", "/judgment_approve", proposed.id);
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    const text = lastSentText();
+    expect(text).toContain("승인됨");
+    expect(text).toContain("approved");
+  });
+
+  test("/judgment_reject with no reason returns usage hint", async () => {
+    seedCommandJob("j-jr-noarg", "k-jr-noarg", "/judgment_reject", "some-id");
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    expect(lastSentText()).toContain("사용법");
+  });
+
+  test("/judgment_reject rejects a proposed judgment", async () => {
+    const proposed = proposeJudgment(db, {
+      kind: "decision",
+      statement: "거부될 판단",
+      epistemic_origin: "user_stated",
+      confidence: "low",
+      scope: { global: true },
+    }, { newId: () => "jdg-reject-1" });
+    seedCommandJob("j-jr-ok", "k-jr-ok", "/judgment_reject", `${proposed.id} 근거 부족`);
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    const text = lastSentText();
+    expect(text).toContain("거부됨");
+    expect(text).toContain("rejected");
+  });
+
+  test("/judgment_approve does NOT store a turn", async () => {
+    const proposed = proposeJudgment(db, {
+      kind: "decision",
+      statement: "테스트용 판단",
+      epistemic_origin: "user_stated",
+      confidence: "high",
+      scope: { global: true },
+    }, { newId: () => "jdg-turn-test" });
+    seedCommandJob("j-ja-turn", "k-ja-turn", "/judgment_approve", proposed.id);
+    await runWorkerOnce(deps());
+    const turns = db.prepare<{ c: number }, []>("SELECT COUNT(*) AS c FROM turns").get()!.c;
+    expect(turns).toBe(0);
+  });
+});
+
+describe("Phase 1B.4 — /judgment_source and /judgment_link commands", () => {
+  test("/judgment_source with no args returns usage hint", async () => {
+    seedCommandJob("j-js-noarg", "k-js-noarg", "/judgment_source", "");
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    expect(lastSentText()).toContain("사용법");
+  });
+
+  test("/judgment_source records a source", async () => {
+    seedCommandJob("j-js-ok", "k-js-ok", "/judgment_source", "user_statement https://example.com/doc");
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    const text = lastSentText();
+    expect(text).toContain("소스 기록됨");
+    expect(text).toContain("user_statement");
+  });
+
+  test("/judgment_link with missing args returns usage hint", async () => {
+    seedCommandJob("j-jl-noarg", "k-jl-noarg", "/judgment_link", "jdg-id src-id");
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    expect(lastSentText()).toContain("사용법");
+  });
+
+  test("/judgment_link links evidence to a judgment", async () => {
+    const proposed = proposeJudgment(db, {
+      kind: "decision",
+      statement: "증거 연결 테스트 판단",
+      epistemic_origin: "user_stated",
+      confidence: "high",
+      scope: { global: true },
+    }, { newId: () => "jdg-link-1" });
+    approveProposedJudgment(db, { judgment_id: proposed.id, reviewer: "user-1" });
+    const src = recordJudgmentSource(db, { kind: "user_statement", locator: "test:evidence" }, { newSourceId: () => "src-link-1" });
+    seedCommandJob("j-jl-ok", "k-jl-ok", "/judgment_link", `${proposed.id} ${src.id} supports`);
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    const text = lastSentText();
+    expect(text).toContain("증거 연결됨");
+    expect(text).toContain("supports");
+  });
+});
+
+describe("Phase 1B.4 — /judgment_commit command", () => {
+  test("/judgment_commit with no id returns usage hint", async () => {
+    seedCommandJob("j-jc-noarg", "k-jc-noarg", "/judgment_commit", "");
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    expect(lastSentText()).toContain("사용법");
+  });
+
+  test("/judgment_commit with unknown id returns not-found", async () => {
+    seedCommandJob("j-jc-unknown", "k-jc-unknown", "/judgment_commit", "nonexistent-id");
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    expect(lastSentText()).toContain("찾을 수 없습니다");
+  });
+
+  test("/judgment_commit commits an approved evidence-linked judgment to active/eligible", async () => {
+    const proposed = proposeJudgment(db, {
+      kind: "decision",
+      statement: "커밋 테스트 판단",
+      epistemic_origin: "user_stated",
+      confidence: "high",
+      scope: { global: true },
+    }, { newId: () => "jdg-commit-1" });
+    approveProposedJudgment(db, { judgment_id: proposed.id, reviewer: "user-1" });
+    const src = recordJudgmentSource(db, { kind: "user_statement", locator: "test:commit" });
+    linkJudgmentEvidence(db, { judgment_id: proposed.id, source_id: src.id, relation: "supports" });
+    seedCommandJob("j-jc-ok", "k-jc-ok", "/judgment_commit", proposed.id);
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    const text = lastSentText();
+    expect(text).toContain("커밋됨");
+    expect(text).toContain("active");
+    expect(text).toContain("eligible");
+  });
+
+  test("/judgment_commit does NOT store a turn", async () => {
+    const proposed = proposeJudgment(db, {
+      kind: "decision",
+      statement: "턴 미저장 테스트",
+      epistemic_origin: "user_stated",
+      confidence: "high",
+      scope: { global: true },
+    }, { newId: () => "jdg-noturn" });
+    approveProposedJudgment(db, { judgment_id: proposed.id, reviewer: "user-1" });
+    const src = recordJudgmentSource(db, { kind: "user_statement", locator: "test:noturn" });
+    linkJudgmentEvidence(db, { judgment_id: proposed.id, source_id: src.id, relation: "supports" });
+    seedCommandJob("j-jc-turn", "k-jc-turn", "/judgment_commit", proposed.id);
+    await runWorkerOnce(deps());
+    const turns = db.prepare<{ c: number }, []>("SELECT COUNT(*) AS c FROM turns").get()!.c;
+    expect(turns).toBe(0);
+  });
+
+  test("/judgment_commit fails on not-yet-approved judgment", async () => {
+    const proposed = proposeJudgment(db, {
+      kind: "decision",
+      statement: "미승인 판단 커밋 시도",
+      epistemic_origin: "user_stated",
+      confidence: "high",
+      scope: { global: true },
+    }, { newId: () => "jdg-nonapproved" });
+    seedCommandJob("j-jc-fail", "k-jc-fail", "/judgment_commit", proposed.id);
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    expect(lastSentText()).toContain("커밋 실패");
+  });
+});
