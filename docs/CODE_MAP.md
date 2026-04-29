@@ -121,8 +121,8 @@ slice:
   `judgment_items`; no source/evidence link, approval, commit, or activation.
 - **Phase 1C.2b**: summary notifications include proposal counts, short IDs, and review command hints.
 
-Pending: provider-output extraction/proposal, provider tool registration, and
-`current_operating_view`. See `docs/RUNTIME.md`.
+DEC-041 excludes freeform provider-output extraction as an MVP automatic proposal
+source. Pending: explicit post-run analyzer, provider tools, `current_operating_view`.
 
 ## Judgment
 

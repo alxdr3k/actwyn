@@ -88,6 +88,7 @@ deployment shape). Everything else is a `DEC-###`.
 | DEC-038 | Judgment System Phase 1B.1–1B.3 Runtime Wiring (2026-04-28)   | accepted |
 | DEC-039 | MVP memory-to-judgment convergence implementation posture      | accepted |
 | DEC-040 | Roadmap/status taxonomy and ledger ownership                   | accepted |
+| DEC-041 | Provider-output Judgment extraction boundary for MVP           | accepted |
 
 Decisions that were previously `D01`..`D05` in the flat log have
 been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
@@ -1242,6 +1243,50 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
 - Supersedes / superseded by: refines DEC-037.
 - Refs: Q-068; `../boilerplate/docs/04_IMPLEMENTATION_PLAN.md`;
   `../boilerplate/docs/DOCUMENTATION.md`.
+
+## DEC-041 — Provider-output Judgment extraction boundary for MVP
+
+- Date: 2026-04-29
+- Status: accepted
+- Context: `JDG-1C.2a` and `JDG-1C.2b` landed the structured
+  `summary_generation` bridge: summary output can create proposal-only
+  `judgment_items` and surface review hints. The remaining question for
+  `JDG-1C.2c` is whether ordinary conversational provider output should also
+  be parsed into Judgment proposals. ADR-0005 keeps Claude tools disabled in
+  P0, and ADR-0017 requires behavior-changing baselines to pass through the
+  Judgment proposal/review/evidence/commit boundary.
+- Decision: For MVP, ordinary `provider_run` output is **not** an automatic
+  Judgment proposal source. Do not parse conversational final text, stream-json
+  text chunks, or assistant replies into `judgment_items`. The only automatic
+  proposal source currently authorized is the structured `summary_generation`
+  output bridge. Provider-output proposal may be revisited only as a separate,
+  explicit post-run analyzer leaf that runs under the advisory/lockdown
+  provider profile, reads persisted run/turn evidence, emits proposal-only
+  rows with source anchors and operator-visible review hints, and never
+  approves, links evidence, commits, activates, or registers Judgment provider
+  tools.
+- Alternatives considered:
+  - Parse every assistant answer opportunistically after `provider_run`.
+  - Add prompt markup to make the conversational provider append a Judgment
+    extraction block.
+  - Register Judgment write tools with Claude so the provider can propose
+    directly during a conversation.
+  - Keep provider-output proposal out of MVP and rely on summary output plus
+    Telegram Judgment commands.
+- Impacted docs: `docs/04_IMPLEMENTATION_PLAN.md`;
+  `docs/context/current-state.md`; `docs/ARCHITECTURE.md`;
+  `docs/CODE_MAP.md`; `docs/RUNTIME.md`; `AGENTS.md`.
+- Risks / mitigations: Useful provider-derived candidates may not be captured
+  immediately; mitigate through summary-generation proposals and explicit
+  Telegram Judgment commands. Freeform parsing could create false durable
+  baselines or couple runtime behavior to assistant prose; mitigate by
+  requiring any future provider-output proposal path to be a scoped analyzer
+  with persisted evidence anchors and review-visible output.
+- Review trigger: a future task explicitly requests provider-output Judgment
+  proposals, Claude tool registration is reconsidered, or summary-based
+  proposals prove insufficient during dogfood.
+- Supersedes / superseded by: —
+- Refs: `JDG-1C.2c`; ADR-0005; ADR-0017; DEC-039; Q-027.
 
 ---
 

@@ -21,8 +21,8 @@ the acceptance plan is executed on a configured host.
 - Active tracks: `OPS` (acceptance/dogfood) and `JDG` (future Judgment
   convergence slices when explicitly authorized).
 - Current ready OPS leaf: `OPS-1A.1` acceptance environment inventory.
-- Current ready feature leaf, if feature work is selected instead of
-  acceptance work: `JDG-1C.2c` provider-output extraction boundary.
+- Current ready feature leaf: none. `JDG-1C.2c` landed DEC-041; any
+  provider-output proposal work needs a new explicit leaf.
 - Latest docs slice: `DOC-1A.5` top-down leaf roadmap expansion landed.
 - Last local validation: `bun run ci` passed on 2026-04-29 for the
   `JDG-1C.2b` summary proposal visibility update.
@@ -52,7 +52,8 @@ the acceptance plan is executed on a configured host.
 ## Planned / deferred
 
 - P0 acceptance/staging execution and dogfood evidence collection.
-- Provider-output Judgment extraction/proposal boundary decision.
+- Freeform provider-output Judgment extraction is excluded for MVP by
+  DEC-041. A future post-run analyzer needs a new explicit leaf.
 - Provider tool registration for Judgment tools, only after explicit
   authorization.
 - `current_operating_view` and compiler input sourced from it.

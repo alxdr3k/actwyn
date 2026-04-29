@@ -222,34 +222,33 @@ Runtime access:
 
 Schema version is **6**: migrations 005–006 add `control_gate_events`, `job_id`, and the migration-006 preflight guard.
 
-ADR-0017 / DEC-039 runtime slices are implemented: memory persistence
-and Judgment proposal gates are split; summary output stays in
-`memory_summaries`, creates proposal-only Judgments, and never creates
-active `memory_items`; summary notifications surface proposal review
-hints; active/eligible judgments outrank memory recall.
+ADR-0017 / DEC-039 runtime slices are implemented: memory/Judgment
+proposal gates are split; summary output stays in `memory_summaries`,
+creates proposal-only Judgments, never creates active `memory_items`,
+surfaces review hints, and ranks active/eligible judgments above memory.
+
+DEC-041 sets the provider-output boundary: ordinary `provider_run`
+text is not parsed into Judgment proposals. Any future path must be a
+post-run analyzer with evidence anchors, review hints, proposal-only
+writes, and no provider tool registration.
 
 ### What is not implemented
 
 Do not wire any of these until explicitly authorized:
 
-- Provider-output extraction of candidate `JudgmentItem` rows.
+- Freeform provider-output extraction of candidate `JudgmentItem` rows.
 - Automatic approval/evidence-link/commit/activation of summary proposals.
 - Provider tool registration for any Judgment write path.
-- `current_operating_view` and `current_operating_view`-sourced Compiler input
-  (`compiler.ts` is wired; `builder.ts` remains active slot helper until Q-066).
-- Destructive migration or physical merge of existing `memory_items`
-  into `judgment_items`.
+- `current_operating_view`-sourced Compiler input (`builder.ts` remains until Q-066).
+- Destructive migration or physical merge of `memory_items` into `judgment_items`.
 - Runtime readers for `judgment_edges`.
-- `Tension` telemetry and the `tensions` table: **not implemented**.
-- `ReflectionTriageEvent` and `reflection_triage_events`: **not implemented**.
+- `Tension` and `ReflectionTriageEvent` telemetry/tables: **not implemented**.
 - Vector and graph derived projections: **not implemented**.
 
-The 6-stage pipeline in `docs/JUDGMENT_SYSTEM.md` remains the
-architectural authority for the Judgment System direction
-(ADR-0009 … ADR-0013, DEC-037). Until a task explicitly
-authorizes a further Judgment runtime slice, do not wire these
-surfaces into provider tools, background workers, or additional
-runtime paths.
+The 6-stage pipeline in `docs/JUDGMENT_SYSTEM.md` remains the architectural
+authority for the Judgment System direction (ADR-0009 … ADR-0013, DEC-037).
+Until a task explicitly authorizes another Judgment runtime slice, do not wire
+these surfaces into provider tools, background workers, or additional paths.
 
 ## Failure / debug path (current)
 
