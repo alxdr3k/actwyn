@@ -81,8 +81,8 @@ Gate status:
 | ----- | ------- | ------------ | ------ | ----- |
 | `P0` | Single-user Telegram + Claude personal agent vertical | `P0-M5` | `landed` | Implementation is on `main`; staging acceptance and dogfood gates are not run. |
 | `JDG` | DB-native Judgment System and memory-to-judgment convergence | `JDG-1C` | `landed` | Runtime foundation is landed; automatic proposal/extraction remains future. |
-| `DOC` | Documentation source-of-truth and roadmap/status migration | `DOC-1A` | `landed` | DEC-040/Q-068 define the migration; `DOC-1A.4` closes the full-scope docs/code consistency loop. |
-| `OPS` | Deployment, staging acceptance, dogfood evidence | `OPS-1A` | `planned` | Acceptance files still show many `pending` rows because staging gates have not been executed. |
+| `DOC` | Documentation source-of-truth and roadmap/status migration | `DOC-1A` | `landed` | DEC-040/Q-068 define the migration; `DOC-1A.5` adds the top-down leaf roadmap. |
+| `OPS` | Deployment, staging acceptance, dogfood evidence | `OPS-1A` | `ready` | First leaf is `OPS-1A.1`; acceptance files still show many `pending` rows because staging gates have not been executed. |
 
 ### Phases / slices
 
@@ -92,7 +92,7 @@ Gate status:
 | `JDG-1A` | `MVP-JDG` | `JDG` | `JDG-1A` | Local Judgment schema/repository/tool/control-gate substrate | ADR-0009..ADR-0015 | `bun run ci` | `passing` | `landed` | `migrations/004_*`, `005_*`, `006_*`; `src/judgment/*`; `test/judgment/*`; `test/db/*judgment*` | Provider registration intentionally out of scope. |
 | `JDG-1B` | `MVP-JDG` | `JDG` | `JDG-1B` | Runtime Judgment reachability through telemetry, context injection, and Telegram commands | `JDG-1A` | `bun run ci` | `passing` | `landed` | `src/queue/worker.ts`; `test/queue/judgment_*`; DEC-038 | Keep provider tools unregistered until explicitly authorized. |
 | `JDG-1C.1` | `MVP-JDG` | `JDG` | `JDG-1C` | First ADR-0017 convergence slice: split memory gates, stop summary active-memory promotion, make judgments outrank memory recall | ADR-0017, DEC-039 | `bun run ci` | `passing` | `landed` | `src/memory/provenance.ts`; `src/memory/summary.ts`; `src/context/*`; Q-027; Q-064 | Continue with extraction/proposal only when explicitly scoped. |
-| `JDG-1C.2` | `MVP-JDG` | `JDG` | `JDG-1C` | Automatic Judgment extraction/proposal from provider or summary output | `JDG-1C.1` | New tests + docs update | `defined` | `planned` | ADR-0017; Q-027 | Needs explicit task authorization. |
+| `JDG-1C.2` | `MVP-JDG` | `JDG` | `JDG-1C` | Automatic Judgment extraction/proposal from provider or summary output | `JDG-1C.1` | New tests + docs update | `defined` | `planned` | ADR-0017; Q-027 | Use `JDG-1C.2a` for the summary-output leaf; provider-output extraction waits on `JDG-1C.2c`. |
 | `JDG-1C.3` | `MVP-JDG` | `JDG` | `JDG-1C` | Provider tool registration for Judgment write path | `JDG-1B`, provider safety review | New provider/tool tests | `defined` | `deferred` | ADR-0009..ADR-0013; `docs/RUNTIME.md` not-implemented list | Do not implement without explicit authorization. |
 | `JDG-2A` | Future | `JDG` | `JDG-2A` | `current_operating_view` and compiler input sourced from it | `JDG-1C` | New compiler/context tests | `defined` | `planned` | ADR-0013; DEC-036; `docs/RUNTIME.md` | Future runtime slice. |
 | `JDG-3A` | Future | `JDG` | `JDG-3A` | Vector / graph derived projections | Evidence that FTS/metadata retrieval is insufficient | TBD | `defined` | `planned` | ADR-0009; `docs/ARCHITECTURE.md` | Keep as derived projection, not source of truth. |
@@ -100,6 +100,140 @@ Gate status:
 | `DOC-1A.2` | Project docs | `DOC` | `DOC-1A` | Tighten maintenance drift workflow around roadmap/status, current-state, and acceptance gates | `DOC-1A.1`; `../boilerplate` commit `24b47f1` | `bun run ci` | `passing` | `landed` | `.codex/skills/*`; `.github/pull_request_template.md`; `.github/workflows/doc-freshness.yml`; `docs/DOCUMENTATION.md`; `bun run ci` (2026-04-29) | Keep workflow warnings aligned with docs policy when doc ownership changes. |
 | `DOC-1A.3` | Project docs | `DOC` | `DOC-1A` | Review current code against updated docs and patch consistency gaps | `DOC-1A.2`; current implementation docs | `bun run ci` | `passing` | `landed` | `.github/pull_request_template.md`; `docs/DOCUMENTATION.md`; `docs/CODE_MAP.md`; `docs/RUNTIME.md`; `bun run ci` (2026-04-29) | No remaining consistency findings from the current loop. |
 | `DOC-1A.4` | Project docs | `DOC` | `DOC-1A` | Expand consistency review to full repo docs/code/test/migration scope | `DOC-1A.3`; full repo scan | `bun run ci` | `passing` | `landed` | `docs/ARCHITECTURE.md`; `docs/CODE_MAP.md`; `docs/DATA_MODEL.md`; `docs/generated/schema.md`; `bun run docs:generate:schema`; `bun run ci` (2026-04-29) | No remaining full-scope consistency findings from the current loop. |
+| `DOC-1A.5` | Project docs | `DOC` | `DOC-1A` | Expand the roadmap from planning/design docs into a top-down leaf inventory | `DOC-1A.4`; PRD/HLD/acceptance/traceability docs | `bun run ci` | `passing` | `landed` | this file; `docs/context/current-state.md`; `bun run ci` (2026-04-29) | Use the leaf rows below as the dev-cycle discovery surface. |
+
+### Full leaf roadmap
+
+The table above is the compact roadmap/status view. The rows below are
+the executable leaf inventory derived from the PRD, HLD, playbook, risk
+spikes, acceptance tests, traceability matrix, ADRs, Q register, DEC
+register, and current code/tests. Some existing slice IDs appear in
+both places when the compact row was already leaf-sized. A broad parent
+row is not considered "ready to code" unless its next step points at
+one of these leaf rows or a new leaf row is added first.
+
+For implementation rows, `passing` means the current local automated
+gate (`bun run ci`) covers the shipped code. P0 acceptance and staging
+evidence remain separate OPS leaves until the real environment gate is
+executed.
+
+#### P0 Runtime Implementation Leaves
+
+| Leaf | Milestone | Phase | Goal | Gate | Gate status | Status | Evidence | Next |
+| ---- | --------- | ----- | ---- | ---- | ----------- | ------ | -------- | ---- |
+| `P0-1A.1` | `P0-M1` | Phase 1 | Typed config loader and runtime config validation | `bun run ci` | `passing` | `landed` | `src/config.ts`; `test/config.test.ts`; PRD Appendix F | Maintain with env/runtime changes. |
+| `P0-1A.2` | `P0-M1` | Phase 1 | Single redactor boundary and redaction lint | `bun run ci` | `passing` | `landed` | `src/observability/redact.ts`; `scripts/check-single-redactor.ts`; `test/redaction.test.ts`; `test/single-redactor.test.ts`; DEC-002/010 | Add patterns only in the redactor module. |
+| `P0-1A.3` | `P0-M1` | Phase 1 | Structured event emitter with correlation payloads | `bun run ci` | `passing` | `landed` | `src/observability/events.ts`; `test/events.test.ts`; HLD §13.3 | Keep logs redacted at boundaries. |
+| `P0-2A.1` | `P0-M1` | Phase 2 | SQLite handle, WAL pragmas, migrator, base schema | `bun run ci` | `passing` | `landed` | `src/db.ts`; `src/db/migrator.ts`; `migrations/001_init.sql`; `test/db/schema.test.ts`; `test/db/invariants.test.ts` | Schema changes require a new contiguous migration. |
+| `P0-2A.2` | `P0-M4` | Phase 2 | Artifact and memory-artifact schema | `bun run ci` | `passing` | `landed` | `migrations/002_artifacts.sql`; `docs/DATA_MODEL.md`; `test/db/schema.test.ts` | Keep storage rows single-writer. |
+| `P0-2A.3` | `P0-M1` | Phase 2 | Notification payload schema extension | `bun run ci` | `passing` | `landed` | `migrations/003_notification_payload_text.sql`; `test/db/schema.test.ts` | No current follow-up. |
+| `P0-3A.1` | `P0-M1` | Phase 3 | Telegram long-poll offset ledger | `bun run ci` | `passing` | `landed` | `src/telegram/poller.ts`; `test/telegram/poller.test.ts`; `test/telegram/offset_durability.test.ts`; ADR-0002/0008 | Staging offset crash drills live in `OPS-1A.5a`. |
+| `P0-3A.2` | `P0-M1` | Phase 3 | Inbound classification, authorization, command/job enqueue | `bun run ci` | `passing` | `landed` | `src/telegram/inbound.ts`; `test/telegram/inbound.test.ts`; AC-TEL-001, AC-TEL-003, AC-TEL-004 | Keep command registry aligned with worker dispatch. |
+| `P0-3A.3` | `P0-M4` | Phase 3 | Attachment metadata phase, no network I/O in inbound txn | `bun run ci` | `passing` | `landed` | `src/telegram/attachment_metadata.ts`; `test/telegram/attachment_metadata.test.ts`; AC-STO-003a | Staging byte-capture proof lives in `OPS-1A.5d`. |
+| `P0-4A.1` | `P0-M1` | Phase 4 | Atomic job claim and queue state machine | `bun run ci` | `passing` | `landed` | `src/queue/worker.ts`; `test/queue/claim.test.ts`; `test/queue/state_machine.test.ts`; DEC-001 | Acceptance restart proof lives in `OPS-1A.5a`. |
+| `P0-4A.2` | `P0-M1` | Phase 4 | Deterministic fake provider for walking skeleton/tests | `bun run ci` | `passing` | `landed` | `src/providers/fake.ts`; `test/providers/fake.test.ts` | Keep fake behavior deterministic. |
+| `P0-4A.3` | `P0-M4` | Phase 4 | Attachment byte capture phase and MIME/hash fields | `bun run ci` | `passing` | `landed` | `src/telegram/attachment_capture.ts`; `src/storage/mime.ts`; `test/queue/attachment_capture.test.ts`; AC-STO-003b | Reinforcement staging test lives in `OPS-1A.5d`. |
+| `P0-5A.1` | `P0-M1` | Phase 5 | Outbound notification parent + chunk ledger | `bun run ci` | `passing` | `landed` | `src/telegram/outbound.ts`; `test/notifications/chunk_ledger.test.ts`; `test/notifications/splitting.test.ts`; DEC-020 | Acceptance chunk failure proof lives in `OPS-1A.5c`. |
+| `P0-5A.2` | `P0-M1` | Phase 5 | Notification retry independent from provider/job terminal state | `bun run ci` | `passing` | `landed` | `src/queue/notification_retry.ts`; `test/notifications/retry_driver.test.ts`; AC-NOTIF-001, AC-NOTIF-003, AC-NOTIF-005 | No code follow-up. |
+| `P0-5A.3` | `P0-M1` | Phase 5 | Worker notification creation/sending wiring | `bun run ci` | `passing` | `landed` | `src/queue/worker.ts`; `test/notifications/worker_wiring.test.ts`; AC-TEL-002 | Staging Telegram delivery proof lives in `OPS-1A.5a`. |
+| `P0-6A.1` | `P0-M1` | Phase 6 | Walking Skeleton staging report with fake provider | Walking Skeleton gate | `not_run` | `planned` | `docs/04_IMPLEMENTATION_PLAN.md` Phase 6; playbook §5.5 | Run alongside `OPS-1A.5a`, `OPS-1A.5c`, and `OPS-1A.5d` before marking `P0-M1` accepted. |
+| `P0-7A.1` | `P0-M2` | Phase 7 | Claude provider adapter and command builder | `bun run ci` | `passing` | `landed` | `src/providers/claude.ts`; `test/providers/claude.test.ts`; ADR-0005/0007 | Provider smoke lives in `OPS-1A.5b`. |
+| `P0-7A.2` | `P0-M2` | Phase 7 | Stream-json parser and final-text normalization | `bun run ci` | `passing` | `landed` | `src/providers/stream_json.ts`; `test/providers/parser.test.ts`; AC-PROV-005 | Re-run fixtures on Claude CLI bumps. |
+| `P0-7A.3` | `P0-M2` | Phase 7 | Subprocess lifecycle, abort, timeout, process-group teardown | `bun run ci` | `passing` | `landed` | `src/providers/subprocess.ts`; `test/providers/subprocess.test.ts`; AC-PROV-002, AC-PROV-004, AC-PROV-006 | Runtime kill drills live in `OPS-1A.5b`. |
+| `P0-8A.1` | `P0-M3` | Phase 8 | Context compiler, builder, packer, token estimator | `bun run ci` | `passing` | `landed` | `src/context/*`; `test/context/*`; DEC-021; Q-066 | `src/context/builder.ts` cleanup remains open under Q-066. |
+| `P0-8A.2` | `P0-M3` | Phase 8 | Summary generation and memory summary persistence | `bun run ci` | `passing` | `landed` | `src/memory/summary.ts`; `test/memory/summary.test.ts`; AC-MEM-001, AC-MEM-002, AC-MEM-005, AC-MEM-006 | Judgment proposal follow-up is `JDG-1C.2a`. |
+| `P0-8A.3` | `P0-M3` | Phase 8 | Memory item writer, provenance gates, correction supersede | `bun run ci` | `passing` | `landed` | `src/memory/items.ts`; `src/memory/provenance.ts`; `test/memory/correction.test.ts`; `test/memory/provenance.test.ts`; AC-MEM-004 | Behavioral baseline authority stays in `JDG`. |
+| `P0-9A.1` | `P0-M4` | Phase 9 | Local artifact object helpers and key generation | `bun run ci` | `passing` | `landed` | `src/storage/local.ts`; `src/storage/objects.ts`; `test/storage/state_machine.test.ts`; AC-SEC-002 | No code follow-up. |
+| `P0-9A.2` | `P0-M4` | Phase 9 | S3 transport, storage sync, retry states | `bun run ci` | `passing` | `landed` | `src/storage/s3.ts`; `src/storage/sync.ts`; `test/storage/roundtrip.test.ts`; `test/storage/state_machine.test.ts`; ADR-0004 | S3 smoke lives in `OPS-1A.6`. |
+| `P0-9A.3` | `P0-M4` | Phase 9 | Local/S3 capacity policy and long-term write gate | `bun run ci` | `passing` | `landed` | `src/storage/capacity.ts`; `test/storage/capacity.test.ts`; DEC-018 | Monitor during dogfood. |
+| `P0-10A.1` | `P0-M5` | Phase 10 | Core system commands: status, cancel, summary/end, provider, whoami | `bun run ci` | `passing` | `landed` | `src/commands/status.ts`; `src/commands/cancel.ts`; `src/commands/summary.ts`; `src/commands/provider.ts`; `src/commands/whoami.ts`; `test/commands/basic.test.ts`; AC-OBS-003 | Staging command proof lives in `OPS-1A.5e`. |
+| `P0-10A.2` | `P0-M5` | Phase 10 | `/doctor` checks and typed output | `bun run ci` | `passing` | `landed` | `src/commands/doctor.ts`; `test/commands/doctor.test.ts`; AC-OBS-001, AC-OPS-002 | Deep smoke lives in `OPS-1A.6`. |
+| `P0-10A.3` | `P0-M5` | Phase 10 | Save, forget, and correct command surfaces | `bun run ci` | `passing` | `landed` | `src/commands/save.ts`; `src/commands/forget.ts`; `src/commands/correct.ts`; `test/commands/save.test.ts`; `test/commands/forget.test.ts`; `test/commands/correct.test.ts`; AC-MEM-003, AC-MEM-004, AC-STO-004, AC-STO-005 | Staging destructive-flow proof lives in `OPS-1A.5d`. |
+| `P0-10A.4` | `P0-M5` | Phase 10 | Startup recovery and stale job reconciliation | `bun run ci` | `passing` | `landed` | `src/startup/recovery.ts`; `test/startup/recovery.test.ts`; AC-JOB-002 | Crash/restart acceptance lives in `OPS-1A.5a`. |
+| `P0-10A.5` | `P0-M5` | Phase 10 | WAL-safe local DB backup helper | `bun run ci` | `passing` | `landed` | `scripts/backup-sqlite.ts`; `test/db/backup_sqlite.test.ts`; AC-OPS-004 | Exercise on staging before P0 accepted. |
+| `P0-11A.1` | `P0-M5` | Phase 11 | systemd unit, installer, deployment docs, operations docs | `bun run ci` | `passing` | `landed` | `deploy/install.sh`; `deploy/systemd/*`; `docs/05_RUNBOOK.md`; `docs/OPERATIONS.md`; playbook §10 | Fresh-host proof lives in `OPS-1A.2`/`OPS-1A.6`. |
+
+#### P0 Acceptance And Operations Leaves
+
+| Leaf | Milestone | Phase | Goal | Gate | Gate status | Status | Evidence | Next |
+| ---- | --------- | ----- | ---- | ---- | ----------- | ------ | -------- | ---- |
+| `OPS-1A.1` | `P0-M5` | `OPS-1A` | Prepare acceptance environment inventory | Manual checklist | `defined` | `ready` | `docs/06_ACCEPTANCE_TESTS.md` §Test environment; `docs/05_RUNBOOK.md` | Record host, bot, authorized/unauthorized accounts, Claude, S3 bucket, and env source. |
+| `OPS-1A.2` | `P0-M5` | `OPS-1A` | Fresh deploy or staging deploy rehearsal | Deploy gate | `not_run` | `planned` | `deploy/install.sh`; `deploy/systemd/actwyn.service`; playbook §5.8 | Run install/restart/reboot path. |
+| `OPS-1A.3a` | `P0-M5` | `OPS-1A` | Write full plans for inbound/outbound ledger backlog | Acceptance plan completeness | `not_run` | `planned` | `docs/06_ACCEPTANCE_TESTS.md` §Phase-gate escalation | AC-TEL-005, AC-TEL-006, AC-TEL-007, AC-TEL-008, AC-TEL-009, AC-NOTIF-001, AC-NOTIF-002, AC-NOTIF-003, AC-NOTIF-004, AC-NOTIF-005, AC-OPS-003, TEST-NOTIF-CHUNK-001. |
+| `OPS-1A.3b` | `P0-M5` | `OPS-1A` | Write full plans for attachment/storage reinforcement backlog | Acceptance plan completeness | `not_run` | `planned` | `docs/06_ACCEPTANCE_TESTS.md` §Phase-gate escalation | TEST-TEL-ATTACH-001 and TEST-STO-STATE-001. |
+| `OPS-1A.3c` | `P0-M5` | `OPS-1A` | Write full plans for Claude/provider/security backlog | Acceptance plan completeness | `not_run` | `planned` | `docs/06_ACCEPTANCE_TESTS.md` §Phase-gate escalation | AC-PROV-007, AC-PROV-008, AC-PROV-010, AC-PROV-011, AC-PROV-012, AC-PROV-013, AC-SEC-003, AC-SEC-004, AC-SEC-005, AC-SEC-006, AC-SEC-007, TEST-PROV-RESUME-001. |
+| `OPS-1A.3d` | `P0-M5` | `OPS-1A` | Write full plans for summary/advisory output backlog | Acceptance plan completeness | `not_run` | `planned` | `docs/06_ACCEPTANCE_TESTS.md` §Phase-gate escalation | AC-PROV-014 and AC-MEM-006. |
+| `OPS-1A.3e` | `P0-M5` | `OPS-1A` | Write full plans for operate-and-polish backlog | Acceptance plan completeness | `not_run` | `planned` | `docs/06_ACCEPTANCE_TESTS.md` §Phase-gate escalation | AC-OPS-002, AC-OPS-004, AC-PROV-009, AC-SEC-ATTACH-001. |
+| `OPS-1A.4` | `P0-M5` | `OPS-1A` | Run or explicitly supersede risk spikes SP-01..SP-08 | Risk Spike gate | `not_run` | `planned` | `docs/03_RISK_SPIKES.md`; playbook §5.3 | Promote each spike from `pending` to `passed` or add a DEC explaining supersession by landed tests. |
+| `OPS-1A.5a` | `P0-M5` | `OPS-1A` | Execute Telegram and job acceptance criteria | P0 Acceptance gate | `not_run` | `planned` | `docs/06_ACCEPTANCE_TESTS.md`; `docs/09_TRACEABILITY_MATRIX.md` | AC-TEL-001, AC-TEL-002, AC-TEL-003, AC-TEL-004, AC-TEL-005, AC-TEL-006, AC-TEL-007, AC-TEL-008, AC-TEL-009, AC-JOB-001, AC-JOB-002, AC-JOB-003. |
+| `OPS-1A.5b` | `P0-M5` | `OPS-1A` | Execute provider and security acceptance criteria | P0 Acceptance gate | `not_run` | `planned` | `docs/06_ACCEPTANCE_TESTS.md`; `docs/09_TRACEABILITY_MATRIX.md` | AC-PROV-001, AC-PROV-002, AC-PROV-003, AC-PROV-004, AC-PROV-005, AC-PROV-006, AC-PROV-007, AC-PROV-008, AC-PROV-009, AC-PROV-010, AC-PROV-011, AC-PROV-012, AC-PROV-013, AC-PROV-014, AC-SEC-001, AC-SEC-002, AC-SEC-003, AC-SEC-004, AC-SEC-005, AC-SEC-006, AC-SEC-007, AC-SEC-ATTACH-001. |
+| `OPS-1A.5c` | `P0-M5` | `OPS-1A` | Execute notification acceptance criteria | P0 Acceptance gate | `not_run` | `planned` | `docs/06_ACCEPTANCE_TESTS.md`; `docs/09_TRACEABILITY_MATRIX.md` | AC-NOTIF-001, AC-NOTIF-002, AC-NOTIF-003, AC-NOTIF-004, AC-NOTIF-005, TEST-NOTIF-CHUNK-001. |
+| `OPS-1A.5d` | `P0-M5` | `OPS-1A` | Execute memory and storage acceptance criteria | P0 Acceptance gate | `not_run` | `planned` | `docs/06_ACCEPTANCE_TESTS.md`; `docs/09_TRACEABILITY_MATRIX.md` | AC-MEM-001, AC-MEM-002, AC-MEM-003, AC-MEM-004, AC-MEM-005, AC-MEM-006, AC-STO-001, AC-STO-002, AC-STO-003a, AC-STO-003b, AC-STO-004, AC-STO-005, AC-STO-006, TEST-TEL-ATTACH-001, TEST-STO-STATE-001. |
+| `OPS-1A.5e` | `P0-M5` | `OPS-1A` | Execute observability and operations acceptance criteria | P0 Acceptance gate | `not_run` | `planned` | `docs/06_ACCEPTANCE_TESTS.md`; `docs/09_TRACEABILITY_MATRIX.md` | AC-OBS-001, AC-OBS-002, AC-OBS-003, AC-OPS-001, AC-OPS-002, AC-OPS-003, AC-OPS-004. |
+| `OPS-1A.6` | `P0-M5` | `OPS-1A` | Run `/doctor` quick/deep, S3 smoke, backup, reboot recovery | Deploy gate | `not_run` | `planned` | `docs/05_RUNBOOK.md`; `docs/OPERATIONS.md`; AC-OBS-001, AC-OPS-004 | Attach output summaries to the acceptance log. |
+| `OPS-1A.7` | `P0-M5` | `OPS-1A` | Seven-day dogfood evidence collection | DEC-013 dogfood gate | `not_run` | `planned` | DEC-013; playbook §14 | Track incidents, redaction checks, recovery, and operator notes. |
+| `OPS-1A.8` | `P0-M5` | `OPS-1A` | Acceptance closeout and P0 accepted declaration | P0 Acceptance gate | `not_run` | `planned` | `docs/06_ACCEPTANCE_TESTS.md`; `docs/08_DECISION_REGISTER.md` | Mark milestones accepted only after all required gates pass or are waived. |
+
+#### Judgment Leaves
+
+| Leaf | Milestone | Phase | Goal | Gate | Gate status | Status | Evidence | Next |
+| ---- | --------- | ----- | ---- | ---- | ----------- | ------ | -------- | ---- |
+| `JDG-1A.1` | `MVP-JDG` | `JDG-1A` | Judgment schema skeleton and FTS5 table | `bun run ci` | `passing` | `landed` | `migrations/004_judgment_skeleton.sql`; `test/db/judgment_schema.test.ts`; ADR-0009..0013 | No schema change without migration. |
+| `JDG-1A.2` | `MVP-JDG` | `JDG-1A` | Proposal repository and unregistered `judgment.propose` contract | `bun run ci` | `passing` | `landed` | `src/judgment/repository.ts`; `src/judgment/tool.ts`; `test/judgment/repository.test.ts`; `test/judgment/tool.test.ts` | Runtime command wiring tracked in `JDG-1B.4`. |
+| `JDG-1A.3` | `MVP-JDG` | `JDG-1A` | Approve/reject local review surface | `bun run ci` | `passing` | `landed` | `src/judgment/repository.ts`; `src/judgment/tool.ts`; `test/judgment/repository.test.ts` | Approval still does not activate. |
+| `JDG-1A.4` | `MVP-JDG` | `JDG-1A` | Source recording and evidence linking | `bun run ci` | `passing` | `landed` | `src/judgment/repository.ts`; `src/judgment/tool.ts`; `test/judgment/repository.test.ts` | Evidence linking still does not activate. |
+| `JDG-1A.5` | `MVP-JDG` | `JDG-1A` | Commit approved/evidence-linked judgment as active/eligible | `bun run ci` | `passing` | `landed` | `src/judgment/repository.ts`; `src/judgment/tool.ts`; `test/judgment/repository.test.ts` | Context visibility handled by `JDG-1B.2`. |
+| `JDG-1A.6` | `MVP-JDG` | `JDG-1A` | Query and explain read-only judgment surfaces | `bun run ci` | `passing` | `landed` | `src/judgment/repository.ts`; `src/judgment/tool.ts`; `test/judgment/tool.test.ts` | Telegram read commands tracked in `JDG-1B.3`. |
+| `JDG-1A.7` | `MVP-JDG` | `JDG-1A` | Supersede, revoke, expire retirement operations | `bun run ci` | `passing` | `landed` | `src/judgment/repository.ts`; `src/judgment/tool.ts`; `test/judgment/repository.test.ts` | Telegram retirement commands tracked in `JDG-1B.5`. |
+| `JDG-1A.8` | `MVP-JDG` | `JDG-1A` | Control Gate evaluator and append-only event ledger | `bun run ci` | `passing` | `landed` | `migrations/005_control_gate_events.sql`; `migrations/006_control_gate_job_id.sql`; `src/judgment/control_gate.ts`; `test/judgment/control_gate.test.ts`; `test/db/control_gate_schema.test.ts`; ADR-0015 | Runtime telemetry tracked in `JDG-1B.1`. |
+| `JDG-1B.1` | `MVP-JDG` | `JDG-1B` | Record Control Gate telemetry for non-system `provider_run` jobs | `bun run ci` | `passing` | `landed` | `src/queue/worker.ts`; `test/queue/control_gate_telemetry.test.ts`; DEC-038 | Signal detection remains future. |
+| `JDG-1B.2` | `MVP-JDG` | `JDG-1B` | Inject active/eligible/global/time-valid judgments into context | `bun run ci` | `passing` | `landed` | `src/context/compiler.ts`; `src/context/builder.ts`; `src/queue/worker.ts`; `test/queue/judgment_context_injection.test.ts`; issue #44 | `current_operating_view` is `JDG-2A`. |
+| `JDG-1B.3` | `MVP-JDG` | `JDG-1B` | Telegram read commands `/judgment` and `/judgment_explain` | `bun run ci` | `passing` | `landed` | `src/queue/worker.ts`; `src/telegram/inbound.ts`; `test/queue/judgment_commands.test.ts` | No provider tool registration. |
+| `JDG-1B.4` | `MVP-JDG` | `JDG-1B` | Telegram write commands for propose/review/source/evidence/commit | `bun run ci` | `passing` | `landed` | `src/queue/worker.ts`; `test/queue/judgment_commands.test.ts` | Automatic proposal is `JDG-1C.2a`. |
+| `JDG-1B.5` | `MVP-JDG` | `JDG-1B` | Telegram retirement commands for supersede/revoke/expire | `bun run ci` | `passing` | `landed` | `src/queue/worker.ts`; `test/queue/judgment_commands.test.ts` | No current follow-up. |
+| `JDG-1C.1` | `MVP-JDG` | `JDG-1C` | Split memory persistence vs judgment proposal gates; stop summary active-memory promotion; raise judgment context priority | `bun run ci` | `passing` | `landed` | `src/memory/provenance.ts`; `src/memory/summary.ts`; `src/context/*`; `test/memory/*`; `test/context/*`; ADR-0017; DEC-039; Q-027/Q-064 | Continue at `JDG-1C.2a` only when feature work is selected. |
+| `JDG-1C.2a` | `MVP-JDG` | `JDG-1C` | Convert `summary_generation` structured output into proposed judgments | New worker/memory/judgment tests | `defined` | `ready` | ADR-0017; Q-027; `src/memory/summary.ts`; `src/judgment/tool.ts`; `src/queue/worker.ts` | Implement summary-output-only proposal; do not approve/link/commit. |
+| `JDG-1C.2b` | `MVP-JDG` | `JDG-1C` | Add review/operator visibility for auto-proposed summary judgments | New command/notification tests | `defined` | `planned` | Depends on `JDG-1C.2a`; existing `/judgment` commands | Decide whether summary notification includes proposal counts or separate query guidance. |
+| `JDG-1C.2c` | `MVP-JDG` | `JDG-1C` | Decide provider-output extraction boundary | ADR/DEC or explicit design note | `defined` | `planned` | ADR-0017; ADR-0005; provider safety constraints | Choose parser/prompt/tool boundary before coding provider-output extraction. |
+| `JDG-1C.2d` | `MVP-JDG` | `JDG-1C` | Implement provider-output proposal only if `JDG-1C.2c` authorizes it | New provider/worker tests | `defined` | `blocked` | Depends on `JDG-1C.2c` | Blocked until extraction boundary is decided. |
+| `JDG-1C.3` | `MVP-JDG` | `JDG-1C` | Provider tool registration for Judgment write path | Provider/tool safety review | `defined` | `deferred` | ADR-0009..0013; `docs/RUNTIME.md` not-implemented list | Do not implement without explicit authorization. |
+| `JDG-2A.1` | Future | `JDG-2A` | Define `current_operating_view` projection contract | New ADR/DEC or design note | `defined` | `planned` | ADR-0013; DEC-036; Q-057 | Decide schema/projection before runtime code. |
+| `JDG-2A.2` | Future | `JDG-2A` | Implement `current_operating_view` read model and compiler input | New migration + compiler tests | `defined` | `planned` | Depends on `JDG-2A.1` | Future runtime slice. |
+| `JDG-3A.1` | Future | `JDG-3A` | Define vector/graph derived projection need and source-of-truth boundary | New design note | `defined` | `planned` | ADR-0009; `docs/ARCHITECTURE.md` | Keep projections derived, never canonical. |
+| `JDG-3A.2` | Future | `JDG-3A` | Implement vector/graph projection if retrieval evidence justifies it | New projection tests | `defined` | `planned` | Depends on `JDG-3A.1` | Future, not MVP. |
+
+#### Documentation And Process Leaves
+
+| Leaf | Milestone | Phase | Goal | Gate | Gate status | Status | Evidence | Next |
+| ---- | --------- | ----- | ---- | ---- | ----------- | ------ | -------- | ---- |
+| `DOC-1A.1` | Project docs | `DOC-1A` | Roadmap/status taxonomy and compressed current-state entrypoint | `bun run ci` | `passing` | `landed` | Q-068; DEC-040; `docs/context/current-state.md`; `AGENTS.md` | Keep current-state short. |
+| `DOC-1A.2` | Project docs | `DOC-1A` | Drift workflow, PR template, doc freshness CI, skill overrides | `bun run ci` | `passing` | `landed` | `.github/*`; `.codex/*`; `docs/DOCUMENTATION.md` | Keep workflow warnings aligned with policy. |
+| `DOC-1A.3` | Project docs | `DOC-1A` | Current code/docs consistency pass | `bun run ci` | `passing` | `landed` | `docs/CODE_MAP.md`; `docs/RUNTIME.md`; `docs/DOCUMENTATION.md` | No remaining findings from that loop. |
+| `DOC-1A.4` | Project docs | `DOC-1A` | Full repo docs/code/test/migration consistency pass | `bun run ci`; `bun run docs:generate:schema` | `passing` | `landed` | `docs/ARCHITECTURE.md`; `docs/DATA_MODEL.md`; `docs/generated/schema.md` | No remaining findings from that loop. |
+| `DOC-1A.5` | Project docs | `DOC-1A` | Top-down leaf roadmap from planning/design docs | `bun run ci` | `passing` | `landed` | this file; `docs/context/current-state.md`; `bun run ci` (2026-04-29) | Use the leaf rows as the dev-cycle discovery surface. |
+| `DOC-1B.1` | Project docs | `DOC-1B` | Keep roadmap leaves current after every feature/ops slice | Doc freshness warning + review | `defined` | `planned` | `docs/DOCUMENTATION.md`; `.github/workflows/doc-freshness.yml` | Update this ledger whenever next work changes. |
+
+#### Future Deferred Leaves
+
+| Leaf | Track | Goal | Gate | Gate status | Status | Evidence | Next |
+| ---- | ----- | ---- | ---- | ----------- | ------ | -------- | ---- |
+| `ITR-1A.1` | `ITR` | Define capability-governed internal task runner security boundary | New ADR/DEC or design note | `defined` | `deferred` | ADR-0016; Q-067 | Do not implement in P0/MVP without explicit authorization. |
+| `ITR-1A.2` | `ITR` | Implement task-runner security/capability modules | New tests + threat review | `defined` | `deferred` | Depends on `ITR-1A.1` | Future self-improvement track. |
+| `ITR-1A.3` | `ITR` | Implement repo/deploy task adapters | New integration tests | `defined` | `deferred` | ADR-0016 future refs | Future self-improvement track. |
+| `DOC-2A.1` | `DOC` | Decide archive/move policy for Phase 0 design docs | Q/DEC update | `defined` | `planned` | Q-063; DEC-037 | Avoid moving archives during feature work. |
+| `MEM-2A.1` | `P0` | Decide `memory_base_path` JSONL/MD sidecar policy | Q/DEC update | `defined` | `planned` | Q-065; `src/memory/summary.ts`; `src/queue/worker.ts` | Keep sidecars non-canonical unless policy changes. |
+| `CTX-2A.1` | `P0` | Decide `src/context/builder.ts` deletion/soak timing | Q/DEC update | `defined` | `planned` | Q-066; `docs/design/salvage-audit-2026-04.md` | Do not remove until migration risk is accepted. |
+
+#### Current Execution Order
+
+1. If the goal is P0 completion, execute `OPS-1A.1`,
+   `OPS-1A.2`, `OPS-1A.3a` through `OPS-1A.3e`,
+   `OPS-1A.4`, `OPS-1A.5a` through `OPS-1A.5e`, then
+   `OPS-1A.6` through `OPS-1A.8`.
+2. If the goal is feature development instead of acceptance work,
+   the next ready feature leaf is `JDG-1C.2a`.
+3. Any parent row that still feels too broad must be split into new
+   leaf rows here before implementation begins.
 
 ### Gates / acceptance
 

@@ -20,12 +20,13 @@ the acceptance plan is executed on a configured host.
   not run.
 - Active tracks: `OPS` (acceptance/dogfood) and `JDG` (future Judgment
   convergence slices when explicitly authorized).
-- Current planned slice: `P0-M5.GATE` for staging acceptance and dogfood
-  evidence collection.
-- Latest docs slice: `DOC-1A.4` full-scope docs/code consistency loop landed.
+- Current ready OPS leaf: `OPS-1A.1` acceptance environment inventory.
+- Current ready feature leaf, if feature work is selected instead of
+  acceptance work: `JDG-1C.2a` summary-output Judgment proposal.
+- Latest docs slice: `DOC-1A.5` top-down leaf roadmap expansion landed.
 - Last local validation: `bun run ci` passed on 2026-04-29 for the
-  `DOC-1A.4` consistency update.
-- Next gate: `bun run ci`, then P0 acceptance/staging work.
+  `DOC-1A.5` leaf roadmap update.
+- Next gate: P0 acceptance/staging work.
 - Canonical ledger: `docs/04_IMPLEMENTATION_PLAN.md`.
 
 ## Implemented
