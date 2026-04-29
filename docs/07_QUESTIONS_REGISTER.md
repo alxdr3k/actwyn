@@ -1505,6 +1505,36 @@ committed for a later milestone.
 - **History**: 2026-04-29 가설 세션 Q1-Q6 검토 후 사용자가 방향을
   accept함.
 
+### Q-068 — roadmap/status 문서 체계를 어떻게 정리할까?
+
+- **Status**: decided (2026-04-29).
+- **Owner**: project lead.
+- **Context**: 로드맵, 현재 구현 상태, phase, task, acceptance status가
+  `ARCHITECTURE.md`, `RUNTIME.md`, `04_IMPLEMENTATION_PLAN.md`,
+  Q/DEC register, traceability, `AGENTS.md`에 흩어져 있었다. 특히
+  Judgment Phase 1A/1B 구현 상태와 P0 acceptance `pending` 상태가 같은
+  "status" 단어로 보이면서, 구현 미완료인지 gate 미실행인지 구분이
+  어려웠다. 사용자가 `../boilerplate` 문서 체계, 특히 roadmap/status
+  migration 절차를 참고해 정리하라고 지시했다.
+- **Proposed answer**: `../boilerplate`의 taxonomy를 actwyn에 맞게
+  적용한다. `docs/04_IMPLEMENTATION_PLAN.md`가 milestone / track /
+  phase / slice / gate / evidence / next work의 canonical ledger가 되고,
+  새 `docs/context/current-state.md`는 짧은 first-read summary만 맡는다.
+  기존 top-level thin docs는 당장 `docs/current/`로 이동하지 않는다.
+  `pending` / `done`은 implementation status와 gate status로 분리한다.
+- **Decision**: DEC-040.
+- **Impacted docs**: `docs/04_IMPLEMENTATION_PLAN.md`;
+  `docs/context/current-state.md`; `docs/DOCUMENTATION.md`; `docs/README.md`;
+  `AGENTS.md`; `docs/09_TRACEABILITY_MATRIX.md`.
+- **Follow-up**:
+  1. Thin docs에서 미래 roadmap inventory가 다시 커지면
+     `docs/04_IMPLEMENTATION_PLAN.md` ledger로 이동한다.
+  2. P0 acceptance를 실제 실행하면 `docs/06_ACCEPTANCE_TESTS.md`의 gate
+     status와 `P0-M5.GATE` row를 함께 갱신한다.
+  3. Phase 0 design archive 위치는 Q-063에서 계속 추적한다.
+- **History**: 2026-04-29 boilerplate migration checklist를 기준으로
+  DOC-1A.1 docs migration landed.
+
 ---
 
 ## Deferred

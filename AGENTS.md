@@ -7,17 +7,22 @@ Guidance for AI coding agents working in this repo. Keep it short.
 For a normal implementation task, read in this order and stop as
 soon as you have enough:
 
-1. `docs/ARCHITECTURE.md` — what is implemented, what is planned.
-2. `docs/CODE_MAP.md` — where the relevant module lives.
-3. `docs/TESTING.md` — how to validate.
-4. The task-relevant files in `src/` and `test/`.
-5. The relevant ADR in `docs/adr/` **only if** the task changes
+1. `docs/context/current-state.md` — compressed current state.
+2. `docs/04_IMPLEMENTATION_PLAN.md` — read the top
+   "Current roadmap / status ledger" section for active milestone /
+   track / phase / slice only.
+3. `docs/ARCHITECTURE.md` — what is implemented, what is planned.
+4. `docs/CODE_MAP.md` — where the relevant module lives.
+5. `docs/TESTING.md` — how to validate.
+6. The task-relevant files in `src/` and `test/`.
+7. The relevant ADR in `docs/adr/` **only if** the task changes
    architecture.
 
 Do not read the long P0 design docs (`docs/PRD.md`, `docs/02_HLD.md`,
 `docs/00_PROJECT_DELIVERY_PLAYBOOK.md`, `docs/03_RISK_SPIKES.md`,
-`docs/04_IMPLEMENTATION_PLAN.md`, `docs/05_RUNBOOK.md`,
-`docs/06_ACCEPTANCE_TESTS.md`) by default. Open them only when:
+`docs/05_RUNBOOK.md`, `docs/06_ACCEPTANCE_TESTS.md`) by default.
+For `docs/04_IMPLEMENTATION_PLAN.md`, read only the top current
+ledger by default; open the historical phase plan below it only when:
 
 - the task requires understanding *why* a P0 decision was made, or
 - the task hits an acceptance criterion that is only described
@@ -45,10 +50,16 @@ Do not read `docs/design/archive/` by default. Those are history.
   `docs/generated/`) sit just below them — derived, not authority.
   If a generated doc looks wrong, fix the generator or the source,
   never the generated output by hand.
+- `docs/04_IMPLEMENTATION_PLAN.md` owns roadmap/status inventory:
+  milestone, track, phase, slice, gate, implementation status, gate
+  status, evidence, and next work.
+- `docs/context/current-state.md` is the compressed first-read state
+  and active roadmap position. Keep it short; do not copy the full
+  ledger into it.
 - Thin current-state docs (`docs/ARCHITECTURE.md`, `docs/CODE_MAP.md`,
   `docs/DATA_MODEL.md`, `docs/RUNTIME.md`, `docs/TESTING.md`,
   `docs/OPERATIONS.md`) explain the current shape but never override
-  the code.
+  the code. They do not own future roadmap inventory.
 - ADRs explain why decisions were made; accepted ADRs are not edited
   to chase later changes.
 - Long design docs are historical reasoning and an acceptance
@@ -58,126 +69,28 @@ Do not read `docs/design/archive/` by default. Those are history.
   and partially implemented** (Phase 1A+). ADR-0009 … ADR-0013,
   ADR-0015, ADR-0017, and `docs/JUDGMENT_SYSTEM.md` are the
   architectural authority for *why*.
-  Current state (per DEC-037):
-  - **Phase 1A.1 (landed)**: `migrations/004_judgment_skeleton.sql`
-    (5 tables + FTS5), `src/judgment/types.ts`,
-    `src/judgment/validators.ts`.
-  - **Phase 1A.2 (landed)**: `src/judgment/repository.ts`
-    (proposal-only writer), `src/judgment/tool.ts` (unregistered
-    `judgment.propose` typed-tool contract).
-  - **Phase 1A.3 (landed)**: `src/judgment/repository.ts` now also
-    exports `approveProposedJudgment` and `rejectProposedJudgment`
-    (local unregistered approval/rejection review surface).
-    `src/judgment/tool.ts` now also exports `JUDGMENT_APPROVE_TOOL` /
-    `JUDGMENT_REJECT_TOOL` and `executeJudgmentApproveTool` /
-    `executeJudgmentRejectTool`. The typed-tool contracts are not
-    registered as provider tools; they are reachable only through
-    worker-dispatched `/judgment_approve` and `/judgment_reject`
-    Telegram system commands (Phase 1B.4). Approval does **not**
-    activate a judgment.
-  - **Phase 1A.4 (landed)**: `src/judgment/repository.ts` now also
-    exports `recordJudgmentSource` (writes `judgment_sources` +
-    `judgment_events`) and `linkJudgmentEvidence` (writes
-    `judgment_evidence_links`, updates denormalized arrays on
-    `judgment_items`, appends `judgment.evidence.linked` event).
-    `src/judgment/tool.ts` now also exports
-    `JUDGMENT_RECORD_SOURCE_TOOL` / `JUDGMENT_LINK_EVIDENCE_TOOL` and
-    `executeJudgmentRecordSourceTool` /
-    `executeJudgmentLinkEvidenceTool`. The typed-tool contracts are
-    not registered as provider tools; they are reachable only through
-    worker-dispatched `/judgment_source` and `/judgment_link` Telegram
-    system commands (Phase 1B.4). Evidence linking does **not**
-    activate, approve, or make a judgment context-visible.
-  - **Phase 1A.5 (landed)**: `src/judgment/repository.ts` now also
-    exports `commitApprovedJudgment`. Commit requires an approved,
-    evidence-linked proposed judgment and sets
-    `lifecycle_status=active` / `activation_state=eligible` /
-    `authority_source=user_confirmed`. `src/judgment/tool.ts` now also
-    exports `JUDGMENT_COMMIT_TOOL` / `executeJudgmentCommitTool`.
-    The typed-tool contract is not registered as a provider tool.
-    Active/eligible rows are now read by `src/queue/worker.ts` for
-    context injection (Phase 1B.2) and via `/judgment` /
-    `/judgment_explain` Telegram commands (Phase 1B.3). Commit is
-    reachable only through the worker-dispatched `/judgment_commit`
-    Telegram system command (Phase 1B.4).
-  - **Phase 1A.6 (landed)**: `src/judgment/repository.ts` now also
-    exports `queryJudgments` and `explainJudgment`, and
-    `src/judgment/tool.ts` now also exports `JUDGMENT_QUERY_TOOL` /
-    `JUDGMENT_EXPLAIN_TOOL` and `executeJudgmentQueryTool` /
-    `executeJudgmentExplainTool`. These are **local, unregistered,
-    read-only** surfaces. They do **not** mutate judgment rows,
-    append `judgment_events`, or make judgments context-visible.
-  - **Phase 1A.7 (landed)**: `src/judgment/repository.ts` now also
-    exports `supersedeJudgment`, `revokeJudgment`, and
-    `expireJudgment`, and `src/judgment/tool.ts` now also exports
-    `JUDGMENT_SUPERSEDE_TOOL` / `JUDGMENT_REVOKE_TOOL` /
-    `JUDGMENT_EXPIRE_TOOL` and the corresponding `execute*` functions.
-    These are **local, unregistered** write surfaces that retire
-    `active/eligible` judgments. `supersedeJudgment` can write
-    `judgment_edges`. These surfaces do not register provider tools;
-    they are reachable only through the worker-dispatched
-    `/judgment_supersede`, `/judgment_revoke`, and `/judgment_expire`
-    Telegram system commands (Phase 1B.5). Future agents must not
-    implement provider-tool or additional runtime integration unless
-    explicitly tasked.
-  - **Phase 1A.8 (landed)**: `src/judgment/control_gate.ts` exports
-    `ControlGateDecision`, `evaluateTurn`, `evaluateCandidate`, and
-    `recordControlGateDecision`. `migrations/005_control_gate_events.sql`
-    adds the append-only `control_gate_events` table (schema version 5);
-    migration 006 adds `job_id` attribution (current schema version 6).
-    `direct_commit_allowed` is always 0 (ADR-0012 invariant).
-  - **Phase 1B.1 (landed)**: `src/queue/worker.ts` calls `evaluateTurn()`
-    and `recordControlGateDecision()` on every **non-system**
-    `provider_run` job (system commands are dispatched before the gate
-    block and produce no gate row). Control gate decisions are persisted
-    to `control_gate_events` as telemetry (append-only, L0-only; signal
-    detection deferred). `src/judgment/control_gate.ts` is now imported
-    from `worker.ts`.
-  - **Phase 1B.2 (landed)**: `src/context/builder.ts` gains a
-    `judgment_items` slot (`JudgmentItemSlot[]`) at priority 600, between
-    `memory_user_stated` (700) and `recent_turns` (500). `worker.ts`
-    queries `judgment_items` with filters `lifecycle_status='active'`,
-    `activation_state='eligible'`, `retention_state='normal'`,
-    `json_extract(scope_json, '$.global')=1`, temporal validity
-    (`valid_from ≤ now OR NULL`, `valid_until > now OR NULL`), `LIMIT 20`
-    — in `buildContextForRun` (replay_mode) and in the resume-mode
-    judgment refresh path (resume_mode; same filters, no turns/memory/
-    summary injected). Active judgments now appear in the packed context
-    sent to Claude in both modes. Excluded for `summary_generation`.
-  - **Phase 1B.3 (landed)**: `/judgment` and `/judgment_explain <id>`
-    added to `SYSTEM_COMMANDS` in `worker.ts` and dispatched via
-    `dispatchSystemCommand`. Uses `executeJudgmentQueryTool` and
-    `executeJudgmentExplainTool` from `src/judgment/tool.ts`.
-    System commands do not trigger Control Gate evaluation.
-  - **Phase 1B.4 (landed)**: `/judgment_propose`,
-    `/judgment_approve`, `/judgment_reject`, `/judgment_source`,
-    `/judgment_link`, and `/judgment_commit` added to
-    `KNOWN_COMMANDS` / `SYSTEM_COMMANDS` and dispatched via
-    `dispatchSystemCommand`. These commands route through
-    `src/judgment/tool.ts`, send outbound notification output, do not
-    store conversation turns, and do not trigger Control Gate
-    evaluation. `/judgment_commit` activates only approved,
-    evidence-linked proposed judgments.
-  - **Phase 1B.5 (landed)**: `/judgment_supersede`,
-    `/judgment_revoke`, and `/judgment_expire` added to
-    `KNOWN_COMMANDS` / `SYSTEM_COMMANDS` and dispatched via
-    `dispatchSystemCommand`. These commands retire active/eligible
-    judgments through `src/judgment/tool.ts`, send outbound
-    notification output, do not store conversation turns, and do not
-    trigger Control Gate evaluation.
-  - **ADR-0017 / DEC-039 (committed, not implemented)**: Q-027 is
-    resolved in favor of judgment-centered convergence for MVP.
-    Context-visible durable behavioral baselines should converge on
-    `judgment_items`; `memory_items` remains memory-plane /
-    candidate / compatibility data, not peer authority. Follow-up
-    implementation must split `mayPromoteToLongTerm` semantics and
-    adjust summary promotion / Context Compiler behavior.
+- Current Judgment status lives in `docs/04_IMPLEMENTATION_PLAN.md`
+  track `JDG`, `docs/ARCHITECTURE.md`, and `docs/RUNTIME.md`.
+  Summary:
+  - Phase 1A.1–1A.8 local substrate is landed under `src/judgment/*`
+    plus migrations 004–006.
+  - Phase 1B.1–1B.5 runtime wiring is landed through
+    `src/queue/worker.ts`: Control Gate telemetry, active/eligible
+    judgment context injection, Telegram read/write commands, and
+    retirement commands.
+  - ADR-0017 / DEC-039 first runtime slice is landed: memory
+    provenance gates are split, summary extraction no longer writes
+    active `memory_items`, and active judgments outrank memory recall
+    in context packing.
+  - The `judgment_items` context slot priority is 790.
   - Remaining Phase 1A constraints still apply to all modules except
     `src/queue/worker.ts`:
-    - `src/main.ts`, `src/providers/*`, `src/context/*` (except
-      `builder.ts` which gains `JudgmentItemSlot` type), `src/memory/*`,
+    - `src/main.ts`, `src/providers/*`, `src/memory/*`,
       `src/telegram/*`, and `src/commands/*` must NOT import from
       `src/judgment/*`.
+    - `src/context/*` may contain the existing Judgment context slot /
+      compiler input types, but do not add new Judgment runtime paths
+      there unless explicitly tasked.
   - Do **not** implement Tension, ReflectionTriageEvent,
     `current_operating_view`, provider/context integration beyond the
     existing compiler/context-injection path, vector / graph projections,
@@ -189,6 +102,10 @@ Do not read `docs/design/archive/` by default. Those are history.
 
 - Update tests in the same change. Tests describe the contract;
   changing behavior without changing the test is a smell.
+- If roadmap position, slice status, gate status, evidence, or next
+  work changes, update `docs/04_IMPLEMENTATION_PLAN.md`.
+- If the active milestone / track / phase / slice changes, update
+  `docs/context/current-state.md`.
 - If you change runtime behavior, update `docs/RUNTIME.md`.
 - If you add, move, or rename modules, update `docs/CODE_MAP.md`.
 - If you change schema, add a new migration file
@@ -237,9 +154,9 @@ the PR description rather than claiming green.
 
 ## What to avoid
 
-- Implementing Phase 1A Judgment System runtime surfaces beyond what
-  is already landed (see "Source of truth" note above). That is a
-  separate, larger track.
+- Implementing additional Judgment runtime surfaces beyond what is
+  already landed (see the `JDG` track in
+  `docs/04_IMPLEMENTATION_PLAN.md`). That is a separate, larger track.
 - Editing accepted ADRs to chase code changes — supersede instead.
 - Rewriting long design docs to "match" implementation drift —
   patch the thin current-state docs.

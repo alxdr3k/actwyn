@@ -14,17 +14,19 @@ authoritative, and what to update when something changes.
 1. Code, tests, migrations
 2. Generated docs / schemas produced from those sources
    (`docs/generated/*`; see `docs/generated/README.md` for active generators)
-3. Thin current-state docs (`docs/ARCHITECTURE.md`, `docs/CODE_MAP.md`,
+3. Roadmap / status ledger (`docs/04_IMPLEMENTATION_PLAN.md`):
+   milestone, track, phase, slice, gate, status, evidence, and next work
+4. Compressed current state (`docs/context/current-state.md`) and thin
+   current-state docs (`docs/ARCHITECTURE.md`, `docs/CODE_MAP.md`,
    `docs/DATA_MODEL.md`, `docs/RUNTIME.md`, `docs/TESTING.md`,
    `docs/OPERATIONS.md`)
-4. ADRs in `docs/adr/`
-5. Q / DEC registers and traceability matrix
+5. ADRs in `docs/adr/`
+6. Q / DEC registers and traceability matrix
    (`docs/07_QUESTIONS_REGISTER.md`, `docs/08_DECISION_REGISTER.md`,
    `docs/09_TRACEABILITY_MATRIX.md`)
-6. Long design documents and archived design notes
+7. Long design documents and archived design notes
    (`docs/PRD.md`, `docs/02_HLD.md`, `docs/00_PROJECT_DELIVERY_PLAYBOOK.md`,
-   `docs/03_RISK_SPIKES.md`, `docs/04_IMPLEMENTATION_PLAN.md`,
-   `docs/05_RUNBOOK.md`, `docs/06_ACCEPTANCE_TESTS.md`,
+   `docs/03_RISK_SPIKES.md`, `docs/05_RUNBOOK.md`, `docs/06_ACCEPTANCE_TESTS.md`,
    `docs/JUDGMENT_SYSTEM.md` (Phase 0 / 0.5 architectural design
    record, per DEC-037), future `docs/design/archive/*`)
 
@@ -38,8 +40,14 @@ output.
 
 - Code, tests, and migrations are **authoritative** for implemented
   behavior. If a doc and the code disagree, the code wins.
+- `docs/04_IMPLEMENTATION_PLAN.md` owns roadmap/status inventory:
+  milestone, track, phase, slice, gate, implementation status, gate
+  status, evidence, and next work.
+- `docs/context/current-state.md` is the short first-read summary of
+  the active position. Do not copy the full roadmap ledger into it.
 - Thin current-state docs explain the current code shape but never
   override the code.
+- Thin current-state docs do not own future roadmap inventory.
 - ADRs explain **why** major decisions were made.
 - Accepted ADRs are not edited to reflect later changes in
   implementation. If an architecture decision changes, create a new
@@ -59,6 +67,8 @@ output.
 
 | Change type                                  | Required doc action                                |
 | -------------------------------------------- | -------------------------------------------------- |
+| Roadmap taxonomy, slice status, gate status, evidence, or next work changes | update `docs/04_IMPLEMENTATION_PLAN.md` |
+| Active milestone / track / phase / slice changes | update `docs/context/current-state.md` |
 | Runtime behavior changes                     | update `docs/RUNTIME.md`                           |
 | Module / file layout changes                 | update `docs/CODE_MAP.md`                          |
 | DB / schema / migration changes              | update `docs/DATA_MODEL.md` + run `bun run docs:generate:schema` |
@@ -68,6 +78,28 @@ output.
 | Tactical / policy decision                   | add an entry in `docs/08_DECISION_REGISTER.md`     |
 | Open question that needs an answer           | add an entry in `docs/07_QUESTIONS_REGISTER.md`    |
 | Historical design context only               | do not update current-state docs unless behavior changed |
+
+## Roadmap / status migration
+
+When adopting or updating the roadmap/status taxonomy, normalize scattered
+roadmap language into `docs/04_IMPLEMENTATION_PLAN.md`:
+
+1. Map product / user-facing gates to milestones.
+2. Map technical streams to tracks.
+3. Map ordered implementation stages inside each track to phases.
+4. Map commit-sized implementation units to slices.
+5. Map acceptance criteria, automated tests, staging checks, or manual
+   verification to gates.
+6. Split ambiguous `done` / `pending` states into implementation status
+   (`planned`, `landed`, `accepted`, etc.) and gate status (`defined`,
+   `not_run`, `passing`, etc.).
+7. Move the canonical inventory into `04_IMPLEMENTATION_PLAN.md`, then trim
+   duplicate status inventories from `docs/context/current-state.md`,
+   thin current-state docs, runtime docs, architecture docs, and
+   `AGENTS.md`.
+8. Preserve source anchors when moving status: path, test, Q, DEC, ADR, AC,
+   issue, or commit when known. If unknown, write `anchor missing` rather
+   than inventing one.
 
 ## Enforcement mechanisms
 
@@ -116,10 +148,14 @@ is added or modified. Do not edit `docs/generated/*` by hand.
 
 The P0 deliverables in this repo (`docs/PRD.md`, `docs/02_HLD.md`,
 `docs/00_PROJECT_DELIVERY_PLAYBOOK.md`, `docs/03_RISK_SPIKES.md`,
-`docs/04_IMPLEMENTATION_PLAN.md`, `docs/05_RUNBOOK.md`,
+`docs/05_RUNBOOK.md`,
 `docs/06_ACCEPTANCE_TESTS.md`) are the long-form design and acceptance
 record for the Personal Agent P0 vertical. They remain valuable as
 historical reasoning and acceptance-criteria references.
+
+`docs/04_IMPLEMENTATION_PLAN.md` is the exception among the numbered
+project docs: its top ledger is the canonical roadmap/status view,
+while its older phase-by-phase build plan remains historical context.
 
 For day-to-day implementation work, agents should prefer the thin
 current-state docs and consult the long docs only when the question is

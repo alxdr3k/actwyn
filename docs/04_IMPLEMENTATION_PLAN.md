@@ -1,20 +1,128 @@
 # Personal Agent P0 — Implementation Plan
 
-> Status: draft · Owner: project lead · Last updated: 2026-04-22
+> Status: living roadmap/status ledger + historical P0 build plan ·
+> Owner: project lead · Last updated: 2026-04-29
 >
-> This plan turns the PRD + HLD into a concrete build order. It
-> expands the playbook's build-order sketch (§7.2) into named
-> phases with **entry criteria**, **deliverables**, **exit
-> criteria**, and **ledger-integration test targets**.
+> This file owns the canonical roadmap/status ledger for milestone,
+> track, phase, slice, gate, status, evidence, and next work. The
+> original P0 build plan remains below as the historical build-order
+> contract. If the ledger and a historical phase section disagree
+> about current status, the ledger wins.
 >
 > Rules:
 >
-> 1. Phases happen in order. A phase may not begin until its entry
->    criteria are met.
-> 2. Every phase ends with at least one automated test that
->    asserts the state-machine transitions it introduced (HLD §6).
-> 3. The first implementation target is not Claude response
->    quality — it is durable end-to-end state flow (playbook §7.3).
+> 1. Roadmap / phase / slice inventory lives here, not in
+>    `docs/context/current-state.md` or thin current-state docs.
+> 2. A slice can be `landed` while its acceptance or staging gate is
+>    still `not_run`.
+> 3. Evidence is linked by source anchor (path, test, Q, DEC, ADR,
+>    AC, issue, commit when known) instead of copying implementation
+>    detail into this ledger.
+
+## Current roadmap / status ledger
+
+This section adapts the boilerplate roadmap/status taxonomy without
+moving the existing thin docs into `docs/current/`. In actwyn, the
+thin current-state docs remain at the top of `docs/`
+(`ARCHITECTURE.md`, `CODE_MAP.md`, `DATA_MODEL.md`, `RUNTIME.md`,
+`TESTING.md`, `OPERATIONS.md`). This file owns roadmap/status; those
+docs own fast navigation for implemented behavior.
+
+### Taxonomy
+
+| Term | Meaning | Example ID | Notes |
+| ---- | ------- | ---------- | ----- |
+| Milestone | Product / user-facing delivery gate | `P0-M5` | Defined by what the user or operator can rely on. |
+| Track | Technical stream or major implementation flow | `JDG` | Examples: P0 runtime, Judgment, docs, ops. |
+| Phase | Ordered stage inside a track | `JDG-1B` | Reuses existing Judgment phase names where already established. |
+| Slice / Task | Commit-sized or PR-sized work unit | `JDG-1B.5` | Should be small enough to review and validate. |
+| Gate | Acceptance, test, staging, or manual verification criterion | `AC-MEM-004` / `bun run ci` | Gate definitions live in `docs/06_ACCEPTANCE_TESTS.md` or test files. |
+| Evidence | Anchor proving status | code, tests, docs, Q, DEC, ADR | Prefer links / IDs over copied details. |
+
+### Status vocabulary
+
+Implementation status:
+
+| Status | Meaning |
+| ------ | ------- |
+| `planned` | Planned but not ready to start. |
+| `ready` | Dependencies and scope are clear enough to start. |
+| `in_progress` | Work is actively being changed. |
+| `landed` | Code or docs are on `main`; acceptance may still be pending. |
+| `accepted` | The relevant gate has passed and the milestone accepts the work. |
+| `blocked` | Cannot proceed without resolving a blocker. |
+| `deferred` | Intentionally moved out of the current milestone. |
+| `dropped` | Explicitly not planned. |
+
+Gate status:
+
+| Status | Meaning |
+| ------ | ------- |
+| `defined` | Gate is defined but is not yet due. |
+| `not_run` | Gate is due or relevant but has not been executed. |
+| `passing` | Gate passed. |
+| `failing` | Gate failed. |
+| `waived` | Gate explicitly waived with rationale. |
+
+### Milestones
+
+| Milestone | Product / user gate | Status | Gate | Gate status | Evidence | Next |
+| --------- | ------------------- | ------ | ---- | ----------- | -------- | ---- |
+| `P0-M1` | Walking skeleton with durable Telegram/job/outbound ledger and fake provider | `landed` | Walking Skeleton gate | `not_run` | `src/telegram/*`, `src/queue/*`, `src/providers/fake.ts`, queue/telegram tests | Historical gate remains in `docs/06_ACCEPTANCE_TESTS.md`. |
+| `P0-M2` | Claude vertical slice | `landed` | Provider acceptance criteria | `not_run` | `src/providers/claude.ts`, `test/providers/*`, `docs/RUNTIME.md` | Staging provider checks still tracked as acceptance work. |
+| `P0-M3` | Memory + summary | `landed` | Memory acceptance criteria | `not_run` | `src/memory/*`, `src/context/*`, `test/memory/*`, `test/context/*` | Judgment convergence follow-ups tracked under `JDG`. |
+| `P0-M4` | Attachment + S3 | `landed` | Storage acceptance criteria | `not_run` | `src/storage/*`, `src/telegram/attachment_*`, storage/attachment tests | Staging S3 smoke remains acceptance work. |
+| `P0-M5` | Operate-and-polish: commands, doctor/status, startup recovery, deploy/runbook | `landed` | P0 Acceptance gate | `not_run` | `src/commands/*`, `src/startup/recovery.ts`, `deploy/*`, `docs/OPERATIONS.md` | Run full acceptance/staging gate before calling P0 accepted. |
+| `MVP-JDG` | Judgment-backed behavioral baseline for MVP | `landed` | `bun run ci` + current docs review | `passing` | `src/judgment/*`, `src/queue/worker.ts`, `src/context/*`, ADR-0017, DEC-039 | Automatic extraction/proposal and `current_operating_view` remain planned/deferred. |
+
+### Tracks
+
+| Track | Purpose | Active phase | Status | Notes |
+| ----- | ------- | ------------ | ------ | ----- |
+| `P0` | Single-user Telegram + Claude personal agent vertical | `P0-M5` | `landed` | Implementation is on `main`; staging acceptance and dogfood gates are not run. |
+| `JDG` | DB-native Judgment System and memory-to-judgment convergence | `JDG-1C` | `landed` | Runtime foundation is landed; automatic proposal/extraction remains future. |
+| `DOC` | Documentation source-of-truth and roadmap/status migration | `DOC-1A` | `landed` | DEC-040/Q-068 define this migration. |
+| `OPS` | Deployment, staging acceptance, dogfood evidence | `OPS-1A` | `planned` | Acceptance files still show many `pending` rows because staging gates have not been executed. |
+
+### Phases / slices
+
+| Slice | Milestone | Track | Phase | Goal | Depends | Gate | Gate status | Status | Evidence | Next |
+| ----- | --------- | ----- | ----- | ---- | ------- | ---- | ----------- | ------ | -------- | ---- |
+| `P0-M5.GATE` | `P0-M5` | `OPS` | `OPS-1A` | Run staging P0 Acceptance gate and dogfood evidence collection | Deployed staging host, configured Telegram/S3/Claude | `docs/06_ACCEPTANCE_TESTS.md` | `not_run` | `planned` | `docs/06_ACCEPTANCE_TESTS.md`, `docs/05_RUNBOOK.md`, DEC-013 | Promote acceptance results from pending/not_run to pass/fail when executed. |
+| `JDG-1A` | `MVP-JDG` | `JDG` | `JDG-1A` | Local Judgment schema/repository/tool/control-gate substrate | ADR-0009..ADR-0015 | `bun run ci` | `passing` | `landed` | `migrations/004_*`, `005_*`, `006_*`; `src/judgment/*`; `test/judgment/*`; `test/db/*judgment*` | Provider registration intentionally out of scope. |
+| `JDG-1B` | `MVP-JDG` | `JDG` | `JDG-1B` | Runtime Judgment reachability through telemetry, context injection, and Telegram commands | `JDG-1A` | `bun run ci` | `passing` | `landed` | `src/queue/worker.ts`; `test/queue/judgment_*`; DEC-038 | Keep provider tools unregistered until explicitly authorized. |
+| `JDG-1C.1` | `MVP-JDG` | `JDG` | `JDG-1C` | First ADR-0017 convergence slice: split memory gates, stop summary active-memory promotion, make judgments outrank memory recall | ADR-0017, DEC-039 | `bun run ci` | `passing` | `landed` | `src/memory/provenance.ts`; `src/memory/summary.ts`; `src/context/*`; Q-027; Q-064 | Continue with extraction/proposal only when explicitly scoped. |
+| `JDG-1C.2` | `MVP-JDG` | `JDG` | `JDG-1C` | Automatic Judgment extraction/proposal from provider or summary output | `JDG-1C.1` | New tests + docs update | `defined` | `planned` | ADR-0017; Q-027 | Needs explicit task authorization. |
+| `JDG-1C.3` | `MVP-JDG` | `JDG` | `JDG-1C` | Provider tool registration for Judgment write path | `JDG-1B`, provider safety review | New provider/tool tests | `defined` | `deferred` | ADR-0009..ADR-0013; `docs/RUNTIME.md` not-implemented list | Do not implement without explicit authorization. |
+| `JDG-2A` | Future | `JDG` | `JDG-2A` | `current_operating_view` and compiler input sourced from it | `JDG-1C` | New compiler/context tests | `defined` | `planned` | ADR-0013; DEC-036; `docs/RUNTIME.md` | Future runtime slice. |
+| `JDG-3A` | Future | `JDG` | `JDG-3A` | Vector / graph derived projections | Evidence that FTS/metadata retrieval is insufficient | TBD | `defined` | `planned` | ADR-0009; `docs/ARCHITECTURE.md` | Keep as derived projection, not source of truth. |
+| `DOC-1A.1` | Project docs | `DOC` | `DOC-1A` | Adopt roadmap/status taxonomy and create compressed current-state entrypoint | Boilerplate migration checklist | `bun run ci` | `passing` | `landed` | Q-068; DEC-040; this file; `docs/context/current-state.md`; `AGENTS.md`; `bun run ci` (2026-04-29) | Keep future roadmap/status inventory in this ledger. |
+
+### Gates / acceptance
+
+- `bun run ci` is the current full local validation command.
+- Acceptance status in `docs/06_ACCEPTANCE_TESTS.md` means staging /
+  acceptance execution status, not necessarily implementation status.
+- A milestone is `accepted` only when its required gates are
+  `passing` or explicitly `waived`.
+- Rows marked `landed` above are implementation status rows; do not
+  read them as acceptance-pass claims unless the gate status is also
+  `passing`.
+
+### Migration notes
+
+This ledger follows the migration rules adopted from `../boilerplate`:
+
+1. Existing product/user gates map to `P0-M1` ... `P0-M5` and
+   `MVP-JDG`.
+2. Technical streams map to `P0`, `JDG`, `DOC`, and `OPS`.
+3. Existing P0 phases stay in the historical plan below; active
+   status lives in the ledger above.
+4. Ambiguous `done` / `pending` language is split into implementation
+   status and gate status.
+5. Source anchors use paths, tests, Q, DEC, ADR, AC, and issue IDs.
+   Unknown commit anchors are intentionally omitted rather than
+   fabricated.
 
 ## Phase map
 
@@ -621,4 +729,3 @@ Not a commitment — project is single-operator cadence.
 | 8      | Phase 11 + P0 acceptance gate          |
 
 Adjust aggressively; the phase order is fixed, the weeks are not.
-

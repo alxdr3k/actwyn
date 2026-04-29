@@ -108,6 +108,7 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | Q-065   | `memory_base_path` JSONL/MD sidecar policy                   | —             | —                          | —                | `docs/design/salvage-audit-2026-04.md` §5.3/§7 |
 | Q-066   | `src/context/builder.ts` 삭제 timing                         | —             | —                          | —                | `docs/design/salvage-audit-2026-04.md` §6 step 9/§7 |
 | Q-067   | actwyn self-improvement task 실행 경계                       | ADR-0016      | —                          | —                | future `src/security/*`, `src/execution/*`, `src/tasks/repo/*`, `src/tasks/deploy/*` |
+| Q-068   | roadmap/status 문서 체계 정리                                | DEC-040       | —                          | —                | `docs/04_IMPLEMENTATION_PLAN.md`; `docs/context/current-state.md`; `AGENTS.md` |
 
 ## Matrix — ADRs → artifacts
 
@@ -175,6 +176,7 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | DEC-037 | Implementation Documentation Lifecycle Policy                  | —                        | —                  | ADR README §Promotion rules; Q-063 (follow-up docs-structure PR) |
 | DEC-038 | Judgment System Phase 1B.1–1B.3 Runtime Wiring (2026-04-28)  | —                        | —                  | `src/queue/worker.ts`; `src/context/builder.ts`; `src/telegram/inbound.ts`; Phase 1B tests |
 | DEC-039 | MVP memory-to-judgment convergence implementation posture      | §12 (taxonomy 확장 예정) | §11.3              | ADR-0017; Q-027; Q-064; first `src/memory/*` + context-priority slice landed; extraction / `current_operating_view` future |
+| DEC-040 | Roadmap/status taxonomy and ledger ownership                  | —                        | —                  | Q-068; `docs/04_IMPLEMENTATION_PLAN.md`; `docs/context/current-state.md`; `docs/DOCUMENTATION.md`; `AGENTS.md` |
 
 ## Matrix — PRD acceptance criteria → evidence
 

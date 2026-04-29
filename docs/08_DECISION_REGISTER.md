@@ -87,6 +87,7 @@ deployment shape). Everything else is a `DEC-###`.
 | DEC-037 | Implementation Documentation Lifecycle Policy                  | accepted |
 | DEC-038 | Judgment System Phase 1B.1–1B.3 Runtime Wiring (2026-04-28)   | accepted |
 | DEC-039 | MVP memory-to-judgment convergence implementation posture      | accepted |
+| DEC-040 | Roadmap/status taxonomy and ledger ownership                   | accepted |
 
 Decisions that were previously `D01`..`D05` in the flat log have
 been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
@@ -1189,6 +1190,58 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
 - History: 2026-04-29 first runtime slice split provenance gates, stopped
   summary output from creating active `memory_items`, and made active judgments
   outrank memory recall in context packing.
+
+## DEC-040 — Roadmap/status taxonomy and ledger ownership
+
+- Date: 2026-04-29
+- Status: accepted
+- Context: Roadmap language, phase names, implementation status, and
+  acceptance status were spread across thin current-state docs, the P0
+  implementation plan, Questions/Decision registers, and AGENTS.md. The
+  ambiguity made `pending` / `done` hard to interpret: a feature can be
+  implemented on `main` while its staging acceptance gate is still not run.
+  The repo also has an adjacent `../boilerplate` docs taxonomy that separates
+  milestone, track, phase, slice, gate, evidence, implementation status, and
+  gate status.
+- Decision: Adopt the boilerplate roadmap/status taxonomy for actwyn, with
+  project-specific adaptation:
+  - `docs/04_IMPLEMENTATION_PLAN.md` owns the canonical roadmap/status
+    ledger: milestone, track, phase, slice, gate, implementation status,
+    gate status, evidence, and next work.
+  - `docs/context/current-state.md` is the compressed first-read current
+    state and active roadmap position.
+  - Existing thin current-state docs stay at the top of `docs/`; they are not
+    moved into `docs/current/` in this migration.
+  - Acceptance files keep gate definitions/results. Their `pending` rows are
+    gate status, not proof that implementation is absent.
+  - `AGENTS.md` reads the compressed current state first and then the top
+    ledger section of `docs/04_IMPLEMENTATION_PLAN.md`.
+- Alternatives considered:
+  - Add a separate `docs/ROADMAP.md` while leaving `04_IMPLEMENTATION_PLAN.md`
+    historical only. Rejected because it creates another status owner.
+  - Move all thin docs into `docs/current/` to match boilerplate exactly.
+    Rejected for this migration because path churn would be high and existing
+    agent/readme references already rely on the top-level thin docs.
+  - Keep status scattered and fix only stale lines. Rejected because it does
+    not solve the source-of-truth problem.
+- Impacted docs: `docs/04_IMPLEMENTATION_PLAN.md`;
+  `docs/context/current-state.md`; `docs/DOCUMENTATION.md`; `docs/README.md`;
+  `AGENTS.md`; `docs/07_QUESTIONS_REGISTER.md` (Q-068);
+  `docs/09_TRACEABILITY_MATRIX.md`.
+- Risks / mitigations:
+  - `04_IMPLEMENTATION_PLAN.md` becomes both current ledger and historical
+    build plan → mitigate by placing the current ledger at the top and
+    declaring it authoritative for status.
+  - Stale status inventories remain in thin docs → mitigate by keeping thin
+    docs focused on implemented behavior and moving future/status inventory
+    into the ledger over follow-up patches.
+  - Acceptance `pending` remains confusing → mitigate by explicitly splitting
+    implementation status and gate status in the ledger and policy.
+- Review trigger: first future milestone completion, first large docs
+  migration, or any dev-cycle review that finds conflicting status owners.
+- Supersedes / superseded by: refines DEC-037.
+- Refs: Q-068; `../boilerplate/docs/04_IMPLEMENTATION_PLAN.md`;
+  `../boilerplate/docs/DOCUMENTATION.md`.
 
 ---
 

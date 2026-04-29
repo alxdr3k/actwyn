@@ -7,6 +7,8 @@ specific file you need.
 
 | Need                                                                   | Read                                                         |
 | ---------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Compressed current project state / first read                          | [`context/current-state.md`](./context/current-state.md)     |
+| Roadmap / status ledger (milestone, track, phase, slice, gate)          | [`04_IMPLEMENTATION_PLAN.md`](./04_IMPLEMENTATION_PLAN.md)   |
 | Current architecture (what is implemented)                             | [`ARCHITECTURE.md`](./ARCHITECTURE.md)                       |
 | Where code lives                                                       | [`CODE_MAP.md`](./CODE_MAP.md)                               |
 | Database / schema                                                      | [`DATA_MODEL.md`](./DATA_MODEL.md)                           |
@@ -35,7 +37,7 @@ needs the *why* or the acceptance criterion.
 | [`00_PROJECT_DELIVERY_PLAYBOOK.md`](./00_PROJECT_DELIVERY_PLAYBOOK.md) | How the P0 project is delivered.             |
 | [`02_HLD.md`](./02_HLD.md)                                        | High-Level Design — module boundaries, state machines, invariants. |
 | [`03_RISK_SPIKES.md`](./03_RISK_SPIKES.md)                        | Risk spikes (SP-##).                             |
-| [`04_IMPLEMENTATION_PLAN.md`](./04_IMPLEMENTATION_PLAN.md)        | P0 implementation plan.                          |
+| [`04_IMPLEMENTATION_PLAN.md`](./04_IMPLEMENTATION_PLAN.md)        | Roadmap/status ledger at top; historical P0 implementation plan below. |
 | [`05_RUNBOOK.md`](./05_RUNBOOK.md)                                | Operational runbook (P0).                        |
 | [`06_ACCEPTANCE_TESTS.md`](./06_ACCEPTANCE_TESTS.md)              | P0 acceptance criteria + test plan.              |
 
@@ -43,10 +45,11 @@ needs the *why* or the acceptance criterion.
 
 1. Code, tests, migrations
 2. Generated docs / schemas produced from those sources
-3. Thin current-state docs (top of this index)
-4. ADRs (`adr/`)
-5. Q / DEC registers + traceability matrix
-6. Long design / historical / archived docs
+3. Roadmap / status ledger (`04_IMPLEMENTATION_PLAN.md`)
+4. Compressed current state + thin current-state docs
+5. ADRs (`adr/`)
+6. Q / DEC registers + traceability matrix
+7. Long design / historical / archived docs
 
 See [`DOCUMENTATION.md`](./DOCUMENTATION.md) for the full policy
 and the "what to update when" table.

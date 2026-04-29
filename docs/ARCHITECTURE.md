@@ -12,8 +12,9 @@
 > For the architectural authority of the DB-native AI-first
 > Judgment System direction, see `docs/JUDGMENT_SYSTEM.md` (Phase 0 /
 > 0.5 design record; Phase 1A.1–1A.8 implemented; Phase 1B.1–1B.5
-> runtime-wired). For current schema and code layout, see
-> `docs/DATA_MODEL.md` and `docs/CODE_MAP.md`.
+> runtime-wired). For roadmap/status, see
+> `docs/04_IMPLEMENTATION_PLAN.md`. For current schema and code
+> layout, see `docs/DATA_MODEL.md` and `docs/CODE_MAP.md`.
 
 ## Status
 
@@ -117,6 +118,10 @@ Detailed module / state-machine diagrams live in `docs/02_HLD.md`.
 - **Active runtime state** — the SQLite database opened by
   `src/db.ts` (path resolved by `ACTWYN_DB_PATH` /
   `/var/lib/actwyn/actwyn.db` on prod).
+- **Roadmap / status** — `docs/04_IMPLEMENTATION_PLAN.md` owns
+  milestone, track, phase, slice, gate, status, evidence, and next
+  work. `docs/context/current-state.md` is the compressed first-read
+  view.
 - **Architecture decisions** — `docs/adr/*` (ADR-0001 … ADR-0017
   accepted on `main`; ADR-0009 … ADR-0013 + ADR-0015 cover the
   Judgment System direction, and ADR-0017 resolves memory-to-judgment
