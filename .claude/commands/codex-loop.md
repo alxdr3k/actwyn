@@ -5,9 +5,11 @@ description: 현재 PR의 codex 리뷰를 기다리고 코멘트 수정 후 push
 
 현재 작업 중인 PR에 대해 codex 리뷰를 기다리고, 코멘트가 달리면 수정 후 push. 통과 reaction까지 반복한 뒤 PR을 정책에 맞춰 merge한다.
 
-## ⚠️ 핵심 원칙: foreground sync로 한 번만 호출
+## 핵심 원칙: 대기 사이클마다 foreground sync 1회
 
-**스크립트는 polling sleep 동안 idle**이라 그 시간 동안 토큰을 전혀 쓰지 않음. 한 번 호출하고 종료까지 기다리면 한 번의 결과만 받게 됨. **이게 이 스크립트의 존재 이유다.**
+각 대기 사이클은 `wait-codex-review.sh`를 foreground로 1회 실행해 처리한다.
+스크립트는 polling sleep 동안 idle이라 그 시간 동안 토큰을 거의 쓰지 않는다.
+feedback을 수정하고 push한 뒤에는 다음 대기 사이클로 보고 스크립트를 다시 실행한다.
 
 ```bash
 bash .claude/scripts/wait-codex-review.sh
@@ -21,7 +23,7 @@ bash .claude/scripts/wait-codex-review.sh
 
 ## 절차
 
-1. PR 만든 직후, 또는 push 직후, 위 명령을 **foreground로 한 번** 실행한다.
+1. PR 만든 직후, 또는 push 직후, 위 명령을 **foreground로 1회** 실행한다.
 2. 종료될 때까지 기다린다 (스크립트가 알아서 polling).
 3. 종료 코드에 따라 처리:
 
