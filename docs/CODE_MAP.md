@@ -229,7 +229,7 @@ See `docs/RUNTIME.md` for the full runtime boundary description.
 None currently flagged. The 2026-04 salvage audit
 (`docs/design/salvage-audit-2026-04.md`) classified
 `src/context/builder.ts` as the only REPLACE candidate. It
-remains in tree until the Stage 4 Context Compiler path is
-available. The removal timing — immediate deletion vs a
+remains in tree for regression parity after the Stage 4 Context
+Compiler landing. The removal timing — immediate deletion vs a
 `possibly stale` soak period — is an open follow-up decision
 recorded in audit §7.

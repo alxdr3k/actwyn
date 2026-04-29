@@ -720,8 +720,8 @@ committed for a later milestone.
     (proposal-only writer for `judgment_items` + `judgment_events`)
     and `src/judgment/tool.ts` (unregistered `judgment.propose`
     contract) landed. `memory_items` and `judgment_items` remain
-    separate schemas. Question stays open; broader migration /
-    unification policy unresolved.
+    separate schemas. At that point, broader migration / unification
+    policy had not yet been decided.
   - 2026-04-27 Phase 1A.6 implementation: local unregistered
     `judgment.query` / `judgment.explain` read surfaces landed.
     `memory_items` and `judgment_items` remain separate schemas.
@@ -730,7 +730,8 @@ committed for a later milestone.
     `judgment_items` rows and injects them into `buildContext()` as a
     `judgment_active` slot (priority 600, below `memory_user_stated`).
     `memory_items` and `judgment_items` remain separate schemas;
-    promotion/migration policy still unresolved (broader Q-027 scope).
+    at that point, promotion/migration policy had not yet been decided
+    (broader Q-027 scope).
   - 2026-04-29 architecture review: resolved in favor of
     judgment-centered convergence for MVP (ADR-0017). Long dual-track
     active memory + active judgment authority is rejected; physical table
@@ -1404,22 +1405,25 @@ committed for a later milestone.
 - **Owner**: project lead.
 - **Context**: `docs/design/salvage-audit-2026-04.md` §6 step 9 / §7
   에서 surfaced. Audit headline에서 `src/context/builder.ts`만
-  REPLACE로 분류됨 (Stage 4 Context Compiler가 ownership을 가져감).
-  남은 결정: Compiler PR과 같은 PR에서 `builder.ts`를 즉시 삭제할
-  것인가, 아니면 한 release soak period 동안 `possibly stale`로
-  marker 후 삭제할 것인가.
+  REPLACE로 분류됨. Stage 4 Context Compiler는 랜딩했고,
+  `builder.ts`는 regression parity 목적으로 남아 있다. 남은 결정:
+  `builder.ts`를 즉시 삭제할 것인가, 아니면 한 release soak period
+  동안 `possibly stale`로 marker 후 삭제할 것인가.
 - **Required follow-up items**:
   1. 옵션 비교 — 즉시 삭제 (clean cut, regression 시 git revert
      필요) vs soak (rollback 용이, 단기 dead code 노출).
   2. soak 채택 시 — `possibly stale` marker 형식 결정 (top-of-file
      comment / ARCHITECTURE.md 표 / lint warning).
-  3. 삭제 PR 시점 결정 — Compiler merge + N release.
-- **Recommendation**: Compiler design PR review 시점에 결정. soak
+  3. 삭제 PR 시점 결정 — current compiler path + N release.
+- **Recommendation**: 다음 context cleanup/refactor 전에 결정. soak
   period가 채택된다면 audit §6 step 9에 명시된 `chore(context):
   drop legacy builder` 를 별도 PR로.
-- **Trigger**: Stage 4 Context Compiler 설계 PR 작성 시점.
-- **History**: 2026-04-27 (salvage audit §6 step 9 / §7 candidate를
-  정식 Q로 promotion).
+- **Trigger**: next context cleanup/refactor 또는 P1 kickoff 전.
+- **History**:
+  - 2026-04-27 salvage audit §6 step 9 / §7 candidate를 정식 Q로
+    promotion.
+  - 2026-04-29 current-state review: Compiler landing 이후에도
+    삭제 timing만 open인 상태로 정리.
 
 ### Q-067 — actwyn self-improvement task 실행 경계?
 

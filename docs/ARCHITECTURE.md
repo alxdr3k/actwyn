@@ -31,10 +31,10 @@
 | second-brain repo as canonical runtime memory     | not planned (history/seed only) |
 | Obsidian / Markdown active write path             | not planned |
 
-The Judgment System direction is committed by ADR-0009 through
-ADR-0015, refined by ADR-0017, plus `docs/JUDGMENT_SYSTEM.md`.
-Per DEC-037, those records explain *why*; implemented behavior is
-defined by code, migrations, and tests.
+The Judgment System direction is committed by ADR-0009 … ADR-0013,
+ADR-0015, ADR-0017, and `docs/JUDGMENT_SYSTEM.md`; ADR-0017 refines
+memory-to-judgment convergence. Per DEC-037, those records explain
+*why*; implemented behavior is defined by code, migrations, and tests.
 
 Current Judgment slice:
 
@@ -213,10 +213,11 @@ integration, `Tension` / `ReflectionTriageEvent`,
 
 The 2026-04 salvage audit
 (`docs/design/salvage-audit-2026-04.md`) concluded that most P0
-runtime stays. `src/context/builder.ts` is a future REPLACE candidate
-once the Stage 4 Context Compiler exists; `src/queue/worker.ts` and
-`src/memory/*` are ADAPT surfaces because summary-derived active
-memory remains a policy boundary. Q-027 is now resolved by ADR-0017:
-behavioral baselines converge on `judgment_items`, while implementation
-work remains pending. See the audit for the full table and follow-up
-sequence; this file only records the current architectural shape.
+runtime stays. `src/context/builder.ts` remains a REPLACE candidate
+after the Stage 4 Context Compiler landing; deletion timing is tracked
+by Q-066. `src/queue/worker.ts` and `src/memory/*` are ADAPT surfaces
+because summary-derived active memory remains a policy boundary. Q-027
+is now resolved by ADR-0017: behavioral baselines converge on
+`judgment_items`, while implementation work remains pending. See the
+audit for the historical table and follow-up sequence; this file only
+records the current architectural shape.
