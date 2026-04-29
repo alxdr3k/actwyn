@@ -135,5 +135,7 @@ it avoids.
 - DEC-039 — MVP implementation posture for this ADR.
 - ADR-0006 — Explicit memory and attachment promotion.
 - ADR-0009 — DB-native, AI-first Judgment System.
+- ADR-0011 — Architecture upgradeability and memory activation lifecycle.
 - ADR-0012 — Origin/Authority separation and Metacognitive Critique Loop.
+- ADR-0013 — Status axis separation and Judgment taxonomy refinements.
 - `docs/design/salvage-audit-2026-04.md` §7.

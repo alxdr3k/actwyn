@@ -55,7 +55,7 @@ Do not read `docs/design/archive/` by default. Those are history.
   contract for the P0 vertical. They are not authority for current
   runtime behavior.
 - The DB-native AI-first Judgment System direction is **committed
-  and partially implemented** (Phase 1A). ADR-0009 … ADR-0013,
+  and partially implemented** (Phase 1A+). ADR-0009 … ADR-0013,
   ADR-0015, ADR-0017, and `docs/JUDGMENT_SYSTEM.md` are the
   architectural authority for *why*.
   Current state (per DEC-037):

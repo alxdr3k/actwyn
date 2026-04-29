@@ -104,7 +104,7 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | Q-061   | Critique Lens v0.1 LLM critic prompt 형식                           | —             | —                          | —                | ADR-0013 §Decision 1                          |
 | Q-062   | Tension target_domain 확장 시점                                     | —             | —                          | —                | ADR-0013 §Decision 2; DEC-032                 |
 | Q-063   | docs-structure follow-up PR scope (current-state docs / AGENTS.md / archive) | —    | —                          | —                | DEC-037 §scope clarification                  |
-| Q-064   | `mayPromoteToLongTerm` gate를 의미별로 split할까?             | DEC-039       | —                          | —                | ADR-0017; `docs/design/salvage-audit-2026-04.md` §7 |
+| Q-064   | `mayPromoteToLongTerm` gate를 의미별로 split할까?             | ADR-0017 / DEC-039 | §12 (taxonomy)       | §11.3            | `docs/design/salvage-audit-2026-04.md` §7 |
 | Q-065   | `memory_base_path` JSONL/MD sidecar policy                   | —             | —                          | —                | `docs/design/salvage-audit-2026-04.md` §5.3/§7 |
 | Q-066   | `src/context/builder.ts` 삭제 timing                         | —             | —                          | —                | `docs/design/salvage-audit-2026-04.md` §6 step 9/§7 |
 | Q-067   | actwyn self-improvement task 실행 경계                       | ADR-0016      | —                          | —                | future `src/security/*`, `src/execution/*`, `src/tasks/repo/*`, `src/tasks/deploy/*` |

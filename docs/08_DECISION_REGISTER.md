@@ -1173,8 +1173,10 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
   - Wait until P1 and leave dual active baselines through dogfood.
   - Physically merge `memory_items` and `judgment_items` immediately.
   - Keep permanent separation and resolve conflicts only in context ordering.
-- Impacted docs: ADR-0017; Q-027; Q-064; `docs/ARCHITECTURE.md`;
-  `docs/CODE_MAP.md`; `docs/RUNTIME.md`; `docs/DATA_MODEL.md`.
+- Impacted docs: ADR-0017; Q-027; Q-064;
+  PRD §12 taxonomy; HLD §11.3; `docs/09_TRACEABILITY_MATRIX.md`;
+  `docs/ARCHITECTURE.md`; `docs/CODE_MAP.md`; `docs/RUNTIME.md`;
+  `docs/DATA_MODEL.md`; `AGENTS.md`; `docs/adr/README.md`.
 - Risks / mitigations: accidental loss of useful recall → preserve summaries
   and candidate memory as non-authoritative; migration risk → avoid
   destructive table removal in the first refactor unless a separate migration

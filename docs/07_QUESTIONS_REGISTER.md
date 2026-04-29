@@ -705,7 +705,8 @@ committed for a later milestone.
 - **Decision**: ADR-0017; implementation posture DEC-039.
 - **Impacted docs**: ADR-0006, ADR-0009, ADR-0017, DEC-039; PRD §12.1a
   Taxonomy; `docs/JUDGMENT_SYSTEM.md` §Relationship to memory layer;
-  thin current-state docs.
+  `docs/09_TRACEABILITY_MATRIX.md`; thin current-state docs; `AGENTS.md`;
+  `docs/adr/README.md`.
 - **Follow-up**: implementation PR에서 `mayPromoteToLongTerm` 의미 분리,
   summary promotion 조정, Context Compiler baseline priority 조정,
   관련 tests/docs 갱신.
@@ -715,7 +716,7 @@ committed for a later milestone.
   - 2026-04-27 Phase 1A.1 implementation: schema lands with
     separate `memory_items` and `judgment_items` per ADR-0009
     분리 commitment. Long-term unify/migrate/separate question
-    remains open and tracked here.
+    remained open and tracked here at that point.
   - 2026-04-27 Phase 1A.2 implementation: `src/judgment/repository.ts`
     (proposal-only writer for `judgment_items` + `judgment_events`)
     and `src/judgment/tool.ts` (unregistered `judgment.propose`
@@ -1140,6 +1141,8 @@ committed for a later milestone.
 - **Context**: ADR-0012가 8단계 정의. P0.5 도입 범위 미정.
 - **Decision**: DEC-031 — P0.5는 1-3단계만 (capture / signal detection /
   tension proposal). 4-7단계는 P1+, 8단계는 P3+.
+- **Impacted docs**: ADR-0012 §Decision 9; DEC-031;
+  `docs/JUDGMENT_SYSTEM.md` §Metacognitive Critique Loop.
 - **Trigger**: P1 도입 시점.
 - **History**: 2026-04-26 (ADR-0012 §Decision 9; DEC-031).
 
@@ -1165,6 +1168,8 @@ committed for a later milestone.
 - **Decision**: 깊이 제한 1 — `Tension` on `Tension` 금지. `target_type`
   enum에서 critique-object self-target (예: 별도 `tension` target_type)
   제외. 메타-critique이 필요하면 사용자 명시 또는 별 ADR.
+- **Impacted docs**: ADR-0012 §Risks; ADR-0013 Tension generalization;
+  `docs/JUDGMENT_SYSTEM.md` §Tension Generalization.
 - **Trigger**: 깊이 제한 2 이상이 필요한 use case 발견 시.
 - **History**: 2026-04-26 (ADR-0012 §Risks). 2026-04-26 follow-up
   (ADR-0013 cleanup): `DesignTension` → `Tension` rename 반영.
@@ -1177,6 +1182,8 @@ committed for a later milestone.
 - **Decision**: DEC-030 — 같은 SQLite DB, schema prefix 분리
   (`control_plane_*` vs `judgment_*`). cross-reference는 link table만,
   foreign key 없음.
+- **Impacted docs**: ADR-0012 §Decision 6; DEC-030;
+  `docs/JUDGMENT_SYSTEM.md` control-plane / judgment-plane sections.
 - **Trigger**: storage cost가 control-plane에서 폭발할 때.
 - **History**: 2026-04-26 (ADR-0012 §Decision 6; DEC-030).
 
@@ -1186,6 +1193,11 @@ committed for a later milestone.
   / workflow / evidence / decision / security / architecture). `architecture`
   는 Tension과 `kind=assumption`이 enum을 공유하므로 P0.5 필수 (PR #10
   codex bot P1 review 정정으로 7 → 8).
+- **Decision**: DEC-032 — P0.5는 8 enum
+  (`design` / `memory` / `policy` / `workflow` / `evidence` /
+  `decision` / `security` / `architecture`).
+- **Impacted docs**: ADR-0013 §Decision 2 / §Decision 8; DEC-032;
+  `docs/JUDGMENT_SYSTEM.md` §Tension Generalization.
 - **Trigger**: 사용자가 reserved 5 enum domain에서 tension 제기 시 enum 추가.
 - **History**: 2026-04-26 (ADR-0013 §Decision 2; DEC-032). follow-up:
   codex bot 발견 — DEC-032 본문은 8 enum이지만 Q-051은 7로 stale → 정정.
@@ -1205,12 +1217,20 @@ committed for a later milestone.
 ### Q-053 — status 3축 분리 시 ADR-0011 partial retract 형식?
 
 - **Status**: decided as ADR-0013 (partial retract).
+- **Decision**: ADR-0013 — ADR-0011 status 통합 결정은 partial retract로
+  처리하고, 3축 분리 결정은 ADR-0013에 기록한다.
+- **Impacted docs**: ADR-0011 §Decision 2; ADR-0013 §Decision 3;
+  DEC-033; `docs/JUDGMENT_SYSTEM.md` §Status Axis Separation.
 - **Trigger**: 추가 ADR partial retract 필요 시 동일 패턴.
 - **History**: 2026-04-26 (ADR-0013 §Decision 3 partial retract ADR-0011).
 
 ### Q-054 — Reflection 5 sub-action P0.5 도입 범위?
 
 - **Status**: decided as DEC-035 (`reflection_triage`만 P0.5).
+- **Decision**: DEC-035 — P0.5는 `reflection_triage`만 도입하고 나머지
+  reflection sub-action은 P1+로 둔다.
+- **Impacted docs**: ADR-0013 §Decision 5; DEC-035;
+  `docs/JUDGMENT_SYSTEM.md` §Reflection 5 sub-action.
 - **Trigger**: 사용자가 critique / proposal 자동화 요구 시.
 - **History**: 2026-04-26 (ADR-0013 §Decision 5; DEC-035).
 
@@ -1228,12 +1248,20 @@ committed for a later milestone.
 ### Q-056 — `procedure_subtype` 마이그레이션 default?
 
 - **Status**: decided as DEC-034 (default `skill`).
+- **Decision**: DEC-034 — 기존 procedure 노트 마이그레이션 default는
+  `procedure_subtype='skill'`.
+- **Impacted docs**: ADR-0013 §Decision 7; DEC-034;
+  `docs/JUDGMENT_SYSTEM.md` §procedure_subtype.
 - **Trigger**: 기존 procedure 노트 마이그레이션 정확도 문제 시.
 - **History**: 2026-04-26 (ADR-0013 §Decision 7; DEC-034).
 
 ### Q-057 — `current_truth` → `current_operating_view` 이름 변경 적용 범위?
 
 - **Status**: decided as DEC-036 (문서/UX만, DB 필드 그대로).
+- **Decision**: DEC-036 — 문서 / UX 용어는 `current_operating_view`로
+  바꾸고 DB 필드 `current_state`는 유지한다.
+- **Impacted docs**: ADR-0009 Law #4; ADR-0013 §Decision 4; DEC-036;
+  `docs/JUDGMENT_SYSTEM.md` §current_operating_view.
 - **Trigger**: 더 정확한 이름 발견 시.
 - **History**: 2026-04-26 (ADR-0013 §Decision 4; DEC-036).
 
@@ -1355,6 +1383,10 @@ committed for a later milestone.
   `mayBecomeBehaviorBaseline` 또는 `mayProposeJudgment`
   (judgment/baseline eligibility)을 분리한다. 구체 함수명은
   implementation PR에서 코드 패턴에 맞춰 확정한다.
+- **Impacted docs**: ADR-0017; DEC-039;
+  `docs/09_TRACEABILITY_MATRIX.md`; PRD §12 taxonomy; HLD §11.3;
+  future `src/memory/provenance.ts`, `src/memory/summary.ts`, and
+  related memory tests.
 - **Required follow-up items**:
   1. `src/memory/provenance.ts` gate split.
   2. Call site 마이그레이션 — `src/memory/items.ts`,
