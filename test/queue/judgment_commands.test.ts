@@ -387,3 +387,142 @@ describe("Phase 1B.4 — /judgment_commit command", () => {
     expect(lastSentText()).toContain("커밋 실패");
   });
 });
+
+describe("Phase 1B.5 — /judgment_revoke command", () => {
+  test("/judgment_revoke with no id returns usage hint", async () => {
+    seedCommandJob("j-rv-noarg", "k-rv-noarg", "/judgment_revoke", "");
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    expect(lastSentText()).toContain("사용법");
+  });
+
+  test("/judgment_revoke with id but no reason returns usage hint", async () => {
+    seedCommandJob("j-rv-noreason", "k-rv-noreason", "/judgment_revoke", "some-id");
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    expect(lastSentText()).toContain("사용법");
+  });
+
+  test("/judgment_revoke with unknown id returns not-found", async () => {
+    seedCommandJob("j-rv-unknown", "k-rv-unknown", "/judgment_revoke", "nonexistent-id 잘못된 판단");
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    expect(lastSentText()).toContain("찾을 수 없습니다");
+  });
+
+  test("/judgment_revoke revokes an active judgment", async () => {
+    seedActiveJudgment("jdg-revoke-1", "철회될 판단");
+    seedCommandJob("j-rv-ok", "k-rv-ok", "/judgment_revoke", "jdg-revoke-1 더 이상 유효하지 않음");
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    const text = lastSentText();
+    expect(text).toContain("철회됨");
+    expect(text).toContain("revoked");
+    expect(text).toContain("excluded");
+  });
+
+  test("/judgment_revoke does NOT store a turn", async () => {
+    seedActiveJudgment("jdg-rv-turn", "턴 미저장 테스트 판단");
+    seedCommandJob("j-rv-turn", "k-rv-turn", "/judgment_revoke", "jdg-rv-turn 테스트용");
+    await runWorkerOnce(deps());
+    const turns = db.prepare<{ c: number }, []>("SELECT COUNT(*) AS c FROM turns").get()!.c;
+    expect(turns).toBe(0);
+  });
+
+  test("/judgment_revoke does NOT insert a control_gate_events row", async () => {
+    seedActiveJudgment("jdg-rv-cg", "CG 미생성 테스트");
+    seedCommandJob("j-rv-cg", "k-rv-cg", "/judgment_revoke", "jdg-rv-cg 테스트");
+    await runWorkerOnce(deps());
+    const cgCount = db.prepare<{ c: number }, []>("SELECT COUNT(*) AS c FROM control_gate_events").get()!.c;
+    expect(cgCount).toBe(0);
+  });
+
+  test("revoked judgment no longer appears in /judgment list", async () => {
+    seedActiveJudgment("jdg-rv-hidden", "숨겨질 판단");
+    // revoke it
+    seedCommandJob("j-rv-hide1", "k-rv-hide1", "/judgment_revoke", "jdg-rv-hidden 테스트 철회");
+    await runWorkerOnce(deps());
+    // now query
+    seedCommandJob("j-rv-hide2", "k-rv-hide2", "/judgment");
+    await runWorkerOnce(deps());
+    expect(lastSentText()).toContain("없습니다");
+  });
+});
+
+describe("Phase 1B.5 — /judgment_expire command", () => {
+  test("/judgment_expire with no id returns usage hint", async () => {
+    seedCommandJob("j-ex-noarg", "k-ex-noarg", "/judgment_expire", "");
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    expect(lastSentText()).toContain("사용법");
+  });
+
+  test("/judgment_expire with id but no reason returns usage hint", async () => {
+    seedCommandJob("j-ex-noreason", "k-ex-noreason", "/judgment_expire", "some-id");
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    expect(lastSentText()).toContain("사용법");
+  });
+
+  test("/judgment_expire with unknown id returns not-found", async () => {
+    seedCommandJob("j-ex-unknown", "k-ex-unknown", "/judgment_expire", "nonexistent-id 만료 이유");
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    expect(lastSentText()).toContain("찾을 수 없습니다");
+  });
+
+  test("/judgment_expire expires an active judgment", async () => {
+    seedActiveJudgment("jdg-expire-1", "만료될 판단");
+    seedCommandJob("j-ex-ok", "k-ex-ok", "/judgment_expire", "jdg-expire-1 시효 만료");
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    const text = lastSentText();
+    expect(text).toContain("만료됨");
+    expect(text).toContain("expired");
+    expect(text).toContain("excluded");
+  });
+
+  test("/judgment_expire does NOT store a turn", async () => {
+    seedActiveJudgment("jdg-ex-turn", "만료 턴 미저장");
+    seedCommandJob("j-ex-turn", "k-ex-turn", "/judgment_expire", "jdg-ex-turn 테스트");
+    await runWorkerOnce(deps());
+    const turns = db.prepare<{ c: number }, []>("SELECT COUNT(*) AS c FROM turns").get()!.c;
+    expect(turns).toBe(0);
+  });
+});
+
+describe("Phase 1B.5 — /judgment_supersede command", () => {
+  test("/judgment_supersede with missing args returns usage hint", async () => {
+    seedCommandJob("j-su-noarg", "k-su-noarg", "/judgment_supersede", "old-id");
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    expect(lastSentText()).toContain("사용법");
+  });
+
+  test("/judgment_supersede with ids but no reason returns usage hint", async () => {
+    seedCommandJob("j-su-noreason", "k-su-noreason", "/judgment_supersede", "old-id new-id");
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    expect(lastSentText()).toContain("사용법");
+  });
+
+  test("/judgment_supersede supersedes an active judgment with another", async () => {
+    seedActiveJudgment("jdg-old-1", "구 판단: SQLite 버전 A 사용");
+    seedActiveJudgment("jdg-new-1", "신 판단: SQLite 버전 B 사용");
+    seedCommandJob("j-su-ok", "k-su-ok", "/judgment_supersede", "jdg-old-1 jdg-new-1 버전 업그레이드로 인한 교체");
+    const result = await runWorkerOnce(deps());
+    expect(result?.terminal).toBe("succeeded");
+    const text = lastSentText();
+    expect(text).toContain("교체됨");
+    expect(text).toContain("superseded");
+  });
+
+  test("/judgment_supersede does NOT store a turn", async () => {
+    seedActiveJudgment("jdg-su-old", "교체될 판단");
+    seedActiveJudgment("jdg-su-new", "대체 판단");
+    seedCommandJob("j-su-turn", "k-su-turn", "/judgment_supersede", "jdg-su-old jdg-su-new 테스트");
+    await runWorkerOnce(deps());
+    const turns = db.prepare<{ c: number }, []>("SELECT COUNT(*) AS c FROM turns").get()!.c;
+    expect(turns).toBe(0);
+  });
+});

@@ -177,6 +177,10 @@ const KNOWN_COMMANDS = new Set<string>([
   "/judgment_source",
   "/judgment_link",
   "/judgment_commit",
+  // Phase 1B.5 — Judgment System retirement commands
+  "/judgment_supersede",
+  "/judgment_revoke",
+  "/judgment_expire",
 ]);
 
 function parseCommand(text: string): { command: string; args: string } | { unknown: string } | null {

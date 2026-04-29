@@ -81,12 +81,15 @@ import { evaluateTurn, recordControlGateDecision } from "~/judgment/control_gate
 import {
   executeJudgmentApproveTool,
   executeJudgmentCommitTool,
+  executeJudgmentExpireTool,
   executeJudgmentExplainTool,
   executeJudgmentLinkEvidenceTool,
   executeJudgmentProposeTool,
   executeJudgmentQueryTool,
   executeJudgmentRecordSourceTool,
   executeJudgmentRejectTool,
+  executeJudgmentRevokeTool,
+  executeJudgmentSupersedeTool,
 } from "~/judgment/tool.ts";
 import { JUDGMENT_KINDS } from "~/judgment/types.ts";
 
@@ -1303,6 +1306,10 @@ const SYSTEM_COMMANDS = new Set([
   "/judgment_source",
   "/judgment_link",
   "/judgment_commit",
+  // Phase 1B.5 — Judgment System retirement commands
+  "/judgment_supersede",
+  "/judgment_revoke",
+  "/judgment_expire",
 ]);
 
 function isSystemCommand(cmd: string): boolean {
@@ -1352,6 +1359,9 @@ async function runSystemCommandJob(
     "/judgment_source",
     "/judgment_link",
     "/judgment_commit",
+    "/judgment_supersede",
+    "/judgment_revoke",
+    "/judgment_expire",
   ]);
   let turnId: string | null = null;
   if (job.session_id && responseText.length > 0 && !JUDGMENT_COMMANDS_NO_TURN.has(command)) {
@@ -1472,6 +1482,9 @@ async function dispatchSystemCommand(
         "/judgment_source <kind> <locator> — 소스 기록",
         "/judgment_link <judgment_id> <source_id> <relation> — 증거 연결",
         "/judgment_commit <id> [reason] — 승인된 판단 활성화",
+        "/judgment_supersede <old_id> <new_id> <reason> — 판단 교체",
+        "/judgment_revoke <id> <reason> — 판단 철회",
+        "/judgment_expire <id> <reason> — 판단 만료 처리",
       ].join("\n");
     }
 
@@ -1822,6 +1835,66 @@ async function dispatchSystemCommand(
           : `커밋 실패: ${result.error.message}`;
       }
       return `커밋됨: [${result.judgment.id.slice(0, 8)}] (${result.judgment.lifecycle_status}/${result.judgment.activation_state})`;
+    }
+
+    // Phase 1B.5 — Judgment System retirement commands
+    case "/judgment_supersede": {
+      const parts = args.trim().split(/\s+/);
+      const oldId = parts[0];
+      const newId = parts[1];
+      const reason = parts.slice(2).join(" ").trim();
+      if (!oldId || !newId) return "사용법: /judgment_supersede <old_id> <new_id> <reason>";
+      if (!reason) return "사용법: /judgment_supersede <old_id> <new_id> <reason>";
+      const result = executeJudgmentSupersedeTool(deps.db, {
+        old_judgment_id: oldId,
+        replacement_judgment_id: newId,
+        actor: job.user_id ?? "user",
+        reason,
+      }, { nowIso: () => deps.now().toISOString() });
+      if (!result.ok) {
+        return result.error.code === "not_found"
+          ? `판단을 찾을 수 없습니다 (old=${oldId}, new=${newId}).`
+          : `교체 실패: ${result.error.message}`;
+      }
+      return `교체됨: [${result.result.old_judgment_id.slice(0, 8)}] → [${result.result.replacement_judgment_id.slice(0, 8)}] (${result.result.old_lifecycle_status})`;
+    }
+
+    case "/judgment_revoke": {
+      const parts = args.trim().split(/\s+/);
+      const judgmentId = parts[0];
+      if (!judgmentId) return "사용법: /judgment_revoke <judgment_id> <reason>";
+      const reason = parts.slice(1).join(" ").trim();
+      if (!reason) return "사용법: /judgment_revoke <judgment_id> <reason>";
+      const result = executeJudgmentRevokeTool(deps.db, {
+        judgment_id: judgmentId,
+        actor: job.user_id ?? "user",
+        reason,
+      }, { nowIso: () => deps.now().toISOString() });
+      if (!result.ok) {
+        return result.error.code === "not_found"
+          ? `판단(${judgmentId})을 찾을 수 없습니다.`
+          : `철회 실패: ${result.error.message}`;
+      }
+      return `철회됨: [${result.result.id.slice(0, 8)}] (${result.result.lifecycle_status}/${result.result.activation_state})`;
+    }
+
+    case "/judgment_expire": {
+      const parts = args.trim().split(/\s+/);
+      const judgmentId = parts[0];
+      if (!judgmentId) return "사용법: /judgment_expire <judgment_id> <reason>";
+      const reason = parts.slice(1).join(" ").trim();
+      if (!reason) return "사용법: /judgment_expire <judgment_id> <reason>";
+      const result = executeJudgmentExpireTool(deps.db, {
+        judgment_id: judgmentId,
+        actor: job.user_id ?? "user",
+        reason,
+      }, { nowIso: () => deps.now().toISOString() });
+      if (!result.ok) {
+        return result.error.code === "not_found"
+          ? `판단(${judgmentId})을 찾을 수 없습니다.`
+          : `만료 처리 실패: ${result.error.message}`;
+      }
+      return `만료됨: [${result.result.id.slice(0, 8)}] (${result.result.lifecycle_status}/${result.result.activation_state})`;
     }
 
     default:
