@@ -1,6 +1,6 @@
 # Traceability Matrix
 
-> Status: living document · Owner: project lead · Last updated: 2026-04-28
+> Status: living document · Owner: project lead · Last updated: 2026-04-29
 >
 > This matrix is the index that connects questions, decisions, and
 > source-of-truth artifacts. See
@@ -107,6 +107,7 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | Q-064   | `mayPromoteToLongTerm` gate를 의미별로 split할까?             | —             | —                          | —                | `docs/design/salvage-audit-2026-04.md` §7     |
 | Q-065   | `memory_base_path` JSONL/MD sidecar policy                   | —             | —                          | —                | `docs/design/salvage-audit-2026-04.md` §5.3/§7 |
 | Q-066   | `src/context/builder.ts` 삭제 timing                         | —             | —                          | —                | `docs/design/salvage-audit-2026-04.md` §6 step 9/§7 |
+| Q-067   | actwyn self-improvement task 실행 경계                       | ADR-0016      | —                          | —                | future `src/security/*`, `src/execution/*`, `src/tasks/repo/*`, `src/tasks/deploy/*` |
 
 ## Matrix — ADRs → artifacts
 
@@ -127,6 +128,7 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | ADR-0013 | Critique Lens v0.1 + Tension Generalization + Status Axis Separation | §12 (taxonomy 확장 예정) | §11.3                | `docs/JUDGMENT_SYSTEM.md` §Critique Lens v0.1 + §Tension Generalization + §Status Axis Separation; second-brain Ideation Round 13 + Appendix A.23; partial retract ADR-0011 status 9 enum / activation_score 통합; rename ADR-0012 DesignTension → Tension; refine ADR-0010 Reflection / Workspace / procedure |
 | ADR-0014 | Bun runtime stack confirmation: cautions, principles, roadmap | —                        | —                       | `docs/RUNTIME.md`; `docs/TESTING.md`; `src/db.ts`; `src/providers/subprocess.ts`; `src/storage/s3.ts` |
 | ADR-0015 | control_gate_events append-only ledger                        | —                        | —                       | `migrations/005_control_gate_events.sql`; `src/judgment/control_gate.ts`; `test/db/control_gate_schema.test.ts`; `test/judgment/control_gate.test.ts`; **Phase 1B.1**: runtime-wired via `src/queue/worker.ts` (per non-system `provider_run`); `test/queue/control_gate_telemetry.test.ts` |
+| ADR-0016 | Capability-governed internal task runner                      | —                        | —                       | future `src/security/*`, `src/execution/*`, `src/tasks/repo/*`, `src/tasks/deploy/*`; Q-067 |
 | DEC-038 | Judgment System Phase 1B.1–1B.3 Runtime Wiring (2026-04-28) | —                        | —                       | `src/queue/worker.ts` (1B.1 Control Gate + 1B.2 context injection + 1B.3 commands); `src/context/builder.ts` (`judgment_active` slot); `src/telegram/inbound.ts` (KNOWN_COMMANDS); `test/queue/control_gate_telemetry.test.ts`; `test/context/builder_judgments.test.ts`; `test/queue/judgment_commands.test.ts`; `test/queue/judgment_context_injection.test.ts` |
 
 ## Matrix — DECs → artifacts

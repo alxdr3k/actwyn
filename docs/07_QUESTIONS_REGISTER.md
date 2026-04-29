@@ -1,6 +1,6 @@
 # Personal Agent — Questions Register
 
-> Status: living document · Owner: project lead · Last updated: 2026-04-27
+> Status: living document · Owner: project lead · Last updated: 2026-04-29
 >
 > This file is the **question ledger**: it captures questions, proposed
 > answers, and the promotion pointers that route each decided answer
@@ -1418,6 +1418,42 @@ committed for a later milestone.
 - **Trigger**: Stage 4 Context Compiler 설계 PR 작성 시점.
 - **History**: 2026-04-27 (salvage audit §6 step 9 / §7 candidate를
   정식 Q로 promotion).
+
+### Q-067 — actwyn self-improvement task 실행 경계?
+
+- **Status**: decided as ADR-0016 (2026-04-29).
+- **Owner**: project lead + Staff Eng + Security.
+- **Context**: 가설 세션에서 사용자가 "actwyn 실행 중 발견한 개선점 /
+  문제점을 actwyn에게 actwyn repo를 clone해서 고치게 만들 수 있는가"를
+  질문했다. 후속 질문에서 repo 수정은 `tasks/repo`, 배포는
+  `tasks/deploy` 같은 일반화된 task domain으로 다뤄야 하는지, 보안
+  표면을 capability로 통제할 수 있는지, 외부 GitHub Actions runner를
+  쓰지 않고 내부 sandbox 실행으로 충분한지 검토했다. 현 P0 provider
+  path는 Claude CLI를 `--tools ""` / `dontAsk`로 잠가 실제 파일 수정,
+  shell, git 작업을 허용하지 않는다.
+- **Proposed answer**: 가능하지만 기존 `provider_run`에 붙이지 않는다.
+  future task runner를 capability-governed side-effect control plane으로
+  설계한다. `src/tasks/repo` / `src/tasks/deploy`는 domain workflow,
+  `src/security/*`는 capability policy / approval / audit,
+  `src/execution/*`는 sandboxed process execution enforcement point가
+  된다. 실행은 외부 GitHub Actions runner가 아니라 내부 OS sandbox를
+  우선한다: macOS 개발 환경은 `sandbox-exec`, Ubuntu 운영 환경은
+  `bubblewrap` baseline + 가능한 경우 Landlock / cgroup 보강. fork alone은
+  보안 경계가 아니며, sandbox 미지원 환경에서는 fail-closed한다.
+- **Decision**: ADR-0016.
+- **Impacted docs**: ADR-0016; implementation scope가 열리면
+  `docs/RUNTIME.md`, `docs/CODE_MAP.md`, `docs/TESTING.md`,
+  `docs/OPERATIONS.md`와 필요한 PRD/HLD/AC patch를 같은 변경에서 수행.
+- **Follow-up**:
+  1. Repo task 구현 전 `src/security/*`, `src/execution/*`,
+     `src/tasks/repo/*` 설계 / 테스트 범위를 별도 PR로 확정.
+  2. 첫 구현 범위는 diff / branch / draft PR 생성까지로 제한하고,
+     merge / deploy / production restart는 별도 human approval과 후속
+     architecture review 전까지 금지.
+  3. `bubblewrap`, `sandbox-exec`, Landlock / cgroup availability를
+     `/doctor` 또는 task preflight에서 fail-closed로 검증.
+- **History**: 2026-04-29 가설 세션 Q1-Q6 검토 후 사용자가 방향을
+  accept함.
 
 ---
 

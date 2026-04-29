@@ -5,14 +5,16 @@ description: 현재 PR의 codex 리뷰를 기다리고 코멘트 수정 후 push
 
 현재 작업 중인 PR에 대해 codex 리뷰를 기다리고, 코멘트가 달리면 수정 후 push. 통과 reaction까지 반복한 뒤 PR을 정책에 맞춰 merge한다.
 
-## 핵심 원칙: 대기 사이클마다 foreground script 1회
+## 핵심 원칙: 대기 사이클마다 foreground 확인 1회
 
-각 대기 사이클은 `wait-codex-review.sh`를 foreground로 1회 실행해 처리한다.
-스크립트가 내부 polling을 담당하고 종료 시점에 필요한 결과만 반환한다. feedback을
-수정하고 push한 뒤에는 다음 대기 사이클로 보고 스크립트를 다시 실행한다.
+각 대기 사이클은 GitHub app 또는 `gh` CLI를 사용해 foreground에서 1회 확인한다.
+feedback을 수정하고 push한 뒤에는 다음 대기 사이클로 보고 같은 확인 절차를 다시
+실행한다. background polling을 남기지 않는다.
 
 ```bash
-bash .claude/scripts/wait-codex-review.sh
+gh pr view --json number,url,isDraft,baseRefName,headRefName,mergeStateStatus,reviewDecision
+gh pr checks <PR_NUMBER> --watch
+gh pr view <PR_NUMBER> --comments
 ```
 
 다음 패턴은 금지한다.
@@ -24,31 +26,26 @@ bash .claude/scripts/wait-codex-review.sh
 
 ## 절차
 
-1. PR 만든 직후, 또는 push 직후, 스크립트를 foreground로 1회 실행한다.
-2. 종료될 때까지 기다린다. 스크립트가 PR 감지, baseline 계산, feedback/reaction
-   polling을 처리한다.
-3. 종료 코드에 따라 처리한다.
+1. PR 만든 직후, 또는 push 직후, GitHub app으로 PR 상태와 review/comment를 확인한다.
+2. GitHub app으로 필요한 상태를 볼 수 없으면 `gh pr view`, `gh pr checks --watch`,
+   `gh pr view --comments`를 foreground로 실행한다.
+3. 결과에 따라 처리한다.
 
-| exit | 의미 | 다음 행동 |
-| ---- | ---- | --------- |
-| 0 | Codex pass reaction 감지 | checks 확인 후 PR merge |
-| 1 | 새 comment/review가 stdout에 출력됨 | 분석 -> 수정 -> commit -> push -> 스크립트 재실행 |
-| 2 | timeout | 사용자에게 타임아웃 보고 |
-| 3 | PR 감지 실패 | PR 번호 또는 URL 요청 후 스크립트 인자로 재실행 |
-| 4 | 영구 API 오류 | 인증/권한 문제 보고 |
-
-인자 형식:
-
-- 인자 없음: 현재 브랜치 PR 자동 감지
-- PR 번호: `bash .claude/scripts/wait-codex-review.sh 42`
-- PR URL: `bash .claude/scripts/wait-codex-review.sh https://github.com/owner/repo/pull/42`
+| 상태 | 다음 행동 |
+| ---- | --------- |
+| Codex pass reaction 감지 | checks 확인 후 PR merge |
+| 새 comment/review 발견 | 분석 -> 수정 -> commit -> push -> 확인 절차 재실행 |
+| checks pending | `gh pr checks <PR_NUMBER> --watch` foreground 실행 |
+| timeout | 사용자에게 타임아웃 보고 |
+| PR 감지 실패 | PR 번호 또는 URL 요청 후 재확인 |
+| 영구 API 오류 | 인증/권한 문제 보고 |
 
 ## Feedback 처리
 
 - 코멘트가 모호하거나 우선순위 판단이 필요하면 코드 수정 전 사용자에게 확인한다.
 - 이미 처리된 이슈, 재현 불가 항목, 범위 밖 요구는 근거를 남기고 제외할 수 있다.
 - 수정은 최소 diff로 하고, 관련 테스트와 repo가 정의한 검증 명령을 다시 실행한다.
-- push 후 스크립트를 다시 foreground로 실행한다.
+- push 후 GitHub app 또는 `gh` 확인 절차를 다시 foreground로 실행한다.
 
 ## Merge 처리
 

@@ -108,11 +108,13 @@ Detailed module / state-machine diagrams live in `docs/02_HLD.md`.
 - **Active runtime state** — the SQLite database opened by
   `src/db.ts` (path resolved by `ACTWYN_DB_PATH` /
   `/var/lib/actwyn/actwyn.db` on prod).
-- **Architecture decisions** — `docs/adr/*` (ADR-0001 … ADR-0015
+- **Architecture decisions** — `docs/adr/*` (ADR-0001 … ADR-0016
   accepted on `main`; ADR-0009 … ADR-0013 + ADR-0015 cover the
   Judgment System direction; Phase 1A.1–1A.8 and Phase 1B.1–1B.3
   implemented — DEC-038 records the Phase 1B runtime wiring decision;
-  full Context Compiler and Telegram write commands remain future work).
+  full Context Compiler and Telegram write commands remain future work;
+  ADR-0016 records the future internal task-runner security boundary,
+  not implemented runtime behavior).
 - **Tactical decisions and open questions** —
   `docs/08_DECISION_REGISTER.md`, `docs/07_QUESTIONS_REGISTER.md`
   (DEC-037 records the documentation lifecycle policy this set of

@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-> Status: living index · Owner: project lead · Last updated: 2026-04-28
+> Status: living index · Owner: project lead · Last updated: 2026-04-29
 
 This directory holds **architecture-level decisions**: choices that
 are hard to reverse, have broad blast radius, or shape the system's
@@ -76,3 +76,4 @@ Register (`DEC-###`), not here.
 | ADR-0013 | Critique Lens v0.1 + Tension Generalization + Status Axis Separation | accepted |
 | ADR-0014 | Bun runtime stack confirmation: cautions, principles, roadmap | accepted |
 | ADR-0015 | `control_gate_events` append-only ledger (Phase 1A.8 Control Gate substrate) | accepted |
+| ADR-0016 | Capability-governed internal task runner                 | accepted |
