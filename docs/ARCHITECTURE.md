@@ -53,6 +53,8 @@ Current Judgment slice:
   converted into proposed Judgment rows only; those rows are not
   approved, evidence-linked, committed, activated, or exposed as
   provider tools.
+- Phase 1C.2b: summary completion notifications surface the count,
+  short IDs, and review commands for auto-proposed summary Judgments.
 - Judgment typed-tool contracts remain unregistered as provider tools.
   Provider-output extraction/proposal, provider tool registration,
   `current_operating_view`, and vector/graph projections are future
@@ -218,9 +220,9 @@ Runtime-wired surface:
 
 All Judgment Telegram command output is sent through outbound
 notifications and is not stored as conversation turns. Still future:
-provider-output extraction, provider tool registration, summary
-proposal review visibility, `Tension` / `ReflectionTriageEvent`,
-`current_operating_view`, and vector/graph projections.
+provider-output extraction, provider tool registration, `Tension` /
+`ReflectionTriageEvent`, `current_operating_view`, and vector/graph
+projections.
 
 ## Salvage audit pointer
 
@@ -230,8 +232,7 @@ runtime stays. `src/context/builder.ts` remains a REPLACE candidate
 after the Stage 4 Context Compiler landing; deletion timing is tracked
 by Q-066. `src/queue/worker.ts` and `src/memory/*` are ADAPT surfaces:
 summary output now stays in `memory_summaries` and creates
-proposal-only Judgment rows, while provider-output extraction remains
-future work. Q-027 is resolved by ADR-0017: behavioral baselines
-converge on `judgment_items`. See the audit for the historical table
-and follow-up sequence; this file only records the current
-architectural shape.
+proposal-only Judgment rows with notification visibility, while
+provider-output extraction remains future work. Q-027 is resolved by
+ADR-0017: behavioral baselines converge on `judgment_items`. See the
+audit for history; this file records the current architecture only.

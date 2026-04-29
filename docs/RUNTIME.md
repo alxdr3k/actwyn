@@ -209,9 +209,8 @@ Runtime access:
   `/judgment_revoke`, and `/judgment_expire`. Output is sent through
   outbound notifications and is not stored as conversation turns.
 - `src/judgment/summary_proposals.ts` — worker-called
-  `summary_generation` bridge that creates proposal-only
-  `judgment_items`; no source/evidence link, approval, commit,
-  activation, or provider-tool registration.
+  `summary_generation` bridge that creates proposal-only `judgment_items`
+  and adds proposal counts/IDs/review hints to summary notifications.
 - `src/context/builder.ts` — gains `judgment_items` slot type
   (priority 790, above memory recall). `src/queue/worker.ts` populates it with
   active/eligible/normal/global/time-valid rows in `replay_mode`
@@ -226,14 +225,15 @@ Schema version is **6**: migrations 005–006 add `control_gate_events`, `job_id
 ADR-0017 / DEC-039 runtime slices are implemented: memory persistence
 and Judgment proposal gates are split; summary output stays in
 `memory_summaries`, creates proposal-only Judgments, and never creates
-active `memory_items`; active/eligible judgments outrank memory recall.
+active `memory_items`; summary notifications surface proposal review
+hints; active/eligible judgments outrank memory recall.
 
 ### What is not implemented
 
 Do not wire any of these until explicitly authorized:
 
 - Provider-output extraction of candidate `JudgmentItem` rows.
-- Automatic approval/evidence-link/commit/activation of summary proposals, or operator-facing review affordances.
+- Automatic approval/evidence-link/commit/activation of summary proposals.
 - Provider tool registration for any Judgment write path.
 - `current_operating_view` and `current_operating_view`-sourced Compiler input
   (`compiler.ts` is wired; `builder.ts` remains active slot helper until Q-066).

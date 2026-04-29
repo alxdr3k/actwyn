@@ -92,7 +92,10 @@ import {
   executeJudgmentSupersedeTool,
 } from "~/judgment/tool.ts";
 import { JUDGMENT_KINDS } from "~/judgment/types.ts";
-import { proposeJudgmentsFromSummary } from "~/judgment/summary_proposals.ts";
+import {
+  proposeJudgmentsFromSummary,
+  type ProposeSummaryJudgmentsResult,
+} from "~/judgment/summary_proposals.ts";
 
 export interface WorkerConfig {
   readonly capture: CaptureConfig;
@@ -554,6 +557,7 @@ async function runOneClaimedInner(
   let turnId: string | null = null;
   const finalText = outcome.response.final_text;
   const summaryResult = { sync: null as { summaryId: string; summaryData: SummaryOutput } | null };
+  let summaryProposalResult: ProposeSummaryJudgmentsResult | null = null;
   let pendingNotification: { notification_id: string; chunks: readonly string[] } | null = null;
 
   deps.db.tx<void>(() => {
@@ -722,6 +726,7 @@ async function runOneClaimedInner(
         actor: "summary_generation",
         nowIso: () => deps.now().toISOString(),
       });
+      summaryProposalResult = proposalResult;
       if (proposalResult.proposed > 0 || proposalResult.skipped > 0) {
         deps.events.info("queue.summary.judgment_proposals", {
           job_id: job.id,
@@ -780,7 +785,7 @@ async function runOneClaimedInner(
           ? "job_cancelled"
           : "job_failed";
     const notifText = (isSummaryJob && summaryResult.sync !== null)
-      ? buildSummaryNotificationText(summaryResult.sync.summaryData)
+      ? buildSummaryNotificationText(summaryResult.sync.summaryData, summaryProposalResult)
       : buildNotificationText(outcome.kind, outcome.response.final_text, {
           duration_ms: outcome.response.duration_ms,
           provider: outcome.response.provider,
@@ -839,7 +844,10 @@ async function runOneClaimedInner(
   return { job_id: job.id, terminal, turn_id: turnId, provider_run_id: providerRunId };
 }
 
-function buildSummaryNotificationText(summary: SummaryOutput): string {
+function buildSummaryNotificationText(
+  summary: SummaryOutput,
+  proposalResult: ProposeSummaryJudgmentsResult | null = null,
+): string {
   const counts: string[] = [];
   if (summary.facts.length > 0) counts.push(`사실 ${summary.facts.length}개`);
   if (summary.preferences.length > 0) counts.push(`선호도 ${summary.preferences.length}개`);
@@ -847,7 +855,25 @@ function buildSummaryNotificationText(summary: SummaryOutput): string {
   if (summary.open_tasks.length > 0) counts.push(`열린 작업 ${summary.open_tasks.length}개`);
   if (summary.cautions.length > 0) counts.push(`주의사항 ${summary.cautions.length}개`);
   const detail = counts.length > 0 ? ` (${counts.join(", ")})` : "";
-  return `요약이 완료됐습니다${detail}.`;
+  const lines = [`요약이 완료됐습니다${detail}.`];
+  if (proposalResult !== null && (proposalResult.proposed > 0 || proposalResult.skipped > 0)) {
+    if (proposalResult.proposed > 0) {
+      lines.push(`판단 제안 ${proposalResult.proposed}건 생성됨.`);
+      for (const judgment of proposalResult.judgments.slice(0, 5)) {
+        lines.push(`- [${judgment.id.slice(0, 8)}] ${judgment.kind}: ${truncateForNotification(judgment.statement, 80)}`);
+      }
+      lines.push("검토: /judgment_explain <id> 후 /judgment_approve <id> 또는 /judgment_reject <id> <reason>");
+    }
+    if (proposalResult.skipped > 0) {
+      lines.push(`판단 제안 스킵 ${proposalResult.skipped}건.`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function truncateForNotification(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, Math.max(0, maxChars - 3))}...`;
 }
 
 function buildNotificationText(

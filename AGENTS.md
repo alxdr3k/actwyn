@@ -86,6 +86,8 @@ Do not read `docs/design/archive/` by default. Those are history.
     output creates proposal-only `judgment_items` through
     `src/judgment/summary_proposals.ts`. It does not approve, link
     evidence, commit, activate, or register provider tools.
+  - JDG-1C.2b is landed: summary completion notifications include
+    auto-proposed Judgment counts, short IDs, and review command hints.
   - The `judgment_items` context slot priority is 790.
   - Remaining Phase 1A constraints still apply to all modules except
     `src/queue/worker.ts`:

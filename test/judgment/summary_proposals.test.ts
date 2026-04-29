@@ -54,6 +54,13 @@ describe("proposeJudgmentsFromSummary — JDG-1C.2a", () => {
     expect(result.proposed).toBe(5);
     expect(result.skipped).toBe(0);
     expect(result.judgment_ids).toEqual(["judg-1", "judg-2", "judg-3", "judg-4", "judg-5"]);
+    expect(result.judgments.map((j) => j.kind)).toEqual([
+      "fact",
+      "preference",
+      "decision",
+      "current_state",
+      "caution",
+    ]);
 
     const rows = db
       .prepare<{

@@ -47,14 +47,21 @@ export interface ProposeSummaryJudgmentsResult {
   readonly proposed: number;
   readonly skipped: number;
   readonly judgment_ids: readonly string[];
+  readonly judgments: readonly SummaryProposedJudgment[];
   readonly errors: readonly SummaryJudgmentProposalError[];
+}
+
+export interface SummaryProposedJudgment {
+  readonly id: string;
+  readonly kind: JudgmentKind;
+  readonly statement: string;
 }
 
 export function proposeJudgmentsFromSummary(
   args: ProposeSummaryJudgmentsArgs,
   deps: ProposeSummaryJudgmentsDeps = {},
 ): ProposeSummaryJudgmentsResult {
-  const judgmentIds: string[] = [];
+  const judgments: SummaryProposedJudgment[] = [];
   const errors: SummaryJudgmentProposalError[] = [];
   const observedAt = deps.nowIso?.();
 
@@ -103,7 +110,11 @@ export function proposeJudgmentsFromSummary(
     };
     const result = executeJudgmentProposeTool(args.db, input, proposalDeps);
     if (result.ok) {
-      judgmentIds.push(result.judgment.id);
+      judgments.push({
+        id: result.judgment.id,
+        kind: result.judgment.kind,
+        statement: result.judgment.statement,
+      });
     } else {
       errors.push({
         item_type: item.item_type,
@@ -114,9 +125,10 @@ export function proposeJudgmentsFromSummary(
   }
 
   return {
-    proposed: judgmentIds.length,
+    proposed: judgments.length,
     skipped: errors.length,
-    judgment_ids: judgmentIds,
+    judgment_ids: judgments.map((j) => j.id),
+    judgments,
     errors,
   };
 }

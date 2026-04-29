@@ -22,11 +22,10 @@ the acceptance plan is executed on a configured host.
   convergence slices when explicitly authorized).
 - Current ready OPS leaf: `OPS-1A.1` acceptance environment inventory.
 - Current ready feature leaf, if feature work is selected instead of
-  acceptance work: `JDG-1C.2b` review visibility for auto-proposed
-  summary judgments.
+  acceptance work: `JDG-1C.2c` provider-output extraction boundary.
 - Latest docs slice: `DOC-1A.5` top-down leaf roadmap expansion landed.
 - Last local validation: `bun run ci` passed on 2026-04-29 for the
-  `JDG-1C.2a` summary proposal update.
+  `JDG-1C.2b` summary proposal visibility update.
 - Next gate: P0 acceptance/staging work.
 - Canonical ledger: `docs/04_IMPLEMENTATION_PLAN.md`.
 
@@ -47,11 +46,12 @@ the acceptance plan is executed on a configured host.
 - `JDG-1C.2a`: structured `summary_generation` output now creates
   proposed Judgment rows only; it does not approve, link evidence,
   commit, activate, or register provider tools.
+- `JDG-1C.2b`: summary completion notifications now include
+  auto-proposed Judgment counts, short IDs, and review command hints.
 
 ## Planned / deferred
 
 - P0 acceptance/staging execution and dogfood evidence collection.
-- Review/operator visibility for auto-proposed summary Judgments.
 - Provider-output Judgment extraction/proposal boundary decision.
 - Provider tool registration for Judgment tools, only after explicit
   authorization.

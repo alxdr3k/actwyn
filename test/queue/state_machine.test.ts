@@ -12,6 +12,7 @@ import { runWorkerOnce, type WorkerDeps } from "../../src/queue/worker.ts";
 import { evaluateStorageCapacity } from "../../src/storage/capacity.ts";
 import { StubS3Transport } from "../../src/storage/s3.ts";
 import type { MimeProbe, TelegramFileTransport } from "../../src/telegram/attachment_capture.ts";
+import { StubOutboundTransport } from "../../src/telegram/outbound.ts";
 
 async function sha256HexUint8(bytes: Uint8Array): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", bytes);
@@ -404,6 +405,68 @@ describe("/end: summary_generation job marks session ended on success", () => {
       .prepare<{ n: number }>("SELECT COUNT(*) AS n FROM memory_items WHERE session_id = 'sess-1'")
       .get()!.n;
     expect(memoryItemCount).toBe(0);
+  });
+
+  test("JDG-1C.2b: summary notification includes auto-proposed judgment review hints", async () => {
+    const summaryJson = JSON.stringify({
+      session_id: "sess-1",
+      summary_type: "session",
+      facts: [{ content: "사용자는 Bun을 선호한다", provenance: "observed", confidence: 0.85 }],
+      preferences: [],
+      decisions: [],
+      open_tasks: [{ content: "acceptance 환경을 준비한다", provenance: "user_stated", confidence: 0.7 }],
+      cautions: [],
+      source_turn_ids: ["turn-1"],
+    });
+    db.prepare<unknown, [string, string, string, string]>(
+      `INSERT INTO jobs
+         (id, status, job_type, session_id, user_id, chat_id, request_json, idempotency_key, provider)
+       VALUES(?, 'queued', 'summary_generation', ?, 'user-1', 'chat-1', ?, ?, 'fake')`,
+    ).run(
+      "j-summary-visibility",
+      "sess-1",
+      JSON.stringify({ command: "/summary", args: "", text: "", has_attachments: false }),
+      "telegram:summary-visibility",
+    );
+
+    const outbound = new StubOutboundTransport();
+    await runWorkerOnce(deps({
+      outbound,
+      summaryAdapter: {
+        name: "fake",
+        run: async () => ({
+          kind: "succeeded" as const,
+          response: {
+            provider: "fake",
+            session_id: "fake-session",
+            final_text: summaryJson,
+            raw_events: [],
+            duration_ms: 1,
+            exit_code: 0,
+            parser_status: "parsed" as const,
+          },
+        }),
+      },
+    }));
+
+    const notif = db
+      .prepare<{ notification_type: string; payload_text: string }, [string]>(
+        "SELECT notification_type, payload_text FROM outbound_notifications WHERE job_id = ? AND notification_type = 'summary'",
+      )
+      .get("j-summary-visibility")!;
+    expect(notif.notification_type).toBe("summary");
+    expect(notif.payload_text).toContain("판단 제안 2건 생성됨.");
+    expect(notif.payload_text).toContain("/judgment_explain <id>");
+    expect(notif.payload_text).toContain("/judgment_approve <id>");
+    expect(notif.payload_text).toContain("/judgment_reject <id> <reason>");
+
+    const proposed = db
+      .prepare<{ id: string }, never[]>("SELECT id FROM judgment_items ORDER BY id")
+      .all();
+    expect(proposed.length).toBe(2);
+    expect(notif.payload_text).toContain(`[${proposed[0]!.id.slice(0, 8)}]`);
+    expect(notif.payload_text).toContain(`[${proposed[1]!.id.slice(0, 8)}]`);
+    expect(outbound.call_log.some((c) => c.text.includes("판단 제안 2건 생성됨."))).toBe(true);
   });
 
   test("/end on empty session (fake returns no JSON) still closes session + inserts minimal summary", async () => {

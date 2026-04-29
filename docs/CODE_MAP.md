@@ -119,9 +119,10 @@ slice:
   active judgments through `src/judgment/tool.ts`.
 - **Phase 1C.2a**: successful `summary_generation` output creates proposal-only
   `judgment_items`; no source/evidence link, approval, commit, or activation.
+- **Phase 1C.2b**: summary notifications include proposal counts, short IDs, and review command hints.
 
-Pending: provider-output extraction/proposal, summary-proposal review visibility,
-provider tool registration, and `current_operating_view`. See `docs/RUNTIME.md`.
+Pending: provider-output extraction/proposal, provider tool registration, and
+`current_operating_view`. See `docs/RUNTIME.md`.
 
 ## Judgment
 
