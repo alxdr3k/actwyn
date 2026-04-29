@@ -45,17 +45,22 @@ describe("local Codex skills", () => {
       "codex:rescue",
       "codex:review",
       "codex:adversarial-review",
-      "/verify",
-      "/compact",
       "Claude 실행",
       "Claude가",
       "Claude에게",
+    ];
+    const forbiddenCommandPatterns = [
+      /(^|[\s`(["'])\/verify(?=$|[\s`.,;:)\]"'])/,
+      /(^|[\s`(["'])\/compact(?=$|[\s`.,;:)\]"'])/,
     ];
 
     for (const file of skillFiles()) {
       const content = readFileSync(file, "utf8");
       for (const term of forbiddenStrings) {
         expect(content).not.toContain(term);
+      }
+      for (const pattern of forbiddenCommandPatterns) {
+        expect(content).not.toMatch(pattern);
       }
 
       expect(content).not.toMatch(/\bClaude\b/);
