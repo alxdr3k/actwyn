@@ -217,9 +217,9 @@ The 2026-04 salvage audit
 (`docs/design/salvage-audit-2026-04.md`) concluded that most P0
 runtime stays. `src/context/builder.ts` remains a REPLACE candidate
 after the Stage 4 Context Compiler landing; deletion timing is tracked
-by Q-066. `src/queue/worker.ts` and `src/memory/*` are ADAPT surfaces
-because summary-derived active memory remains a policy boundary. Q-027
-is now resolved by ADR-0017: behavioral baselines converge on
-`judgment_items`, while implementation work remains pending. See the
+by Q-066. `src/queue/worker.ts` and `src/memory/*` are ADAPT surfaces:
+summary output now stays in `memory_summaries`, while automatic
+Judgment extraction/proposal remains future work. Q-027 is resolved by
+ADR-0017: behavioral baselines converge on `judgment_items`. See the
 audit for the historical table and follow-up sequence; this file only
 records the current architectural shape.
