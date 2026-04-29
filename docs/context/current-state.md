@@ -22,9 +22,9 @@ the acceptance plan is executed on a configured host.
   convergence slices when explicitly authorized).
 - Current planned slice: `P0-M5.GATE` for staging acceptance and dogfood
   evidence collection.
-- Latest docs slice: `DOC-1A.1` roadmap/status taxonomy migration landed.
+- Latest docs slice: `DOC-1A.2` maintenance drift workflow tightening landed.
 - Last local validation: `bun run ci` passed on 2026-04-29 for the
-  `DOC-1A.1` docs migration.
+  `DOC-1A.2` docs maintenance update.
 - Next gate: `bun run ci`, then P0 acceptance/staging work.
 - Canonical ledger: `docs/04_IMPLEMENTATION_PLAN.md`.
 

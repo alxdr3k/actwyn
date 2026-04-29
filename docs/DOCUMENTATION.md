@@ -1,6 +1,6 @@
 # Documentation Policy
 
-> Status: living policy · Owner: project lead · Last updated: 2026-04-28
+> Status: living policy · Owner: project lead · Last updated: 2026-04-29
 >
 > Codified in **DEC-037** (Implementation Documentation Lifecycle
 > Policy). This file is the operational shape of that policy and the
@@ -109,9 +109,10 @@ These tools make the policy self-enforcing rather than honor-system only.
 
 `.github/workflows/doc-freshness.yml` fires on every PR and on every direct
 push to `main`. If code in `src/` or `migrations/` changes without a
-corresponding thin-doc or generated-doc update, the workflow posts a warning
-listing the missing items. The warning is non-blocking (does not prevent
-merge), but should not be ignored.
+corresponding roadmap/status, acceptance gate, thin current-state doc,
+generated doc, or ADR update, the workflow posts a warning listing the
+missing items. The warning is non-blocking (does not prevent merge), but
+should not be ignored.
 
 Temporary: during the early-development period, direct `main` pushes are
 permitted. The workflow covers this via a `push` trigger in addition to

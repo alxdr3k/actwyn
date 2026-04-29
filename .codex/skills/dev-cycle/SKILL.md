@@ -9,7 +9,7 @@ description: "전체 개발 사이클: sync -> discover -> implement -> verify -
 
 - `--loop`: cycle 완료 후 Step 1부터 반복한다. Step 3에서 **ALL CLEAR**이면 종료한다.
 - `--loop N`: 정확히 N회 반복한다.
-- `--phase <id>`: 탐색과 구현 범위를 해당 roadmap/task/phase id로 제한한다. 값을 파싱하거나 변환하지 않는다.
+- `--phase <id>`: 탐색과 구현 범위를 해당 milestone / track / phase / slice id로 제한한다. 값을 파싱하거나 변환하지 않는다.
 
 ## Invariants
 
@@ -68,11 +68,14 @@ echo "Review base: $REVIEW_BASE"
 
 ## Step 2 - Discover
 
-로컬에서 직접 탐색한다. 읽기 순서는 repo guidance/README, roadmap과 thin docs, task 관련 source/tests 순서다. 긴 design/archive/generated 문서는 필요할 때만 읽는다.
+로컬에서 직접 탐색한다. 읽기 순서는 repo guidance/README,
+`docs/context/current-state.md`, `docs/04_IMPLEMENTATION_PLAN.md`,
+thin current-state docs, 작업 관련 source/tests 순서다.
+긴 design/archive/generated 문서는 필요할 때만 읽는다.
 
 판단 기준:
 
-- 구현 후보를 우선한다.
+- 구현 후보를 우선하되 commit 가능한 slice 크기로 자른다.
 - docs-only는 구현할 코드 작업이 없고 문서만 틀린 경우에만 선택한다.
 - 문서와 코드가 둘 다 필요하면 구현 작업으로 반환하고 docs update를 acceptance criteria에 포함한다.
 - `--phase <id>`가 있으면 해당 id 범위만 본다.
@@ -80,7 +83,8 @@ echo "Review base: $REVIEW_BASE"
 반환은 아래 중 하나:
 
 **## NEXT TASK**
-파일/영역, acceptance criteria, docs update, validation을 포함한 하나의 작업.
+milestone / track / phase / slice, 파일/영역, gate/acceptance criteria,
+docs update, validation을 포함한 하나의 작업.
 
 **## DOC FIX NEEDED**
 docs-only 수정 목록.
@@ -99,7 +103,7 @@ docs-only 수정 목록.
 - Direct-push repo: `main`에서 직접 작업한다.
 - Standard repo: default branch에서 시작했다면 `codex/<short-description>` 또는 `<type>/<short-description>` 브랜치를 만들고, 이미 작업 브랜치면 유지한다.
 - `update_plan`으로 작은 작업 단위를 만들고, 수동 편집은 `apply_patch`를 사용한다.
-- Step 2의 task를 구현한다. docs update가 acceptance criteria면 같은 cycle에서 처리한다.
+- Step 2의 slice/task를 구현한다. docs update가 acceptance criteria면 같은 cycle에서 처리한다.
 - `--phase <id>` 범위를 벗어난 작업은 하지 않는다.
 
 ## Step 5 - Verify

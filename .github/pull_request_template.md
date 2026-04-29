@@ -10,6 +10,9 @@ this template is a checklist, not a place for long prose.
 ## Documentation impact
 
 - [ ] No doc impact
+- [ ] Updated roadmap / status ledger (`docs/04_IMPLEMENTATION_PLAN.md`)
+- [ ] Updated compressed current state (`docs/context/current-state.md`)
+- [ ] Updated acceptance gates (`docs/06_ACCEPTANCE_TESTS.md`)
 - [ ] Updated current-state docs:
   - [ ] `docs/ARCHITECTURE.md`
   - [ ] `docs/CODE_MAP.md`

@@ -57,14 +57,27 @@ jobs:
 
           touched_any_thin_doc=$(printf '%s\n' "$CHANGED" | grep -E '^docs/(RUNTIME|CODE_MAP|ARCHITECTURE|DATA_MODEL|OPERATIONS|TESTING)\.md$' || true)
           touched_data_doc=$(printf '%s\n' "$CHANGED" | grep -E '^docs/DATA_MODEL\.md$' || true)
+          touched_roadmap_doc=$(printf '%s\n' "$CHANGED" | grep -E '^docs/04_IMPLEMENTATION_PLAN\.md$' || true)
+          touched_current_state=$(printf '%s\n' "$CHANGED" | grep -E '^docs/context/current-state\.md$' || true)
+          touched_acceptance_doc=$(printf '%s\n' "$CHANGED" | grep -E '^docs/06_ACCEPTANCE_TESTS\.md$' || true)
           touched_generated=$(printf '%s\n' "$CHANGED" | grep -E '^docs/generated/' || true)
           touched_adr=$(printf '%s\n' "$CHANGED" | grep -E '^docs/adr/' || true)
 
-          if [ -n "$touched_src" ] && [ -z "$touched_any_thin_doc" ] && [ -z "$touched_adr" ]; then
-            missing+=("src/ changed → update the matching thin doc (\`docs/RUNTIME.md\`, \`CODE_MAP.md\`, \`DATA_MODEL.md\`, \`OPERATIONS.md\`, or \`TESTING.md\`) in the same commit (or add an ADR).")
+          if [ -n "$touched_src" ] &&
+             [ -z "$touched_any_thin_doc" ] &&
+             [ -z "$touched_roadmap_doc" ] &&
+             [ -z "$touched_current_state" ] &&
+             [ -z "$touched_acceptance_doc" ] &&
+             [ -z "$touched_adr" ]; then
+            missing+=("src/ changed → update the matching docs: thin current-state docs (\`docs/RUNTIME.md\`, \`CODE_MAP.md\`, \`DATA_MODEL.md\`, \`OPERATIONS.md\`, or \`TESTING.md\`) for implemented behavior, \`docs/04_IMPLEMENTATION_PLAN.md\` for slice/evidence changes, \`docs/context/current-state.md\` for active position changes, \`docs/06_ACCEPTANCE_TESTS.md\` for gate changes, or add an ADR.")
           fi
 
-          if { [ -n "$touched_judgment" ] || [ -n "$touched_providers" ]; } && [ -z "$touched_any_thin_doc" ] && [ -z "$touched_adr" ]; then
+          if { [ -n "$touched_judgment" ] || [ -n "$touched_providers" ]; } &&
+             [ -z "$touched_any_thin_doc" ] &&
+             [ -z "$touched_roadmap_doc" ] &&
+             [ -z "$touched_current_state" ] &&
+             [ -z "$touched_acceptance_doc" ] &&
+             [ -z "$touched_adr" ]; then
             missing+=("judgment/ or providers/ changed → if a thin doc carries a \`Last verified against code\` header for this area, update the SHA and date.")
           fi
 
@@ -99,7 +112,7 @@ jobs:
               marker,
               '### Doc freshness check',
               '',
-              'Code changes were detected that may require thin-doc or generated-doc updates.',
+              'Code changes were detected that may require roadmap/status, gate, thin-doc, generated-doc, or ADR updates.',
               '',
               missing,
               '',
@@ -138,7 +151,7 @@ jobs:
           {
             echo "### Doc freshness check"
             echo ""
-            echo "Code changes were detected that may require thin-doc or generated-doc updates."
+            echo "Code changes were detected that may require roadmap/status, gate, thin-doc, generated-doc, or ADR updates."
             echo ""
             printf '%s\n' "$MISSING"
             echo ""

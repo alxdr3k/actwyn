@@ -81,7 +81,7 @@ Gate status:
 | ----- | ------- | ------------ | ------ | ----- |
 | `P0` | Single-user Telegram + Claude personal agent vertical | `P0-M5` | `landed` | Implementation is on `main`; staging acceptance and dogfood gates are not run. |
 | `JDG` | DB-native Judgment System and memory-to-judgment convergence | `JDG-1C` | `landed` | Runtime foundation is landed; automatic proposal/extraction remains future. |
-| `DOC` | Documentation source-of-truth and roadmap/status migration | `DOC-1A` | `landed` | DEC-040/Q-068 define this migration. |
+| `DOC` | Documentation source-of-truth and roadmap/status migration | `DOC-1A` | `landed` | DEC-040/Q-068 define the migration; `DOC-1A.2` tightens drift maintenance workflow. |
 | `OPS` | Deployment, staging acceptance, dogfood evidence | `OPS-1A` | `planned` | Acceptance files still show many `pending` rows because staging gates have not been executed. |
 
 ### Phases / slices
@@ -97,6 +97,7 @@ Gate status:
 | `JDG-2A` | Future | `JDG` | `JDG-2A` | `current_operating_view` and compiler input sourced from it | `JDG-1C` | New compiler/context tests | `defined` | `planned` | ADR-0013; DEC-036; `docs/RUNTIME.md` | Future runtime slice. |
 | `JDG-3A` | Future | `JDG` | `JDG-3A` | Vector / graph derived projections | Evidence that FTS/metadata retrieval is insufficient | TBD | `defined` | `planned` | ADR-0009; `docs/ARCHITECTURE.md` | Keep as derived projection, not source of truth. |
 | `DOC-1A.1` | Project docs | `DOC` | `DOC-1A` | Adopt roadmap/status taxonomy and create compressed current-state entrypoint | Boilerplate migration checklist | `bun run ci` | `passing` | `landed` | Q-068; DEC-040; this file; `docs/context/current-state.md`; `AGENTS.md`; `bun run ci` (2026-04-29) | Keep future roadmap/status inventory in this ledger. |
+| `DOC-1A.2` | Project docs | `DOC` | `DOC-1A` | Tighten maintenance drift workflow around roadmap/status, current-state, and acceptance gates | `DOC-1A.1`; `../boilerplate` commit `24b47f1` | `bun run ci` | `passing` | `landed` | `.codex/skills/*`; `.github/pull_request_template.md`; `.github/workflows/doc-freshness.yml`; `docs/DOCUMENTATION.md`; `bun run ci` (2026-04-29) | Keep workflow warnings aligned with docs policy when doc ownership changes. |
 
 ### Gates / acceptance
 
