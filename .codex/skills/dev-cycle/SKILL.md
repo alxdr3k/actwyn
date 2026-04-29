@@ -15,6 +15,7 @@ description: "전체 개발 사이클: sync -> discover -> implement -> verify -
 
 - Step이 끝나면 사용자 입력 없이 다음 Step으로 진행한다.
 - 멈추는 경우: **ALL CLEAR**, 사용자 승인 없이는 안전하지 않은 분기, 인증/권한/destructive git state, 해결 불가 blocker.
+- 사용자에게 보이는 보고, brief, finding, 질문은 한국어로 작성한다. 코드, 명령, 파일명, 원문 인용은 원문 언어를 유지한다.
 - repo type, review base, sync, brief log, risk issue 처리는 helper가 담당한다.
 - helper 경로는 아래 순서로 찾는다.
 
@@ -27,6 +28,7 @@ DEV_CYCLE_HELPER=".agents/scripts/dev-cycle-helper.sh"
 ## Brief Log
 
 새 실행의 첫 cycle에서만 초기화한다.
+`init-brief`는 `.dev-cycle/dev-cycle-run-id`와 `.dev-cycle/dev-cycle-briefs.md`를 만들고 export를 출력한다. Bash 호출 사이에 export가 사라져도 `finish-cycle`과 `summary`는 저장된 state를 검증해 이어 쓴다.
 
 ```bash
 eval "$("$DEV_CYCLE_HELPER" init-brief)"
@@ -38,7 +40,7 @@ eval "$("$DEV_CYCLE_HELPER" init-brief)"
 "$DEV_CYCLE_HELPER" validate-brief "$DEV_CYCLE_RUN_ID" "$DEV_CYCLE_BRIEF_LOG"
 ```
 
-검증 실패 또는 확신이 없으면 새 실행으로 보고 `init-brief`를 다시 실행한다.
+검증 실패 또는 확신이 없으면 새 실행으로 보고 `init-brief`를 다시 실행한다. 단, cycle 종료 시점의 누락된 환경변수를 복구하려고 `init-brief`를 다시 실행하지 않는다. 그것은 새 brief log를 시작한다.
 
 Cycle 종료 시 아래 값을 채워 helper로 brief를 출력하고 append한다. **ALL CLEAR, blocked, publish 금지로 종료하는 경우도 먼저 `finish-cycle`을 실행한다.** `Risk`가 비어 있지 않으면 helper가 GitHub issue를 만들고 issue URL을 brief에 기록한다. issue 생성에 실패하면 helper가 `blocked` brief를 append하고 중단한다.
 

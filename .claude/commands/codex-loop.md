@@ -5,6 +5,8 @@ description: 현재 PR의 codex 리뷰를 기다리고 코멘트 수정 후 push
 
 현재 작업 중인 PR에 대해 codex 리뷰를 기다리고, 코멘트가 달리면 수정 후 push. 통과 reaction까지 반복한 뒤 PR을 정책에 맞춰 merge한다.
 
+사용자에게 보이는 보고, feedback 정리, 질문은 한국어로 작성한다. 코드, 명령, 파일명, 원문 인용은 원문 언어를 유지한다.
+
 ## 핵심 원칙: 대기 사이클마다 foreground sync 1회
 
 각 대기 사이클은 `wait-codex-review.sh`를 foreground로 1회 실행해 처리한다.

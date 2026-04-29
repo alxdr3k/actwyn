@@ -148,12 +148,19 @@ shell_export() {
   printf 'export %s=%q\n' "$key" "$value"
 }
 
+brief_run_id_file() {
+  local state_dir="$1"
+  printf '%s\n' "$state_dir/dev-cycle-run-id"
+}
+
 init_brief() {
-  local run_id state_dir log
+  local run_id state_dir log run_id_file
   run_id="$(date -u +%Y%m%dT%H%M%SZ)"
   state_dir="$(ensure_state_dir)"
   log="$state_dir/dev-cycle-briefs.md"
+  run_id_file="$(brief_run_id_file "$state_dir")"
   printf "# Dev Cycle Briefs %s\n\n" "$run_id" > "$log"
+  printf '%s\n' "$run_id" > "$run_id_file"
   shell_export DEV_CYCLE_RUN_ID "$run_id"
   shell_export DEV_CYCLE_BRIEF_LOG "$log"
 }
@@ -163,6 +170,49 @@ validate_brief() {
   [[ -n "$run_id" && -n "$log" && -f "$log" ]] || return 1
   first="$(head -n 1 "$log")"
   [[ "$first" == "# Dev Cycle Briefs $run_id" ]]
+}
+
+brief_context() {
+  local state_dir run_id_file run_id log
+  state_dir="$(ensure_state_dir)"
+  run_id_file="$(brief_run_id_file "$state_dir")"
+  run_id="${DEV_CYCLE_RUN_ID:-}"
+  log="${DEV_CYCLE_BRIEF_LOG:-$state_dir/dev-cycle-briefs.md}"
+
+  if [[ -z "$run_id" && -f "$run_id_file" ]]; then
+    run_id="$(sed -n '1p' "$run_id_file")"
+  fi
+
+  if ! validate_brief "$run_id" "$log"; then
+    echo "No valid dev-cycle brief state. Run init-brief at the start of this dev-cycle run." >&2
+    return 1
+  fi
+
+  printf '%s\n%s\n' "$run_id" "$log"
+}
+
+validate_cycle_append() {
+  local cycle="$1" log="$2" previous
+
+  if grep -qxF "## Cycle $cycle" "$log"; then
+    echo "Cycle $cycle is already recorded in $log" >&2
+    return 1
+  fi
+
+  if [[ "$cycle" =~ ^[0-9]+$ ]]; then
+    if (( cycle == 1 )); then
+      if grep -q '^## Cycle ' "$log"; then
+        echo "Brief log already contains cycles; run init-brief to start a new dev-cycle run." >&2
+        return 1
+      fi
+    elif (( cycle > 1 )); then
+      previous=$((cycle - 1))
+      if ! grep -qxF "## Cycle $previous" "$log"; then
+        echo "Brief log is missing Cycle $previous before Cycle $cycle" >&2
+        return 1
+      fi
+    fi
+  fi
 }
 
 is_empty_risk() {
@@ -176,7 +226,7 @@ is_empty_risk() {
 }
 
 finish_cycle() {
-  local cycle result work verification review_ship risk next_action log brief issue_url title summary issue_err issue_msg
+  local cycle result work verification review_ship risk next_action log brief issue_url title summary issue_err issue_msg context
   cycle="${DEV_CYCLE_CYCLE:?set DEV_CYCLE_CYCLE}"
   result="${DEV_CYCLE_RESULT:?set DEV_CYCLE_RESULT}"
   work="${DEV_CYCLE_WORK:?set DEV_CYCLE_WORK}"
@@ -184,7 +234,10 @@ finish_cycle() {
   review_ship="${DEV_CYCLE_REVIEW_SHIP:?set DEV_CYCLE_REVIEW_SHIP}"
   risk="${DEV_CYCLE_RISK:-없음}"
   next_action="${DEV_CYCLE_NEXT_ACTION:-Triage the recorded risk.}"
-  log="${DEV_CYCLE_BRIEF_LOG:?set DEV_CYCLE_BRIEF_LOG}"
+  context="$(brief_context)"
+  log="$(printf '%s\n' "$context" | sed -n '2p')"
+
+  validate_cycle_append "$cycle" "$log"
 
   brief="$(cat <<EOF
 ## Cycle $cycle
@@ -239,13 +292,10 @@ EOF
 }
 
 summary() {
-  local log="${DEV_CYCLE_BRIEF_LOG:-}"
-  if [[ -n "$log" && -f "$log" ]]; then
-    sed -n '1,120p' "$log"
-  else
-    echo "No dev-cycle brief log found" >&2
-    return 1
-  fi
+  local context log
+  context="$(brief_context)"
+  log="$(printf '%s\n' "$context" | sed -n '2p')"
+  sed -n '1,120p' "$log"
 }
 
 usage() {
