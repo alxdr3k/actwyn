@@ -707,9 +707,10 @@ committed for a later milestone.
   Taxonomy; `docs/JUDGMENT_SYSTEM.md` §Relationship to memory layer;
   `docs/09_TRACEABILITY_MATRIX.md`; thin current-state docs; `AGENTS.md`;
   `docs/adr/README.md`.
-- **Follow-up**: implementation PR에서 `mayPromoteToLongTerm` 의미 분리,
-  summary promotion 조정, Context Compiler baseline priority 조정,
-  관련 tests/docs 갱신.
+- **Follow-up**: first implementation slice split
+  `mayPromoteToLongTerm` semantics, stopped summary auto-promotion,
+  and adjusted context priority. Remaining work: automatic Judgment
+  extraction/proposal and `current_operating_view`.
 - **History**:
   - 2026-04-26 ADR-0009 채택 시 분리 방향으로 출발점 설정
     (second-brain Ideation 노트 Open Question Q4 import).
