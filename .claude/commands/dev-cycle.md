@@ -19,8 +19,8 @@ description: "전체 개발 사이클: sync → discover → implement → verif
 - helper 경로는 아래 순서로 찾는다.
 
 ```bash
-DEV_CYCLE_HELPER=".claude/scripts/dev-cycle-helper.sh"
-[ -x "$DEV_CYCLE_HELPER" ] || DEV_CYCLE_HELPER="$HOME/.claude/scripts/dev-cycle-helper.sh"
+DEV_CYCLE_HELPER=".agents/scripts/dev-cycle-helper.sh"
+[ -x "$DEV_CYCLE_HELPER" ] || DEV_CYCLE_HELPER="$HOME/.agents/scripts/dev-cycle-helper.sh"
 [ -x "$DEV_CYCLE_HELPER" ] || { echo "Missing dev-cycle-helper.sh"; exit 1; }
 ```
 

@@ -9,10 +9,14 @@ description: 현재 PR의 codex 리뷰를 기다리고 코멘트 수정 후 push
 
 각 대기 사이클은 `wait-codex-review.sh`를 foreground로 1회 실행해 처리한다.
 스크립트는 polling sleep 동안 idle이라 그 시간 동안 토큰을 거의 쓰지 않는다.
+GitHub app으로 즉시 확인 가능한 상태가 있어도 대기/polling은 스크립트에 맡긴다.
 feedback을 수정하고 push한 뒤에는 다음 대기 사이클로 보고 스크립트를 다시 실행한다.
 
 ```bash
-bash .claude/scripts/wait-codex-review.sh
+CODEX_REVIEW_HELPER=".agents/scripts/wait-codex-review.sh"
+[ -x "$CODEX_REVIEW_HELPER" ] || CODEX_REVIEW_HELPER="$HOME/.agents/scripts/wait-codex-review.sh"
+[ -x "$CODEX_REVIEW_HELPER" ] || { echo "Missing wait-codex-review.sh"; exit 1; }
+bash "$CODEX_REVIEW_HELPER"
 ```
 
 다음 패턴은 **금지** — 매 cycle마다 stdout/상태를 확인하면 토큰을 그대로 다 쓰게 되어 스크립트의 의미가 사라짐:
@@ -77,8 +81,8 @@ branch protection, merge queue, required check pending 때문에 즉시 merge가
 ## 인자 형식
 
 - 인자 없음: 현재 브랜치의 PR 자동 감지
-- PR 번호: `bash ... 42`
-- PR URL: `bash ... https://github.com/owner/repo/pull/42`
+- PR 번호: `bash "$CODEX_REVIEW_HELPER" 42`
+- PR URL: `bash "$CODEX_REVIEW_HELPER" https://github.com/owner/repo/pull/42`
 
 ## 작업 지시 시 주의
 
