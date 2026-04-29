@@ -414,6 +414,33 @@ async function runOneClaimedInner(
           .run(JSON.stringify({ error_type: "prompt_overflow", detail: e.message }), job.id);
       });
       deps.events.warn("queue.job.prompt_overflow", { job_id: job.id, detail: e.message });
+      if (deps.outbound && job.chat_id) {
+        const created = createNotificationAndChunks({
+          db: deps.db,
+          newId: deps.newId,
+          args: {
+            job_id: job.id,
+            chat_id: job.chat_id,
+            notification_type: "job_failed",
+            text: buildNotificationText("failed", ""),
+            chunk_size: deps.config.notifications?.chunk_size,
+          },
+        });
+        let retryNeeded = false;
+        try {
+          const sendResult = await sendNotification(
+            { db: deps.db, transport: deps.outbound, events: deps.events },
+            created.notification_id,
+            created.chunks,
+          );
+          retryNeeded = sendResult.roll_up_status !== "sent";
+        } catch {
+          retryNeeded = true;
+        }
+        if (retryNeeded) {
+          enqueueNotificationRetryJob(deps, created.notification_id, job.chat_id);
+        }
+      }
       return { job_id: job.id, terminal: "failed", turn_id: null, provider_run_id: providerRunId };
     }
     throw e;

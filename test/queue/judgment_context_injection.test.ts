@@ -19,6 +19,7 @@ import {
   linkJudgmentEvidence,
 } from "../../src/judgment/repository.ts";
 import type { MimeProbe, TelegramFileTransport } from "../../src/telegram/attachment_capture.ts";
+import { StubOutboundTransport } from "../../src/telegram/outbound.ts";
 
 const MIGRATIONS = join(import.meta.dir, "..", "..", "migrations");
 
@@ -267,5 +268,32 @@ describe("Phase 1B.2 — resume_mode judgment refresh (issue #44)", () => {
     await runWorkerOnce(deps());
     expect(argvMessageFor("j-resume-exp")).not.toContain("만료된 재개 판단");
     expect(snapshotSlotsFor("j-resume-exp")).not.toContain("judgment_active");
+  });
+});
+
+// prompt_overflow terminal path
+describe("prompt_overflow — failure notification", () => {
+  test("job_failed notification is sent when compiler overflows minimum floor", async () => {
+    // Force PromptOverflowError: default budget is 6000 tokens.
+    // A ~18001-char ASCII message → ceil(18001/3) = 6001 tokens for user_message alone.
+    // With system_identity (~7 tokens) the minimum floor exceeds 6000 → PromptOverflowError.
+    const outbound = new StubOutboundTransport();
+    const overflowMessage = "A".repeat(18001);
+    db.prepare<unknown, [string, string, string, string]>(
+      `INSERT INTO jobs
+         (id, status, job_type, session_id, user_id, chat_id, request_json, idempotency_key, provider)
+       VALUES(?, 'queued', 'provider_run', ?, 'user-1', 'chat-1', ?, ?, 'fake')`,
+    ).run("j-overflow", "sess-1", JSON.stringify({ text: overflowMessage, command: null, args: "" }), "k-overflow");
+
+    await runWorkerOnce(deps({ outbound }));
+
+    const jobRow = db.prepare<{ status: string; error_json: string | null }, [string]>(
+      "SELECT status, error_json FROM jobs WHERE id = ?",
+    ).get("j-overflow");
+    expect(jobRow?.status).toBe("failed");
+    const errorJson = JSON.parse(jobRow?.error_json ?? "{}") as { error_type?: string };
+    expect(errorJson.error_type).toBe("prompt_overflow");
+    // A job_failed notification was sent to the user.
+    expect(outbound.call_log.length).toBeGreaterThan(0);
   });
 });
