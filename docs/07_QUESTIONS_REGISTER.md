@@ -693,25 +693,22 @@ committed for a later milestone.
 ### Q-027 — `memory_items`(ADR-0006)와 새 `judgment_items` 관계: 통합 / 분리 / 단계적 마이그레이션 중 무엇?
 
 - **Section**: Future Architecture
-- **Status**: open (2026-04-26).
+- **Status**: decided (2026-04-29).
 - **Top 10 priority**: —
 - **Owner**: Staff Eng + Product
-- **Proposed answer**: ADR-0009 Phase 0에서는 **분리** 방향으로
-  commit (memory layer는 그대로 유지, judgment layer는 별 schema로
-  추가). Phase 1 schema 구현 시 다음 중 결정:
-  - Option A — 영구 분리. `memory_items`는 session summary candidate
-    중심, `judgment_items`는 source-grounded judgment 중심.
-  - Option B — 단계적 마이그레이션. `memory_items`의 `user_stated` /
-    `user_confirmed` row를 source-grounded judgment로 promotion.
-    `memory_items`는 deprecation track.
-  - Option C — 통합. 한 테이블로 합치고 `kind` / `epistemic_origin` (ADR-0013
-    rename)으로 구분.
-  현 commitment는 Option A. Phase 1에서 evidence 기반 재결정.
-- **Decision**: ADR-0009 (Phase 0 commit), Phase 1에서 별 ADR / DEC
-  필요.
-- **Impacted docs**: ADR-0006, ADR-0009; PRD §12.1a Taxonomy;
-  `docs/JUDGMENT_SYSTEM.md` §Relationship to memory layer.
-- **Follow-up**: Phase 1 schema PR에서 결정.
+- **Proposed answer**: **Judgment-centered convergence.** 물리적 단일
+  테이블 통합은 MVP 필수가 아니지만, context-visible durable
+  behavioral baseline은 `judgment_items`로 수렴한다. `memory_items`는
+  summary byproduct / user-stated note / candidate / compatibility row로
+  남을 수 있으나, `judgment_items`와 peer authority로 행동 기준을
+  형성하지 않는다.
+- **Decision**: ADR-0017; implementation posture DEC-039.
+- **Impacted docs**: ADR-0006, ADR-0009, ADR-0017, DEC-039; PRD §12.1a
+  Taxonomy; `docs/JUDGMENT_SYSTEM.md` §Relationship to memory layer;
+  thin current-state docs.
+- **Follow-up**: implementation PR에서 `mayPromoteToLongTerm` 의미 분리,
+  summary promotion 조정, Context Compiler baseline priority 조정,
+  관련 tests/docs 갱신.
 - **History**:
   - 2026-04-26 ADR-0009 채택 시 분리 방향으로 출발점 설정
     (second-brain Ideation 노트 Open Question Q4 import).
@@ -734,6 +731,10 @@ committed for a later milestone.
     `judgment_active` slot (priority 600, below `memory_user_stated`).
     `memory_items` and `judgment_items` remain separate schemas;
     promotion/migration policy still unresolved (broader Q-027 scope).
+  - 2026-04-29 architecture review: resolved in favor of
+    judgment-centered convergence for MVP (ADR-0017). Long dual-track
+    active memory + active judgment authority is rejected; physical table
+    merge remains deferred.
 
 ### Q-028 — `JudgmentItem.kind` v1 enum 범위는 어디까지인가?
 
@@ -1337,7 +1338,7 @@ committed for a later milestone.
 
 ### Q-064 — `mayPromoteToLongTerm` gate를 의미별로 split할까?
 
-- **Status**: open.
+- **Status**: decided (2026-04-29).
 - **Owner**: project lead.
 - **Context**: `docs/design/salvage-audit-2026-04.md` §7에서 surfaced.
   현재 [`src/memory/provenance.ts`](../src/memory/provenance.ts)의
@@ -1348,21 +1349,22 @@ committed for a later milestone.
   `user_confirmed`로 제한하고, 나머지(`fact` / `decision` /
   `open_task` / `caution`)는 모든 provenance를 통과시킨다 — Q-027의
   코드 측 대응 지점.
+- **Decision**: ADR-0017 / DEC-039. Gate 의미를 분리한다. 최소 방향:
+  `mayPersistAsMemoryItem`(memory/candidate persistence)과
+  `mayBecomeBehaviorBaseline` 또는 `mayProposeJudgment`
+  (judgment/baseline eligibility)을 분리한다. 구체 함수명은
+  implementation PR에서 코드 패턴에 맞춰 확정한다.
 - **Required follow-up items**:
-  1. Q-027 결정 후 gate 의미 분리 — 후보:
-     `mayPersistAsMemoryItem` / `mayBecomeBehaviorBaseline` /
-     `mayProposeJudgment` (또는 ADR-0012의 epistemic_origin과 일치
-     하는 명명).
+  1. `src/memory/provenance.ts` gate split.
   2. Call site 마이그레이션 — `src/memory/items.ts`,
      `src/memory/summary.ts`의 `promoteItems` path.
   3. 테스트 fixture 갱신 — `test/memory/summary.test.ts`,
      `test/memory/correction.test.ts`의 expectation.
-- **Recommendation**: Q-027 결정 직후 단독 PR
-  (`refactor(memory): split provenance gate semantics`)로 처리.
-  salvage audit §6 step 7에 대응.
-- **Trigger**: Q-027 resolved.
-- **History**: 2026-04-27 (salvage audit §7 candidate를 정식 Q로
-  promotion).
+  4. Context Compiler baseline priority 조정 (ADR-0017).
+- **History**:
+  - 2026-04-27 salvage audit §7 candidate를 정식 Q로 promotion.
+  - 2026-04-29 Q-027 resolved by ADR-0017; gate split accepted by
+    DEC-039 as implementation prerequisite.
 
 ### Q-065 — `memory_base_path` JSONL/MD sidecar policy
 

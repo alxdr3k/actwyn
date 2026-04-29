@@ -77,3 +77,4 @@ Register (`DEC-###`), not here.
 | ADR-0014 | Bun runtime stack confirmation: cautions, principles, roadmap | accepted |
 | ADR-0015 | `control_gate_events` append-only ledger (Phase 1A.8 Control Gate substrate) | accepted |
 | ADR-0016 | Capability-governed internal task runner                 | accepted |
+| ADR-0017 | Judgment-centered memory convergence for MVP             | accepted |

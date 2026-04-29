@@ -7,7 +7,7 @@
 > current-state summaries; do not append phase history.
 >
 > This is a short pointer doc. For why decisions were made, see
-> `docs/adr/` (ADR-0001 … ADR-0015). For acceptance contracts and
+> `docs/adr/` (ADR-0001 … ADR-0017). For acceptance contracts and
 > full P0 design rationale, see `docs/PRD.md` and `docs/02_HLD.md`.
 > For the architectural authority of the DB-native AI-first
 > Judgment System direction, see `docs/JUDGMENT_SYSTEM.md` (Phase 0 /
@@ -32,9 +32,9 @@
 | Obsidian / Markdown active write path             | not planned |
 
 The Judgment System direction is committed by ADR-0009 through
-ADR-0015 plus `docs/JUDGMENT_SYSTEM.md`. Per DEC-037, those records
-explain *why*; implemented behavior is defined by code, migrations,
-and tests.
+ADR-0015, refined by ADR-0017, plus `docs/JUDGMENT_SYSTEM.md`.
+Per DEC-037, those records explain *why*; implemented behavior is
+defined by code, migrations, and tests.
 
 Current Judgment slice:
 
@@ -52,6 +52,9 @@ Current Judgment slice:
   Automatic extraction, provider tool registration, memory-promotion
   integration, `current_operating_view`, and vector/graph projections
   are future scope.
+- ADR-0017 resolves Q-027: context-visible durable behavioral baselines
+  should converge on `judgment_items`. This is an architectural
+  commitment; the runtime refactor is not yet implemented.
 
 ## System overview
 
@@ -112,11 +115,13 @@ Detailed module / state-machine diagrams live in `docs/02_HLD.md`.
 - **Active runtime state** — the SQLite database opened by
   `src/db.ts` (path resolved by `ACTWYN_DB_PATH` /
   `/var/lib/actwyn/actwyn.db` on prod).
-- **Architecture decisions** — `docs/adr/*` (ADR-0001 … ADR-0016
+- **Architecture decisions** — `docs/adr/*` (ADR-0001 … ADR-0017
   accepted on `main`; ADR-0009 … ADR-0013 + ADR-0015 cover the
-  Judgment System direction; Phase 1A.1–1A.8 and Phase 1B.1–1B.5
-  implemented — DEC-038 records the initial Phase 1B.1–1B.3 runtime
-  wiring decision; provider tool registration remains future work;
+  Judgment System direction, and ADR-0017 resolves memory-to-judgment
+  convergence; Phase 1A.1–1A.8 and Phase 1B.1–1B.5 implemented —
+  DEC-038 records the initial Phase 1B.1–1B.3 runtime wiring decision;
+  DEC-039 records the MVP convergence implementation posture; provider
+  tool registration remains future work;
   ADR-0016 records the future internal task-runner security boundary,
   not implemented runtime behavior).
 - **Tactical decisions and open questions** —
@@ -211,7 +216,7 @@ The 2026-04 salvage audit
 runtime stays. `src/context/builder.ts` is a future REPLACE candidate
 once the Stage 4 Context Compiler exists; `src/queue/worker.ts` and
 `src/memory/*` are ADAPT surfaces because summary-derived active
-memory remains a policy boundary. Q-027 (`memory_items` ↔
-`judgment_items`) stays open. See the audit for the full table and
-follow-up sequence; this file only records the current architectural
-shape.
+memory remains a policy boundary. Q-027 is now resolved by ADR-0017:
+behavioral baselines converge on `judgment_items`, while implementation
+work remains pending. See the audit for the full table and follow-up
+sequence; this file only records the current architectural shape.

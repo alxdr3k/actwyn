@@ -67,7 +67,7 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | Q-024   | Summary generation triggers                                        | DEC-019       | §12.3, §12.5               | §11.1            | —                                             |
 | Q-025   | Context packer drop order                                          | —             | §12.5, §12.6               | §10.3            | —                                             |
 | Q-026   | Recording usage when provider does not report it                   | —             | §14.3                      | §8.4, §13.3      | —                                             |
-| Q-027   | `memory_items` ↔ `judgment_items` 관계 (통합 / 분리 / 마이그레이션)  | —             | §12 (taxonomy)             | §11.3            | ADR-0009 §Risks; ADR-0011 §Decision 6 (architecture_assumption) |
+| Q-027   | `memory_items` ↔ `judgment_items` 관계 (통합 / 분리 / 마이그레이션)  | ADR-0017 / DEC-039 | §12 (taxonomy)       | §11.3            | ADR-0009 §Risks; ADR-0011 §Decision 6; Q-064 |
 | Q-028   | `JudgmentItem.kind` v1 enum 범위                                    | DEC-023       | —                          | —                | ADR-0009 §Risks; second-brain Round 11 must-fix |
 | Q-029   | Phase 1 SQLite FTS5 vs sqlite-vec leave-room                       | —             | —                          | —                | ADR-0009 §Risks; future Phase 1 ADR            |
 | Q-030   | second-brain repo 기존 정책 문서 처분 (cross-repo)                  | DEC-022 (cross-ref) | —                    | —                | ADR-0009 Phase 0 commitment                    |
@@ -104,7 +104,7 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | Q-061   | Critique Lens v0.1 LLM critic prompt 형식                           | —             | —                          | —                | ADR-0013 §Decision 1                          |
 | Q-062   | Tension target_domain 확장 시점                                     | —             | —                          | —                | ADR-0013 §Decision 2; DEC-032                 |
 | Q-063   | docs-structure follow-up PR scope (current-state docs / AGENTS.md / archive) | —    | —                          | —                | DEC-037 §scope clarification                  |
-| Q-064   | `mayPromoteToLongTerm` gate를 의미별로 split할까?             | —             | —                          | —                | `docs/design/salvage-audit-2026-04.md` §7     |
+| Q-064   | `mayPromoteToLongTerm` gate를 의미별로 split할까?             | DEC-039       | —                          | —                | ADR-0017; `docs/design/salvage-audit-2026-04.md` §7 |
 | Q-065   | `memory_base_path` JSONL/MD sidecar policy                   | —             | —                          | —                | `docs/design/salvage-audit-2026-04.md` §5.3/§7 |
 | Q-066   | `src/context/builder.ts` 삭제 timing                         | —             | —                          | —                | `docs/design/salvage-audit-2026-04.md` §6 step 9/§7 |
 | Q-067   | actwyn self-improvement task 실행 경계                       | ADR-0016      | —                          | —                | future `src/security/*`, `src/execution/*`, `src/tasks/repo/*`, `src/tasks/deploy/*` |
@@ -129,6 +129,7 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | ADR-0014 | Bun runtime stack confirmation: cautions, principles, roadmap | —                        | —                       | `docs/RUNTIME.md`; `docs/TESTING.md`; `src/db.ts`; `src/providers/subprocess.ts`; `src/storage/s3.ts` |
 | ADR-0015 | control_gate_events append-only ledger                        | —                        | —                       | `migrations/005_control_gate_events.sql`; `src/judgment/control_gate.ts`; `test/db/control_gate_schema.test.ts`; `test/judgment/control_gate.test.ts`; **Phase 1B.1**: runtime-wired via `src/queue/worker.ts` (per non-system `provider_run`); `test/queue/control_gate_telemetry.test.ts` |
 | ADR-0016 | Capability-governed internal task runner                      | —                        | —                       | future `src/security/*`, `src/execution/*`, `src/tasks/repo/*`, `src/tasks/deploy/*`; Q-067 |
+| ADR-0017 | Judgment-centered memory convergence for MVP                  | §12 (taxonomy 확장 예정) | §11.3                   | Q-027; Q-064; DEC-039; future `src/memory/*` and `src/context/compiler.ts` refactor |
 | DEC-038 | Judgment System Phase 1B.1–1B.3 Runtime Wiring (2026-04-28) | —                        | —                       | `src/queue/worker.ts` (1B.1 Control Gate + 1B.2 context injection + 1B.3 commands); `src/context/builder.ts` (`judgment_active` slot); `src/telegram/inbound.ts` (KNOWN_COMMANDS); `test/queue/control_gate_telemetry.test.ts`; `test/context/builder_judgments.test.ts`; `test/queue/judgment_commands.test.ts`; `test/queue/judgment_context_injection.test.ts` |
 
 ## Matrix — DECs → artifacts
@@ -173,6 +174,7 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | DEC-036 | `current_truth` → `current_operating_view` 이름 변경          | —                        | —                  | ADR-0013 §Decision 4; Q-057    |
 | DEC-037 | Implementation Documentation Lifecycle Policy                  | —                        | —                  | ADR README §Promotion rules; Q-063 (follow-up docs-structure PR) |
 | DEC-038 | Judgment System Phase 1B.1–1B.3 Runtime Wiring (2026-04-28)  | —                        | —                  | `src/queue/worker.ts`; `src/context/builder.ts`; `src/telegram/inbound.ts`; Phase 1B tests |
+| DEC-039 | MVP memory-to-judgment convergence implementation posture      | §12 (taxonomy 확장 예정) | §11.3              | ADR-0017; Q-027; Q-064; future `src/memory/*` and `src/context/compiler.ts` refactor |
 
 ## Matrix — PRD acceptance criteria → evidence
 

@@ -159,6 +159,12 @@ Atomic memory rows with explicit supersede semantics.
 - `status ∈ { active, superseded, revoked }`.
 - `supersedes_memory_id` chains corrections.
 
+ADR-0017 commits future judgment-centered convergence for
+behavior-changing long-term knowledge. The table remains implemented
+today; future refactors should treat it as memory-plane / candidate /
+compatibility data rather than peer authority with active
+`judgment_items`.
+
 ### `storage_objects`
 
 Two-phase attachment / artifact ledger.

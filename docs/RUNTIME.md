@@ -235,7 +235,9 @@ a task explicitly authorizes a further Judgment runtime slice.
 - `Tension` telemetry and the `tensions` table: **not implemented**.
 - `ReflectionTriageEvent` and `reflection_triage_events`: **not implemented**.
 - Vector and graph derived projections: **not implemented**.
-- Memory promotion integration: **not implemented**.
+- Judgment-centered memory convergence (ADR-0017 / DEC-039): **not
+  implemented**. Current runtime still has the older memory promotion
+  path until the follow-up refactor lands.
 
 The 6-stage pipeline in `docs/JUDGMENT_SYSTEM.md` remains the
 architectural authority for the Judgment System direction

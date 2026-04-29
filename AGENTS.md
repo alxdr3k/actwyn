@@ -55,8 +55,9 @@ Do not read `docs/design/archive/` by default. Those are history.
   contract for the P0 vertical. They are not authority for current
   runtime behavior.
 - The DB-native AI-first Judgment System direction is **committed
-  and partially implemented** (Phase 1A). ADR-0009 … ADR-0013 and
-  `docs/JUDGMENT_SYSTEM.md` are the architectural authority for *why*.
+  and partially implemented** (Phase 1A). ADR-0009 … ADR-0013,
+  ADR-0017, and `docs/JUDGMENT_SYSTEM.md` are the architectural
+  authority for *why*.
   Current state (per DEC-037):
   - **Phase 1A.1 (landed)**: `migrations/004_judgment_skeleton.sql`
     (5 tables + FTS5), `src/judgment/types.ts`,
@@ -164,6 +165,13 @@ Do not read `docs/design/archive/` by default. Those are history.
     judgments through `src/judgment/tool.ts`, send outbound
     notification output, do not store conversation turns, and do not
     trigger Control Gate evaluation.
+  - **ADR-0017 / DEC-039 (committed, not implemented)**: Q-027 is
+    resolved in favor of judgment-centered convergence for MVP.
+    Context-visible durable behavioral baselines should converge on
+    `judgment_items`; `memory_items` remains memory-plane /
+    candidate / compatibility data, not peer authority. Follow-up
+    implementation must split `mayPromoteToLongTerm` semantics and
+    adjust summary promotion / Context Compiler behavior.
   - Remaining Phase 1A constraints still apply to all modules except
     `src/queue/worker.ts`:
     - `src/main.ts`, `src/providers/*`, `src/context/*` (except

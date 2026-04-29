@@ -1,6 +1,6 @@
 # Decision Register
 
-> Status: living document · Owner: project lead · Last updated: 2026-04-28
+> Status: living document · Owner: project lead · Last updated: 2026-04-29
 >
 > Small, confirmed decisions that shape the project but are not
 > architecture-level. Architecture-level decisions live under
@@ -86,6 +86,7 @@ deployment shape). Everything else is a `DEC-###`.
 | DEC-036 | `current_truth` → `current_operating_view` 이름 변경          | accepted |
 | DEC-037 | Implementation Documentation Lifecycle Policy                  | accepted |
 | DEC-038 | Judgment System Phase 1B.1–1B.3 Runtime Wiring (2026-04-28)   | accepted |
+| DEC-039 | MVP memory-to-judgment convergence implementation posture      | accepted |
 
 Decisions that were previously `D01`..`D05` in the flat log have
 been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
@@ -1150,6 +1151,39 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
 - Full current-doc structure 생성 X.
 
 본 DEC는 lifecycle policy commitment만 codify한다.
+
+---
+
+## DEC-039 — MVP memory-to-judgment convergence implementation posture
+
+- Date: 2026-04-29
+- Status: accepted
+- Context: ADR-0017 resolves Q-027 by choosing judgment-centered
+  convergence for behavior-changing long-term knowledge. The code still has
+  an older active-memory path that can inject `memory_items.status='active'`
+  beside active judgments.
+- Decision: The MVP implementation should refactor now, not preserve a long
+  dual-baseline migration. Keep `memory_items` only as memory-plane /
+  candidate / compatibility data unless a specific implementation PR gives it
+  an explicitly non-authoritative recall role. Do not add new behavior that
+  treats active `memory_items` as peer authority with active `judgment_items`.
+  Split the old `mayPromoteToLongTerm` gate semantics before changing summary
+  promotion behavior.
+- Alternatives considered:
+  - Wait until P1 and leave dual active baselines through dogfood.
+  - Physically merge `memory_items` and `judgment_items` immediately.
+  - Keep permanent separation and resolve conflicts only in context ordering.
+- Impacted docs: ADR-0017; Q-027; Q-064; `docs/ARCHITECTURE.md`;
+  `docs/CODE_MAP.md`; `docs/RUNTIME.md`; `docs/DATA_MODEL.md`.
+- Risks / mitigations: accidental loss of useful recall → preserve summaries
+  and candidate memory as non-authoritative; migration risk → avoid
+  destructive table removal in the first refactor unless a separate migration
+  plan exists; review friction → use existing Judgment Telegram commands first.
+- Review trigger: first implementation PR touching `src/memory/provenance.ts`,
+  `src/memory/summary.ts`, `src/context/compiler.ts`, or `memory_items`
+  context injection.
+- Supersedes / superseded by: —
+- Refs: ADR-0017; Q-027; Q-064.
 
 ---
 
