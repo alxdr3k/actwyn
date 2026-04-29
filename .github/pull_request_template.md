@@ -40,7 +40,7 @@ See [`docs/DOCUMENTATION.md`](../docs/DOCUMENTATION.md) for the
 
 ## Validation
 
-- [ ] `bun run ci` passed locally (`lint:redactor` + `typecheck` + `bun test`)
+- [ ] `bun run ci` passed locally (`lint:redactor` + `lint:thin-docs` + `typecheck` + `bun test`)
 - [ ] If schema changed: bumped `expected_schema_version` in `src/main.ts`
 - [ ] Verified the PR does not touch unrelated runtime code
 

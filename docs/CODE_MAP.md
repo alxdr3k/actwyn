@@ -90,7 +90,7 @@ Status legend:
 | `src/memory/items.ts`             | Atomic `memory_items` rows with supersede semantics and memory-plane persistence gate.       | implemented · salvage:ADAPT-light (writer invariants KEEP; baseline authority lives in judgment layer per ADR-0017) |
 | `src/memory/provenance.ts`        | Provenance / confidence helpers shared by summary + items; split persistence vs judgment-proposal gates. | implemented · ADR-0017/Q-064 slice (`mayPromoteToLongTerm` retained as deprecated compatibility helper) |
 | `src/context/compiler.ts`         | Stage 4 Context Compiler v0 — centralizes DB retrieval (turns, memory_items, memory_summaries, judgment_items) and packing for replay/resume modes. Wired into worker.ts. | implemented · runtime-wired |
-| `src/context/builder.ts`          | Assembles prompt inputs (resume vs replay decision, recent turns, memory recall, active judgments). | implemented · salvage:ADAPT (active judgments outrank memory recall; `current_operating_view` remains future) |
+| `src/context/builder.ts`          | Pure slot builder used by `compiler.ts`; callers pass mode, turns, memory, summaries, and active judgments. | implemented · salvage:ADAPT (active judgments outrank memory recall; `current_operating_view` remains future) |
 | `src/context/packer.ts`           | Token-budget aware packer per PRD §12.5–§12.6.                                              | implemented · salvage:ADAPT (drop-by-priority + `injected_snapshot_json` shape KEEP; input type re-defined to Compiler output) |
 | `src/context/token_estimator.ts`  | CJK-safer token estimator (DEC-021).                                                        | implemented · salvage:KEEP                   |
 

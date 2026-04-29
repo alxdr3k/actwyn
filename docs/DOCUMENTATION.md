@@ -181,6 +181,6 @@ The operative reference for "what is actually running" is the thin
 current-state docs in this directory (`ARCHITECTURE.md`,
 `CODE_MAP.md`, `DATA_MODEL.md`, `RUNTIME.md`, `TESTING.md`,
 `OPERATIONS.md`) plus the code, tests, and migrations themselves.
-Phase 1A.1–1A.8 are landed on `main`. Phase 0 / 0.5 design specs
-are not rewritten; new ADRs supersede them where the architecture
-changes.
+Phase 1A.1–1A.8 and Phase 1B.1–1B.5 are landed on `main`. Phase 0 /
+0.5 design specs are not rewritten; new ADRs supersede them where
+the architecture changes.

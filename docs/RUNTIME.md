@@ -236,7 +236,7 @@ a task explicitly authorizes a further Judgment runtime slice.
   or summary output.
 - Provider tool registration for any Judgment write path.
 - `current_operating_view` and `current_operating_view`-sourced Compiler input
-  (`src/context/compiler.ts` is now wired; `builder.ts` remains in tree for regression parity).
+  (`compiler.ts` is wired; `builder.ts` remains active slot helper until Q-066).
 - Destructive migration or physical merge of existing `memory_items`
   into `judgment_items`.
 - Runtime readers for `judgment_edges`.
