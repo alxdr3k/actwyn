@@ -73,15 +73,15 @@ Gate status:
 | `P0-M3` | Memory + summary | `landed` | Memory acceptance criteria | `not_run` | `src/memory/*`, `src/context/*`, `test/memory/*`, `test/context/*` | Judgment convergence follow-ups tracked under `JDG`. |
 | `P0-M4` | Attachment + S3 | `landed` | Storage acceptance criteria | `not_run` | `src/storage/*`, `src/telegram/attachment_*`, storage/attachment tests | Staging S3 smoke remains acceptance work. |
 | `P0-M5` | Operate-and-polish: commands, doctor/status, startup recovery, deploy/runbook | `landed` | P0 Acceptance gate | `not_run` | `src/commands/*`, `src/startup/recovery.ts`, `deploy/*`, `docs/OPERATIONS.md` | Run full acceptance/staging gate before calling P0 accepted. |
-| `MVP-JDG` | Judgment-backed behavioral baseline for MVP | `landed` | `bun run ci` + current docs review | `passing` | `src/judgment/*`, `src/queue/worker.ts`, `src/context/*`, ADR-0017, DEC-039, DEC-041 | Summary-output proposal is landed; freeform provider-output extraction is excluded for MVP; `current_operating_view` remains planned. |
+| `MVP-JDG` | Judgment-backed behavioral baseline for MVP | `landed` | `bun run ci` + current docs review | `passing` | `src/judgment/*`, `src/queue/worker.ts`, `src/context/*`, ADR-0017, DEC-039, DEC-041 | Summary-output proposal is landed; freeform provider-output extraction is excluded for MVP; future known leaves are inventoried below. |
 
 ### Tracks
 
 | Track | Purpose | Active phase | Status | Notes |
 | ----- | ------- | ------------ | ------ | ----- |
 | `P0` | Single-user Telegram + Claude personal agent vertical | `P0-M5` | `landed` | Implementation is on `main`; staging acceptance and dogfood gates are not run. |
-| `JDG` | DB-native Judgment System and memory-to-judgment convergence | `JDG-1C` | `in_progress` | Runtime foundation, summary-output proposal, and proposal visibility are landed; freeform provider-output extraction is excluded for MVP by DEC-041. |
-| `DOC` | Documentation source-of-truth and roadmap/status migration | `DOC-1A` | `landed` | DEC-040/Q-068 define the migration; `DOC-1A.5` adds the top-down leaf roadmap. |
+| `JDG` | DB-native Judgment System and memory-to-judgment convergence | `JDG-1C` | `in_progress` | Runtime foundation, summary-output proposal, and proposal visibility are landed; known future/deferred leaves are explicit; none are `ready` without authorization. |
+| `DOC` | Documentation source-of-truth and roadmap/status migration | `DOC-1B` | `in_progress` | DEC-040/Q-068 define the migration; `DOC-1B` keeps roadmap leaves explicit and current. |
 | `OPS` | Deployment, staging acceptance, dogfood evidence | `OPS-1A` | `ready` | First leaf is `OPS-1A.1`; acceptance files still show many `pending` rows because staging gates have not been executed. |
 
 ### Phases / slices
@@ -92,15 +92,24 @@ Gate status:
 | `JDG-1A` | `MVP-JDG` | `JDG` | `JDG-1A` | Local Judgment schema/repository/tool/control-gate substrate | ADR-0009..ADR-0015 | `bun run ci` | `passing` | `landed` | `migrations/004_*`, `005_*`, `006_*`; `src/judgment/*`; `test/judgment/*`; `test/db/*judgment*` | Provider registration intentionally out of scope. |
 | `JDG-1B` | `MVP-JDG` | `JDG` | `JDG-1B` | Runtime Judgment reachability through telemetry, context injection, and Telegram commands | `JDG-1A` | `bun run ci` | `passing` | `landed` | `src/queue/worker.ts`; `test/queue/judgment_*`; DEC-038 | Keep provider tools unregistered until explicitly authorized. |
 | `JDG-1C.1` | `MVP-JDG` | `JDG` | `JDG-1C` | First ADR-0017 convergence slice: split memory gates, stop summary active-memory promotion, make judgments outrank memory recall | ADR-0017, DEC-039 | `bun run ci` | `passing` | `landed` | `src/memory/provenance.ts`; `src/memory/summary.ts`; `src/context/*`; Q-027; Q-064 | Continue with extraction/proposal only when explicitly scoped. |
-| `JDG-1C.2` | `MVP-JDG` | `JDG` | `JDG-1C` | Automatic Judgment extraction/proposal from summary output plus provider-output boundary decision | `JDG-1C.1` | New tests + docs update | `passing` | `landed` | ADR-0017; Q-027; DEC-041; `src/judgment/summary_proposals.ts` | Summary-output proposal and notification visibility are landed; freeform provider-output extraction is not authorized for MVP. |
+| `JDG-1C.2` | `MVP-JDG` | `JDG` | `JDG-1C` | Automatic Judgment extraction/proposal from summary output plus provider-output boundary decision | `JDG-1C.1` | New tests + docs update | `passing` | `landed` | ADR-0017; Q-027; DEC-041; `src/judgment/summary_proposals.ts` | Optional provider-output analyzer leaves are `JDG-1C.2d`/`JDG-1C.2e`; not ready without explicit authorization. |
 | `JDG-1C.3` | `MVP-JDG` | `JDG` | `JDG-1C` | Provider tool registration for Judgment write path | `JDG-1B`, provider safety review | New provider/tool tests | `defined` | `deferred` | ADR-0009..ADR-0013; `docs/RUNTIME.md` not-implemented list | Do not implement without explicit authorization. |
-| `JDG-2A` | Future | `JDG` | `JDG-2A` | `current_operating_view` and compiler input sourced from it | `JDG-1C` | New compiler/context tests | `defined` | `planned` | ADR-0013; DEC-036; `docs/RUNTIME.md` | Future runtime slice. |
-| `JDG-3A` | Future | `JDG` | `JDG-3A` | Vector / graph derived projections | Evidence that FTS/metadata retrieval is insufficient | TBD | `defined` | `planned` | ADR-0009; `docs/ARCHITECTURE.md` | Keep as derived projection, not source of truth. |
+| `JDG-2A` | Future | `JDG` | `JDG-2A` | `current_operating_view` and compiler input sourced from it | `JDG-1C` | New compiler/context tests | `defined` | `planned` | ADR-0013; DEC-036; Q-057 | Future runtime slice. |
+| `JDG-2B` | Future | `JDG` | `JDG-2B` | Goal / Value minimum and decision criteria | ADR-0010; DEC-024 | New ADR/DEC or design note | `defined` | `planned` | Q-032; `docs/JUDGMENT_SYSTEM.md` | Decide schema/view shape before code. |
+| `JDG-2C` | Future | `JDG` | `JDG-2C` | WorkspaceTrace and context audit telemetry | ADR-0010; ADR-0013 | New ADR/DEC or design note | `defined` | `planned` | Q-055; Q-058 | No `workspaces` table in P0.5; trace-only scope. |
+| `JDG-2D` | Future | `JDG` | `JDG-2D` | Reflection/Tension control-plane substrate | ADR-0012; ADR-0013 | New ADR/DEC or design note | `defined` | `deferred` | DEC-031; DEC-035; Q-043..Q-052; Q-061..Q-062 | Do not implement without explicit authorization. |
+| `JDG-2E` | Future | `JDG` | `JDG-2E` | Judgment eval harness automation | ADR-0009 | New eval command/tests | `defined` | `planned` | Q-031 | Define before adding CI eval automation. |
+| `JDG-3A` | Future | `JDG` | `JDG-3A` | Vector / graph derived projections | Evidence that FTS/metadata retrieval is insufficient | TBD | `defined` | `planned` | ADR-0009; Q-029; `docs/ARCHITECTURE.md` | Keep as derived projection, not source of truth. |
+| `JDG-3B` | Future | `JDG` | `JDG-3B` | Procedure / skill library beyond `procedure_subtype` | User procedure usage evidence | New ADR/DEC or design note | `defined` | `planned` | ADR-0010; DEC-034; Q-033 | Decide `judgment_items` rows vs separate library. |
+| `JDG-3C` | Future | `JDG` | `JDG-3C` | Attention / retrieval / activation scoring | Eval evidence from retrieval quality | New ADR/DEC or design note | `defined` | `planned` | Q-034; Q-038; Q-058 | Start with design/eval comparison, not runtime code. |
+| `JDG-3D` | Future | `JDG` | `JDG-3D` | Advanced lifecycle, decay, authority, and ontology evolution | New stale/verification use case | New migration + tests | `defined` | `planned` | DEC-027; DEC-029; Q-040..Q-042; Q-060 | Decide field/policy changes before schema work. |
+| `JDG-3E` | Future | `JDG` | `JDG-3E` | Research update protocol automation | High manual research-update burden | New design note | `defined` | `deferred` | Q-039 | P2+ capture/extract only unless re-authorized. |
 | `DOC-1A.1` | Project docs | `DOC` | `DOC-1A` | Adopt roadmap/status taxonomy and create compressed current-state entrypoint | Boilerplate migration checklist | `bun run ci` | `passing` | `landed` | Q-068; DEC-040; this file; `docs/context/current-state.md`; `AGENTS.md`; `bun run ci` (2026-04-29) | Keep future roadmap/status inventory in this ledger. |
 | `DOC-1A.2` | Project docs | `DOC` | `DOC-1A` | Tighten maintenance drift workflow around roadmap/status, current-state, and acceptance gates | `DOC-1A.1`; `../boilerplate` commit `24b47f1` | `bun run ci` | `passing` | `landed` | `.codex/skills/*`; `.github/pull_request_template.md`; `.github/workflows/doc-freshness.yml`; `docs/DOCUMENTATION.md`; `bun run ci` (2026-04-29) | Keep workflow warnings aligned with docs policy when doc ownership changes. |
 | `DOC-1A.3` | Project docs | `DOC` | `DOC-1A` | Review current code against updated docs and patch consistency gaps | `DOC-1A.2`; current implementation docs | `bun run ci` | `passing` | `landed` | `.github/pull_request_template.md`; `docs/DOCUMENTATION.md`; `docs/CODE_MAP.md`; `docs/RUNTIME.md`; `bun run ci` (2026-04-29) | No remaining consistency findings from the current loop. |
 | `DOC-1A.4` | Project docs | `DOC` | `DOC-1A` | Expand consistency review to full repo docs/code/test/migration scope | `DOC-1A.3`; full repo scan | `bun run ci` | `passing` | `landed` | `docs/ARCHITECTURE.md`; `docs/CODE_MAP.md`; `docs/DATA_MODEL.md`; `docs/generated/schema.md`; `bun run docs:generate:schema`; `bun run ci` (2026-04-29) | No remaining full-scope consistency findings from the current loop. |
 | `DOC-1A.5` | Project docs | `DOC` | `DOC-1A` | Expand the roadmap from planning/design docs into a top-down leaf inventory | `DOC-1A.4`; PRD/HLD/acceptance/traceability docs | `bun run ci` | `passing` | `landed` | this file; `docs/context/current-state.md`; `bun run ci` (2026-04-29) | Use the leaf rows below as the dev-cycle discovery surface. |
+| `DOC-1B.2` | Project docs | `DOC` | `DOC-1B` | Complete known future/deferred leaf inventory from design docs | `DOC-1A.5`; Q/DEC/ADR/Judgment design scan | `bun run ci` | `passing` | `landed` | this file; `docs/context/current-state.md`; Q-029..Q-062; DEC-024..DEC-041 | Keep known future scope explicit even when no leaf is ready. |
 
 ### Full leaf roadmap
 
@@ -194,13 +203,30 @@ executed.
 | `JDG-1C.1` | `MVP-JDG` | `JDG-1C` | Split memory persistence vs judgment proposal gates; stop summary active-memory promotion; raise judgment context priority | `bun run ci` | `passing` | `landed` | `src/memory/provenance.ts`; `src/memory/summary.ts`; `src/context/*`; `test/memory/*`; `test/context/*`; ADR-0017; DEC-039; Q-027/Q-064 | Summary proposal and visibility landed; provider-output boundary is decided by DEC-041. |
 | `JDG-1C.2a` | `MVP-JDG` | `JDG-1C` | Convert `summary_generation` structured output into proposed judgments | `bun run ci` | `passing` | `landed` | ADR-0017; Q-027; `src/judgment/summary_proposals.ts`; `src/queue/worker.ts`; `test/judgment/summary_proposals.test.ts`; `test/queue/state_machine.test.ts` | Summary-output-only proposal implemented; it does not approve/link/commit or activate. |
 | `JDG-1C.2b` | `MVP-JDG` | `JDG-1C` | Add review/operator visibility for auto-proposed summary judgments | `bun run ci` | `passing` | `landed` | `src/queue/worker.ts`; `test/queue/state_machine.test.ts`; existing `/judgment_explain`, `/judgment_approve`, `/judgment_reject` commands | Summary notifications include proposal count, short IDs, and review command hints. |
-| `JDG-1C.2c` | `MVP-JDG` | `JDG-1C` | Decide provider-output extraction boundary | DEC-041 | `passing` | `landed` | DEC-041; ADR-0017; ADR-0005; provider safety constraints | Freeform provider-output parsing is not authorized for MVP; future analyzer work needs a new explicit leaf. |
-| `JDG-1C.2d` | `MVP-JDG` | `JDG-1C` | Implement provider-output proposal only if explicitly re-authorized | New provider/worker tests | `defined` | `deferred` | DEC-041 | DEC-041 does not authorize MVP implementation; revisit only as a scoped post-run analyzer leaf. |
+| `JDG-1C.2c` | `MVP-JDG` | `JDG-1C` | Decide provider-output extraction boundary | DEC-041 | `passing` | `landed` | DEC-041; ADR-0017; ADR-0005; provider safety constraints | Freeform provider-output parsing is not authorized for MVP; optional analyzer contract is `JDG-1C.2d`. |
+| `JDG-1C.2d` | `MVP-JDG` | `JDG-1C` | Define provider-output post-run analyzer contract | New DEC/ADR or design note | `defined` | `deferred` | DEC-041; ADR-0005; ADR-0017 | Must stay advisory/lockdown, proposal-only, evidence-anchored, and review-visible; not ready without explicit authorization. |
+| `JDG-1C.2e` | `MVP-JDG` | `JDG-1C` | Implement provider-output post-run analyzer if authorized | New analyzer/worker/provider tests | `defined` | `blocked` | Depends on `JDG-1C.2d` and explicit authorization | Must not approve, link evidence, commit, activate, or register provider tools. |
 | `JDG-1C.3` | `MVP-JDG` | `JDG-1C` | Provider tool registration for Judgment write path | Provider/tool safety review | `defined` | `deferred` | ADR-0009..0013; `docs/RUNTIME.md` not-implemented list | Do not implement without explicit authorization. |
 | `JDG-2A.1` | Future | `JDG-2A` | Define `current_operating_view` projection contract | New ADR/DEC or design note | `defined` | `planned` | ADR-0013; DEC-036; Q-057 | Decide schema/projection before runtime code. |
 | `JDG-2A.2` | Future | `JDG-2A` | Implement `current_operating_view` read model and compiler input | New migration + compiler tests | `defined` | `planned` | Depends on `JDG-2A.1` | Future runtime slice. |
+| `JDG-2B.1` | Future | `JDG-2B` | Define Goal / Value minimum and decision criteria contract | New ADR/DEC or design note | `defined` | `planned` | ADR-0010; DEC-024; Q-032 | Choose table, view, or projection shape before schema work. |
+| `JDG-2B.2` | Future | `JDG-2B` | Implement Goal / Value minimum read/write surface | New migration + tests | `defined` | `blocked` | Depends on `JDG-2B.1` | Future P0.5 cognitive slice; do not fold into current MVP without authorization. |
+| `JDG-2C.1` | Future | `JDG-2C` | Define WorkspaceTrace and context audit telemetry contract | New ADR/DEC or design note | `defined` | `planned` | ADR-0010; ADR-0013; Q-055; Q-058 | P0.5 scope is trace-only; no `workspaces` table. |
+| `JDG-2C.2` | Future | `JDG-2C` | Implement WorkspaceTrace writer and compiler audit output | New migration + compiler tests | `defined` | `blocked` | Depends on `JDG-2C.1` | Future control-plane event slice. |
+| `JDG-2D.1` | Future | `JDG-2D` | Define Reflection/Tension control-plane schema subset | New ADR/DEC or design note | `defined` | `planned` | ADR-0012; ADR-0013; DEC-031; DEC-035; Q-043..Q-052; Q-061..Q-062 | Scope reflection triage, tension categories, severity, critic schema, and recursion limit. |
+| `JDG-2D.2` | Future | `JDG-2D` | Implement ReflectionTriageEvent/Tension substrate and manual surfaces | New migration + tests | `defined` | `blocked` | Depends on `JDG-2D.1` and explicit authorization | No automatic lesson/consolidation/critique/eval generation in P0.5. |
+| `JDG-2E.1` | Future | `JDG-2E` | Define Judgment eval harness automation scope | New design note or DEC | `defined` | `planned` | ADR-0009; Q-031 | Decide fixture set, metrics, and whether CI runs evals. |
+| `JDG-2E.2` | Future | `JDG-2E` | Implement Judgment eval harness starter | New scripts/tests + docs update | `defined` | `blocked` | Depends on `JDG-2E.1` | Add package script only with docs/TESTING update. |
 | `JDG-3A.1` | Future | `JDG-3A` | Define vector/graph derived projection need and source-of-truth boundary | New design note | `defined` | `planned` | ADR-0009; `docs/ARCHITECTURE.md` | Keep projections derived, never canonical. |
 | `JDG-3A.2` | Future | `JDG-3A` | Implement vector/graph projection if retrieval evidence justifies it | New projection tests | `defined` | `planned` | Depends on `JDG-3A.1` | Future, not MVP. |
+| `JDG-3B.1` | Future | `JDG-3B` | Decide procedure / skill library operating shape | Q/DEC update | `defined` | `planned` | ADR-0010; DEC-034; Q-033 | Choose `judgment_items` rows vs separate procedure library. |
+| `JDG-3B.2` | Future | `JDG-3B` | Implement procedure / skill library if separated | New migration/API/tests | `defined` | `blocked` | Depends on `JDG-3B.1` | Future P1 slice; existing `procedure_subtype` remains enough for MVP. |
+| `JDG-3C.1` | Future | `JDG-3C` | Decide attention / retrieval / activation scoring formula | Q/DEC update + eval comparison | `defined` | `planned` | ADR-0010; ADR-0011; Q-034; Q-038; Q-058 | Start with static weights unless eval evidence says otherwise. |
+| `JDG-3C.2` | Future | `JDG-3C` | Implement attention / retrieval / activation scoring | New retrieval tests + benchmark | `defined` | `blocked` | Depends on `JDG-3C.1` and eval evidence | Future P1+ retrieval quality slice. |
+| `JDG-3D.1` | Future | `JDG-3D` | Decide advanced lifecycle, decay, authority, volatility, and ontology evolution | Q/DEC update | `defined` | `planned` | DEC-027; DEC-029; Q-040; Q-041; Q-042; Q-060 | Decide policy before schema or command changes. |
+| `JDG-3D.2` | Future | `JDG-3D` | Implement advanced lifecycle/policy fields if authorized | New migration + repository/tool tests | `defined` | `blocked` | Depends on `JDG-3D.1` | Includes last verification, volatility, extra authority sources, or decay policies only when needed. |
+| `JDG-3E.1` | Future | `JDG-3E` | Define research update protocol automation scope | Q/DEC update | `defined` | `deferred` | ADR-0011; Q-039 | P2+ capture/extract only unless re-authorized. |
+| `JDG-3E.2` | Future | `JDG-3E` | Implement research update capture/extract automation | New ingestion/eval tests | `defined` | `blocked` | Depends on `JDG-3E.1` | Do not automate architecture migration or supersede steps. |
 
 #### Documentation And Process Leaves
 
@@ -212,6 +238,7 @@ executed.
 | `DOC-1A.4` | Project docs | `DOC-1A` | Full repo docs/code/test/migration consistency pass | `bun run ci`; `bun run docs:generate:schema` | `passing` | `landed` | `docs/ARCHITECTURE.md`; `docs/DATA_MODEL.md`; `docs/generated/schema.md` | No remaining findings from that loop. |
 | `DOC-1A.5` | Project docs | `DOC-1A` | Top-down leaf roadmap from planning/design docs | `bun run ci` | `passing` | `landed` | this file; `docs/context/current-state.md`; `bun run ci` (2026-04-29) | Use the leaf rows as the dev-cycle discovery surface. |
 | `DOC-1B.1` | Project docs | `DOC-1B` | Keep roadmap leaves current after every feature/ops slice | Doc freshness warning + review | `defined` | `planned` | `docs/DOCUMENTATION.md`; `.github/workflows/doc-freshness.yml` | Update this ledger whenever next work changes. |
+| `DOC-1B.2` | Project docs | `DOC-1B` | Complete known future/deferred leaf inventory from design docs | `bun run ci` | `passing` | `landed` | this file; `docs/context/current-state.md`; Q-029..Q-062; DEC-024..DEC-041 | Known future scope must be explicit leaf rows even when none are ready. |
 
 #### Future Deferred Leaves
 
@@ -231,9 +258,10 @@ executed.
    `OPS-1A.4`, `OPS-1A.5a` through `OPS-1A.5e`, then
    `OPS-1A.6` through `OPS-1A.8`.
 2. If the goal is feature development instead of acceptance work,
-   there is no currently ready repo-local feature leaf after DEC-041;
-   add a new explicit leaf before implementing provider-output proposal
-   or continue with a planned future design leaf.
+   there is no currently ready repo-local feature leaf after DEC-041.
+   Known future leaves are explicit above; move one from `planned`,
+   `deferred`, or `blocked` to `ready` only after its dependency /
+   authorization gate is satisfied.
 3. Any parent row that still feels too broad must be split into new
    leaf rows here before implementation begins.
 

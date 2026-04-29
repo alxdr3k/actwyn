@@ -57,8 +57,8 @@ Current Judgment slice:
   short IDs, and review commands for auto-proposed summary Judgments.
 - Judgment typed-tool contracts remain unregistered as provider tools.
 - Phase 1C.2c / DEC-041: freeform provider-output extraction is not
-  an MVP automatic proposal source. Any future provider-output proposal
-  path needs a new explicit post-run analyzer leaf.
+  an MVP automatic proposal source. Optional post-run analyzer work is
+  tracked as `JDG-1C.2d` / `JDG-1C.2e` and is not ready.
 - Provider tool registration, `current_operating_view`, and
   vector/graph projections are future scope.
 - ADR-0017 resolves Q-027: context-visible durable behavioral baselines

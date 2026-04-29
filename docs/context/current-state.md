@@ -21,11 +21,11 @@ the acceptance plan is executed on a configured host.
 - Active tracks: `OPS` (acceptance/dogfood) and `JDG` (future Judgment
   convergence slices when explicitly authorized).
 - Current ready OPS leaf: `OPS-1A.1` acceptance environment inventory.
-- Current ready feature leaf: none. `JDG-1C.2c` landed DEC-041; any
-  provider-output proposal work needs a new explicit leaf.
-- Latest docs slice: `DOC-1A.5` top-down leaf roadmap expansion landed.
+- Current ready feature leaf: none. `JDG-1C.2c` landed DEC-041; known
+  future feature leaves are inventoried but not ready.
+- Latest docs slice: `DOC-1B.2` known future/deferred leaf inventory.
 - Last local validation: `bun run ci` passed on 2026-04-29 for the
-  `JDG-1C.2b` summary proposal visibility update.
+  `DOC-1B.2` known future/deferred leaf inventory update.
 - Next gate: P0 acceptance/staging work.
 - Canonical ledger: `docs/04_IMPLEMENTATION_PLAN.md`.
 
@@ -53,10 +53,13 @@ the acceptance plan is executed on a configured host.
 
 - P0 acceptance/staging execution and dogfood evidence collection.
 - Freeform provider-output Judgment extraction is excluded for MVP by
-  DEC-041. A future post-run analyzer needs a new explicit leaf.
+  DEC-041. Optional analyzer leaves are `JDG-1C.2d` and `JDG-1C.2e`.
 - Provider tool registration for Judgment tools, only after explicit
   authorization.
 - `current_operating_view` and compiler input sourced from it.
+- Goal / Value, WorkspaceTrace, Reflection/Tension control-plane, eval
+  harness, procedure library, attention scoring, advanced lifecycle,
+  and research-update automation leaves.
 - Vector / graph derived projections.
 
 ## Explicit non-goals

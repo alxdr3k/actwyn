@@ -89,9 +89,10 @@ Do not read `docs/design/archive/` by default. Those are history.
   - JDG-1C.2b is landed: summary completion notifications include
     auto-proposed Judgment counts, short IDs, and review command hints.
   - JDG-1C.2c is landed as DEC-041: ordinary provider output is not an
-    automatic Judgment proposal source in MVP. Any provider-output
-    proposal work needs a new explicit leaf and must be a proposal-only
-    post-run analyzer with persisted evidence anchors.
+    automatic Judgment proposal source in MVP. Provider-output proposal
+    leaves are `JDG-1C.2d` / `JDG-1C.2e`; they are not ready without
+    explicit authorization and must stay proposal-only, post-run, and
+    evidence-anchored.
   - The `judgment_items` context slot priority is 790.
   - Remaining Phase 1A constraints still apply to all modules except
     `src/queue/worker.ts`:
