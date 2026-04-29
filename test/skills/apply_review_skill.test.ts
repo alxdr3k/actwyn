@@ -50,8 +50,8 @@ describe("local Codex skills", () => {
       "Claude에게",
     ];
     const forbiddenCommandPatterns = [
-      /(^|[\s`(["'])\/verify(?=$|[\s`.,;:)\]"'])/,
-      /(^|[\s`(["'])\/compact(?=$|[\s`.,;:)\]"'])/,
+      /(^|[^A-Za-z0-9._/-])\/verify(?=$|[^A-Za-z0-9._/-])/,
+      /(^|[^A-Za-z0-9._/-])\/compact(?=$|[^A-Za-z0-9._/-])/,
     ];
 
     for (const file of skillFiles()) {
