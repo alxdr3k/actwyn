@@ -1386,12 +1386,13 @@ committed for a later milestone.
 - **Decision**: ADR-0017 / DEC-039. Gate 의미를 분리한다. 최소 방향:
   `mayPersistAsMemoryItem`(memory/candidate persistence)과
   `mayBecomeBehaviorBaseline` 또는 `mayProposeJudgment`
-  (judgment/baseline eligibility)을 분리한다. 구체 함수명은
-  implementation PR에서 코드 패턴에 맞춰 확정한다.
+  (judgment/baseline eligibility)을 분리한다. First implementation
+  slice에서 함수명은 `mayPersistAsMemoryItem` /
+  `mayProposeJudgment`로 확정했다.
 - **Impacted docs**: ADR-0017; DEC-039;
   `docs/09_TRACEABILITY_MATRIX.md`; PRD §12 taxonomy; HLD §11.3;
-  future `src/memory/provenance.ts`, `src/memory/summary.ts`, and
-  related memory tests.
+  `src/memory/provenance.ts`, `src/memory/summary.ts`, and related
+  memory/context tests.
 - **Required follow-up items**:
   1. `src/memory/provenance.ts` gate split — done in first
      ADR-0017 runtime slice.
