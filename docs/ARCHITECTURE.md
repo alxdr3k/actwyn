@@ -49,12 +49,13 @@ Current Judgment slice:
   `/judgment_commit`), and Telegram retirement commands
   (`/judgment_supersede`, `/judgment_revoke`, `/judgment_expire`).
 - Judgment typed-tool contracts remain unregistered as provider tools.
-  Automatic extraction, provider tool registration, memory-promotion
-  integration, `current_operating_view`, and vector/graph projections
-  are future scope.
+  Automatic extraction/proposal, provider tool registration,
+  `current_operating_view`, and vector/graph projections are future
+  scope.
 - ADR-0017 resolves Q-027: context-visible durable behavioral baselines
-  should converge on `judgment_items`. This is an architectural
-  commitment; the runtime refactor is not yet implemented.
+  converge on `judgment_items`. The first runtime slice is implemented:
+  summary extraction no longer writes active `memory_items`, and
+  context packing keeps active/eligible judgments above memory recall.
 
 ## System overview
 
@@ -98,8 +99,9 @@ Detailed module / state-machine diagrams live in `docs/02_HLD.md`.
   `src/storage/*` owns local FS and S3. Each table has a single-writer
   module (see `docs/DATA_MODEL.md` §Single-writer map; `docs/02_HLD.md` §5.1 has historical reasoning).
 - **Memory boundary** — `src/memory/*` writes `memory_summaries` and
-  `memory_items` from session output. Provenance + confidence come
-  from this module.
+  owns the `memory_items` writer primitives used by correction flows.
+  Summary output remains memory-plane recall/candidate material and
+  does not auto-promote to active `memory_items`.
 - **Redaction boundary** — `src/observability/redact.ts` is the only
   module allowed to define redaction patterns or emit `[REDACTED:*]`
   placeholders. Enforced at lint time by

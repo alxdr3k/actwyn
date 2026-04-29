@@ -86,11 +86,11 @@ Status legend:
 
 | Path                              | Purpose                                                                                     | Status                                       |
 | --------------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| `src/memory/summary.ts`           | `/summary` and `/end` summary generation; provenance + confidence per PRD §12.2.            | implemented · salvage:ADAPT (current auto-promotion to active `memory_items` remains; ADR-0017 commits future judgment-centered baseline convergence) |
-| `src/memory/items.ts`             | Atomic `memory_items` rows with supersede semantics.                                        | implemented · salvage:ADAPT-light (writer invariants KEEP; baseline eligibility moves to judgment layer per ADR-0017) |
-| `src/memory/provenance.ts`        | Provenance / confidence helpers shared by summary + items.                                  | implemented · salvage:ADAPT (`mayPromoteToLongTerm` semantics must split per Q-064 / DEC-039) |
+| `src/memory/summary.ts`           | `/summary` and `/end` summary generation; persists `memory_summaries`; no longer auto-promotes extracted items to active `memory_items`. | implemented · ADR-0017 slice |
+| `src/memory/items.ts`             | Atomic `memory_items` rows with supersede semantics and memory-plane persistence gate.       | implemented · salvage:ADAPT-light (writer invariants KEEP; baseline authority lives in judgment layer per ADR-0017) |
+| `src/memory/provenance.ts`        | Provenance / confidence helpers shared by summary + items; split persistence vs judgment-proposal gates. | implemented · ADR-0017/Q-064 slice (`mayPromoteToLongTerm` retained as deprecated compatibility helper) |
 | `src/context/compiler.ts`         | Stage 4 Context Compiler v0 — centralizes DB retrieval (turns, memory_items, memory_summaries, judgment_items) and packing for replay/resume modes. Wired into worker.ts. | implemented · runtime-wired |
-| `src/context/builder.ts`          | Assembles prompt inputs (resume vs replay decision, recent turns, memory snapshot).         | implemented · salvage:REPLACE (slot taxonomy + `MemoryItemSlot.provenance` / `.status` input incompatible with `current_operating_view` / `lifecycle_status` / `activation_state` — superseded by Stage 4 Context Compiler) |
+| `src/context/builder.ts`          | Assembles prompt inputs (resume vs replay decision, recent turns, memory recall, active judgments). | implemented · salvage:ADAPT (active judgments outrank memory recall; `current_operating_view` remains future) |
 | `src/context/packer.ts`           | Token-budget aware packer per PRD §12.5–§12.6.                                              | implemented · salvage:ADAPT (drop-by-priority + `injected_snapshot_json` shape KEEP; input type re-defined to Compiler output) |
 | `src/context/token_estimator.ts`  | CJK-safer token estimator (DEC-021).                                                        | implemented · salvage:KEEP                   |
 
@@ -106,7 +106,7 @@ slice:
 - **Phase 1B.1**: `src/judgment/control_gate.ts` now imported by `src/queue/worker.ts`.
   `evaluateTurn()` + `recordControlGateDecision()` called per non-system `provider_run` (not
   `summary_generation`). L0-only telemetry; signal detection deferred.
-- **Phase 1B.2**: `src/context/builder.ts` gains `judgment_items` slot (priority 600).
+- **Phase 1B.2**: `src/context/builder.ts` gains `judgment_items` slot (priority 790).
   Worker queries active/eligible/normal/global/time-valid judgments and injects them
   into `buildContext()` in `replay_mode` and into the bounded resume-mode judgment
   refresh path. Excluded from `summary_generation`.
@@ -122,8 +122,8 @@ slice:
 - Judgment command output is not stored as turns and system commands do not produce
   Control Gate rows.
 
-Pending: provider tool registration and automatic judgment extraction;
-`control_gate_events` job attribution (#45) and resume-mode refresh (#44) are resolved.
+Pending: provider tool registration, automatic judgment extraction/proposal,
+and `current_operating_view`; #44 and #45 are resolved.
 See `docs/RUNTIME.md` for the full runtime boundary description.
 
 ## Judgment

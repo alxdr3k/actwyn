@@ -9,19 +9,19 @@
 //   1. user_message         (MUST always survive)
 //   2. system_identity      (MUST always survive — minimal form)
 //   3. active_project_context
-//   4. current_session_summary
-//   5. user_stated_preferences (memory items with provenance ∈ {user_stated, user_confirmed})
+//   4. judgment_active      (active/eligible judgment_items)
+//   5. current_session_summary
 //   6. recent_turns         (only in replay_mode)
-//   7. other_memory         (inferred / tool_output / assistant_generated)
-//   8. inactive_project_context
-//   9. verbose_transcript   (fallback notes)
+//   7. user_stated_memory   (non-authoritative recall)
+//   8. other_memory         (inferred / tool_output / assistant_generated)
+//   9. inactive_project_context
+//   10. verbose_transcript  (fallback notes)
 //
 // The builder is pure. It does NOT read the DB directly; callers
 // pass the data it needs (typically src/queue/worker.ts).
 //
-// Slots (updated for Phase 1B.2):
-//   ...
-//   5.5 judgment_active (active/eligible judgment_items — Phase 1B.2)
+// ADR-0017 keeps active/eligible judgments above memory recall. memory_items
+// may be injected for continuity, but they are not a peer authority channel.
 
 export type PackingMode = "resume_mode" | "replay_mode";
 
@@ -119,7 +119,7 @@ export function buildContext(input: BuildInput): ContextSnapshot {
       key: "current_session_summary",
       label: "current_session_summary",
       text: input.current_session_summary,
-      priority: 780,
+      priority: 760,
       droppable: true,
     });
   }
@@ -134,26 +134,15 @@ export function buildContext(input: BuildInput): ContextSnapshot {
     (m) => m.provenance !== "user_stated" && m.provenance !== "user_confirmed",
   );
 
-  if (userStated.length > 0) {
-    slots.push({
-      key: "memory_user_stated",
-      label: "memory(user_stated|user_confirmed)",
-      text: userStated.map(renderMemoryItem).join("\n"),
-      priority: 700,
-      droppable: true,
-    });
-  }
-
   // Phase 1B.2 — Active judgments (lifecycle_status=active, activation_state=eligible).
-  // Injected between user-stated preferences and recent turns so durable beliefs
-  // survive context budget pressure longer than volatile conversation history.
+  // ADR-0017: active judgments are the authoritative behavioral baseline.
   const activeJudgments = (input.judgment_items ?? []);
   if (activeJudgments.length > 0) {
     slots.push({
       key: "judgment_active",
       label: "judgment(active/eligible)",
       text: activeJudgments.map(renderJudgmentItem).join("\n"),
-      priority: 600,
+      priority: 790,
       droppable: true,
     });
   }
@@ -164,6 +153,16 @@ export function buildContext(input: BuildInput): ContextSnapshot {
       label: "recent_turns",
       text: renderTurns(input.recent_turns),
       priority: 500,
+      droppable: true,
+    });
+  }
+
+  if (userStated.length > 0) {
+    slots.push({
+      key: "memory_user_stated",
+      label: "memory(user_stated|user_confirmed; recall)",
+      text: userStated.map(renderMemoryItem).join("\n"),
+      priority: 450,
       droppable: true,
     });
   }

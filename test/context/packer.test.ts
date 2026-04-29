@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { buildContext, type BuildInput, type MemoryItemSlot } from "../../src/context/builder.ts";
+import { buildContext, type BuildInput, type JudgmentItemSlot, type MemoryItemSlot } from "../../src/context/builder.ts";
 import { pack, PromptOverflowError, serializeForProviderRun } from "../../src/context/packer.ts";
 
 function mi(overrides: Partial<MemoryItemSlot>): MemoryItemSlot {
@@ -9,6 +9,16 @@ function mi(overrides: Partial<MemoryItemSlot>): MemoryItemSlot {
     provenance: overrides.provenance ?? "user_stated",
     confidence: overrides.confidence ?? 0.9,
     status: overrides.status ?? "active",
+  };
+}
+
+function judgment(overrides: Partial<JudgmentItemSlot> = {}): JudgmentItemSlot {
+  return {
+    id: overrides.id ?? "j1",
+    kind: overrides.kind ?? "decision",
+    statement: overrides.statement ?? "authoritative baseline",
+    authority_source: overrides.authority_source ?? "user_confirmed",
+    confidence: overrides.confidence ?? "high",
   };
 }
 
@@ -111,26 +121,20 @@ describe("pack — drop order matches PRD §12.5", () => {
     expect(() => pack(snap, { total_budget_tokens: 100 })).toThrow(PromptOverflowError);
   });
 
-  test("recent_turns dropped before user_stated memory under pressure", () => {
+  test("judgments are retained before memory recall under pressure", () => {
     const snap = buildContext(
       base({
-        recent_turns: Array.from({ length: 10 }, (_, i) => ({
-          id: `t${i}`,
-          role: "user",
-          content_redacted: "T".repeat(200),
-          created_at: `2024-01-${String(i + 1).padStart(2, "0")}`,
-        })),
+        judgment_items: [judgment({ statement: "J".repeat(80) })],
         memory_items: [
-          mi({ id: "u", provenance: "user_confirmed", content: "important" }),
+          mi({ id: "u", provenance: "user_confirmed", content: "M".repeat(500) }),
         ],
       }),
     );
-    const packed = pack(snap, { total_budget_tokens: 60 });
-    const turns = packed.slots.find((s) => s.key === "recent_turns")?.retained;
+    const packed = pack(snap, { total_budget_tokens: 80 });
+    const judgmentRetained = packed.slots.find((s) => s.key === "judgment_active")?.retained;
     const userStated = packed.slots.find((s) => s.key === "memory_user_stated")?.retained;
-    if (turns === false) {
-      expect(userStated).toBe(true);
-    }
+    expect(judgmentRetained).toBe(true);
+    expect(userStated).toBe(false);
   });
 });
 

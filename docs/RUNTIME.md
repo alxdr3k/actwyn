@@ -209,7 +209,7 @@ Runtime access:
   `/judgment_revoke`, and `/judgment_expire`. Output is sent through
   outbound notifications and is not stored as conversation turns.
 - `src/context/builder.ts` — gains `judgment_items` slot type
-  (priority 600). `src/queue/worker.ts` populates it with
+  (priority 790, above memory recall). `src/queue/worker.ts` populates it with
   active/eligible/normal/global/time-valid rows in `replay_mode`
   full context builds and in the `resume_mode` judgment refresh path;
   it is excluded from `summary_generation`.
@@ -221,23 +221,28 @@ Schema version is **6** (migration 005 adds `control_gate_events`; migration 006
 `job_id` attribution and a pre-migration upgrade guard — see `src/main.ts`
 `assertNoPendingProviderRunsBeforeMigration006()`).
 
+ADR-0017 / DEC-039 first runtime slice is implemented: provenance
+gates are split into memory persistence vs Judgment proposal helpers;
+summary output stays in `memory_summaries` and does not create active
+`memory_items`; active/eligible judgments outrank memory recall in
+context packing.
+
 ### What is not implemented
 
 The following are not implemented. Do not wire any of these until
 a task explicitly authorizes a further Judgment runtime slice.
 
 - Automatic extraction of candidate `JudgmentItem` rows from provider
-  output.
+  or summary output.
 - Provider tool registration for any Judgment write path.
 - `current_operating_view` and `current_operating_view`-sourced Compiler input
   (`src/context/compiler.ts` is now wired; `builder.ts` remains in tree for regression parity).
+- Destructive migration or physical merge of existing `memory_items`
+  into `judgment_items`.
 - Runtime readers for `judgment_edges`.
 - `Tension` telemetry and the `tensions` table: **not implemented**.
 - `ReflectionTriageEvent` and `reflection_triage_events`: **not implemented**.
 - Vector and graph derived projections: **not implemented**.
-- Judgment-centered memory convergence (ADR-0017 / DEC-039): **not
-  implemented**. Current runtime still has the older memory promotion
-  path until the follow-up refactor lands.
 
 The 6-stage pipeline in `docs/JUDGMENT_SYSTEM.md` remains the
 architectural authority for the Judgment System direction

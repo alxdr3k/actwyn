@@ -13,7 +13,7 @@
 //     — tombstone only, never hard-deleted.
 
 import type { DbHandle } from "~/db.ts";
-import { mayPromoteToLongTerm, type Provenance } from "~/memory/provenance.ts";
+import { mayPersistAsMemoryItem, type Provenance } from "~/memory/provenance.ts";
 
 export type ItemType = "fact" | "preference" | "decision" | "open_task" | "caution";
 
@@ -32,16 +32,19 @@ export class MemoryProvenanceError extends Error {
   override readonly name = "MemoryProvenanceError";
 }
 
+function assertMayPersistAsMemoryItem(item: NewMemoryItem): void {
+  if (mayPersistAsMemoryItem(item.provenance, item.item_type)) return;
+  throw new MemoryProvenanceError(
+    `preferences require provenance ∈ {user_stated, user_confirmed}; got ${item.provenance}`,
+  );
+}
+
 export function insertMemoryItem(
   db: DbHandle,
   id: string,
   item: NewMemoryItem,
 ): void {
-  if (item.item_type === "preference" && !mayPromoteToLongTerm(item.provenance, item.item_type)) {
-    throw new MemoryProvenanceError(
-      `preferences require provenance ∈ {user_stated, user_confirmed}; got ${item.provenance}`,
-    );
-  }
+  assertMayPersistAsMemoryItem(item);
   db.prepare<
     unknown,
     [string, string, string | null, string, string, string | null, string, number, string]
@@ -99,11 +102,7 @@ export function supersedeMemoryItem(args: {
       .run(args.old_id);
 
     // Insert new row with supersedes pointer.
-    if (args.new_item.item_type === "preference" && !mayPromoteToLongTerm(args.new_item.provenance, args.new_item.item_type)) {
-      throw new MemoryProvenanceError(
-        `preferences require provenance ∈ {user_stated, user_confirmed}; got ${args.new_item.provenance}`,
-      );
-    }
+    assertMayPersistAsMemoryItem(args.new_item);
     args.db
       .prepare<
         unknown,

@@ -149,6 +149,9 @@ Session / project / daily summary snapshots with provenance and
 confidence JSON columns.
 
 - `summary_type ∈ { session, project, daily }`.
+- Summary writes do **not** automatically create active
+  `memory_items`; extracted facts/preferences/decisions/open tasks/
+  cautions remain summary-plane recall/candidate material.
 
 ### `memory_items`
 
@@ -160,10 +163,10 @@ Atomic memory rows with explicit supersede semantics.
 - `supersedes_memory_id` chains corrections.
 
 ADR-0017 commits future judgment-centered convergence for
-behavior-changing long-term knowledge. The table remains implemented
-today; future refactors should treat it as memory-plane / candidate /
-compatibility data rather than peer authority with active
-`judgment_items`.
+behavior-changing long-term knowledge. Summary extraction no longer
+writes active rows here. The table remains implemented for
+memory-plane / candidate / compatibility data and correction flows,
+not as peer authority with active `judgment_items`.
 
 ### `storage_objects`
 
@@ -275,8 +278,8 @@ reasoning.
 | `provider_runs`                       | `src/queue/worker.ts`                                                             |
 | `provider_raw_events`                 | `src/queue/worker.ts`                                                             |
 | `memory_summaries`                    | `src/memory/summary.ts`                                                           |
-| `memory_items` (insert)               | `src/memory/summary.ts`, `src/commands/correct.ts`                                |
-| `memory_items.status`                 | `src/commands/correct.ts` (`active → superseded`), `src/commands/forget.ts` (`→ revoked`) |
+| `memory_items` (insert)               | `src/memory/items.ts` (called by `src/commands/correct.ts`; summary extraction no longer inserts rows) |
+| `memory_items.status`                 | `src/memory/items.ts` (`active → superseded` / `→ revoked`, routed by `src/commands/correct.ts` and `src/commands/forget.ts`) |
 | `storage_objects` (insert)            | `src/telegram/inbound.ts` (Telegram attachments, capture_status=pending); `src/queue/worker.ts` `enqueueMemorySnapshotSync` (memory_snapshot rows for `/summary` / `/end`, also enqueues the `storage_sync` job in the same txn). These are the only two `INSERT INTO storage_objects` sites in `src/`. |
 | `storage_objects.status`              | `src/storage/sync.ts`, `src/commands/forget.ts` (recovery only counts `failed` / `delete_failed` rows and enqueues a `storage_sync` job; it does not update `storage_objects.status` directly) |
 | `storage_objects.capture_status`      | Insert-time: `src/telegram/inbound.ts` (`pending`; oversized attachments: `failed`), `src/queue/worker.ts` memory snapshot inserts (`captured`). Post-insert transitions: `src/telegram/attachment_capture.ts` (`pending → captured` or `pending → failed`). |

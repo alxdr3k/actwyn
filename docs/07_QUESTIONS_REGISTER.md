@@ -737,6 +737,10 @@ committed for a later milestone.
     judgment-centered convergence for MVP (ADR-0017). Long dual-track
     active memory + active judgment authority is rejected; physical table
     merge remains deferred.
+  - 2026-04-29 first runtime slice: summary extraction no longer
+    writes active `memory_items`; provenance gates split into memory
+    persistence vs judgment proposal helpers; `judgment_active` now
+    outranks memory recall in context packing.
 
 ### Q-028 — `JudgmentItem.kind` v1 enum 범위는 어디까지인가?
 
@@ -1388,16 +1392,22 @@ committed for a later milestone.
   future `src/memory/provenance.ts`, `src/memory/summary.ts`, and
   related memory tests.
 - **Required follow-up items**:
-  1. `src/memory/provenance.ts` gate split.
+  1. `src/memory/provenance.ts` gate split — done in first
+     ADR-0017 runtime slice.
   2. Call site 마이그레이션 — `src/memory/items.ts`,
-     `src/memory/summary.ts`의 `promoteItems` path.
+     `src/memory/summary.ts`의 `promoteItems` path — done in first
+     ADR-0017 runtime slice.
   3. 테스트 fixture 갱신 — `test/memory/summary.test.ts`,
-     `test/memory/correction.test.ts`의 expectation.
-  4. Context Compiler baseline priority 조정 (ADR-0017).
+     `test/memory/provenance.test.ts`, context priority tests — done in
+     first ADR-0017 runtime slice.
+  4. Context Compiler baseline priority 조정 (ADR-0017) — first
+     priority slice done; `current_operating_view` remains future.
 - **History**:
   - 2026-04-27 salvage audit §7 candidate를 정식 Q로 promotion.
   - 2026-04-29 Q-027 resolved by ADR-0017; gate split accepted by
     DEC-039 as implementation prerequisite.
+  - 2026-04-29 first runtime slice implemented the gate split and
+    summary-promotion stop.
 
 ### Q-065 — `memory_base_path` JSONL/MD sidecar policy
 

@@ -179,17 +179,17 @@ describe("writeSummary — schema-valid row", () => {
 });
 
 // ---------------------------------------------------------------
-// writeSummary — promotes items to memory_items (HLD §6.5 / line 409)
+// writeSummary — keeps summary extraction out of active memory_items
 // ---------------------------------------------------------------
 
-describe("writeSummary — promotes summary items to memory_items rows", () => {
+describe("writeSummary — summary output stays in memory_summaries", () => {
   let idSeq = 0;
   function nextId(): string { return `id-${++idSeq}`; }
 
   beforeEach(() => { idSeq = 0; });
 
-  test("facts → memory_items with item_type='fact' and status='active'", () => {
-    writeSummary({
+  test("facts remain in memory_summaries and do not create active memory_items", () => {
+    const out = writeSummary({
       db,
       newId: nextId,
       summary: summary({
@@ -199,21 +199,23 @@ describe("writeSummary — promotes summary items to memory_items rows", () => {
         ],
       }),
     });
-    const items = db
-      .prepare<{ item_type: string; status: string; provenance: string; content: string }>(
-        "SELECT item_type, status, provenance, content FROM memory_items WHERE session_id = 'sess-1' ORDER BY created_at",
+    expect(out.memory_items_inserted).toBe(0);
+    const memoryRows = db
+      .prepare<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM memory_items WHERE session_id = 'sess-1'",
       )
-      .all();
-    expect(items.length).toBe(2);
-    for (const it of items) {
-      expect(it.item_type).toBe("fact");
-      expect(it.status).toBe("active");
-    }
-    expect(items.map((i) => i.content)).toContain("user prefers Python");
-    expect(items.map((i) => i.content)).toContain("user has a dog");
+      .get()!;
+    expect(memoryRows.n).toBe(0);
+    const row = db
+      .prepare<{ facts_json: string }, [string]>(
+        "SELECT facts_json FROM memory_summaries WHERE id = ?",
+      )
+      .get(out.summary_id)!;
+    const facts = JSON.parse(row.facts_json) as Array<{ content: string }>;
+    expect(facts.map((i) => i.content)).toEqual(["user prefers Python", "user has a dog"]);
   });
 
-  test("provenance-gated preference (user_stated) → memory_items; inferred preference → dropped", () => {
+  test("provenance-gated preferences persist only in preferences_json", () => {
     const out = writeSummary({
       db,
       newId: nextId,
@@ -226,18 +228,22 @@ describe("writeSummary — promotes summary items to memory_items rows", () => {
     });
     expect(out.kept_preferences).toBe(1);
     expect(out.dropped_preferences).toBe(1);
-    expect(out.memory_items_inserted).toBe(2); // 1 fact (from summary()) + 1 preference
-    const prefs = db
-      .prepare<{ item_type: string; content: string }>(
-        "SELECT item_type, content FROM memory_items WHERE item_type = 'preference'",
+    expect(out.memory_items_inserted).toBe(0);
+    const memoryRows = db
+      .prepare<{ n: number }>("SELECT COUNT(*) AS n FROM memory_items")
+      .get()!;
+    expect(memoryRows.n).toBe(0);
+    const row = db
+      .prepare<{ preferences_json: string }, [string]>(
+        "SELECT preferences_json FROM memory_summaries WHERE id = ?",
       )
-      .all();
-    expect(prefs.length).toBe(1);
-    expect(prefs[0]!.content).toBe("prefers short replies");
+      .get(out.summary_id)!;
+    const prefs = JSON.parse(row.preferences_json) as Array<{ content: string }>;
+    expect(prefs.map((i) => i.content)).toEqual(["prefers short replies"]);
   });
 
-  test("open_tasks, decisions, cautions each produce memory_items rows", () => {
-    writeSummary({
+  test("open_tasks, decisions, cautions remain summary-plane candidate material", () => {
+    const out = writeSummary({
       db,
       newId: nextId,
       summary: summary({
@@ -247,16 +253,25 @@ describe("writeSummary — promotes summary items to memory_items rows", () => {
         cautions: [{ content: "avoid peanuts", provenance: "user_stated", confidence: 1.0 }],
       }),
     });
-    const types = db
-      .prepare<{ item_type: string }>("SELECT item_type FROM memory_items WHERE session_id = 'sess-1'")
-      .all()
-      .map((r) => r.item_type);
-    expect(types).toContain("open_task");
-    expect(types).toContain("decision");
-    expect(types).toContain("caution");
+    const memoryRows = db
+      .prepare<{ n: number }>("SELECT COUNT(*) AS n FROM memory_items WHERE session_id = 'sess-1'")
+      .get()!;
+    expect(memoryRows.n).toBe(0);
+    const row = db
+      .prepare<
+        { open_tasks_json: string; decisions_json: string; cautions_json: string },
+        [string]
+      >(
+        `SELECT open_tasks_json, decisions_json, cautions_json
+         FROM memory_summaries WHERE id = ?`,
+      )
+      .get(out.summary_id)!;
+    expect(JSON.parse(row.open_tasks_json).map((i: { content: string }) => i.content)).toEqual(["buy coffee"]);
+    expect(JSON.parse(row.decisions_json).map((i: { content: string }) => i.content)).toEqual(["use PostgreSQL"]);
+    expect(JSON.parse(row.cautions_json).map((i: { content: string }) => i.content)).toEqual(["avoid peanuts"]);
   });
 
-  test("memory_items_inserted count reflects total promoted items", () => {
+  test("memory_items_inserted stays zero for extracted summary items", () => {
     const out = writeSummary({
       db,
       newId: nextId,
@@ -268,6 +283,6 @@ describe("writeSummary — promotes summary items to memory_items rows", () => {
         cautions: [{ content: "c1", provenance: "user_stated", confidence: 1.0 }],
       }),
     });
-    expect(out.memory_items_inserted).toBe(5);
+    expect(out.memory_items_inserted).toBe(0);
   });
 });

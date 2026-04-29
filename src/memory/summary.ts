@@ -10,16 +10,15 @@
 //   1. Decide whether an automatic summary should be enqueued
 //      (shouldAutoTriggerSummary).
 //   2. Persist a memory_summaries row when a summary completes
-//      (writeSummary). Long-term preferences follow the
-//      provenance gate from src/memory/provenance.ts.
+//      (writeSummary). Summary output stays in memory_summaries;
+//      it is not automatically promoted to active memory_items.
 //
 // Summary generation itself (driving Claude in the advisory
 // profile) lands in Phase 7's adapter: this module only consumes
 // the structured output.
 
 import type { DbHandle } from "~/db.ts";
-import { insertMemoryItem, type ItemType } from "~/memory/items.ts";
-import { mayPromoteToLongTerm, type Provenance } from "~/memory/provenance.ts";
+import { mayPersistAsMemoryItem, type Provenance } from "~/memory/provenance.ts";
 
 // ---------------------------------------------------------------
 // Advisory profile prompt (PRD §12.3, HLD §11.2 step 3)
@@ -46,7 +45,8 @@ Required schema:
 }
 
 Rules:
-- Only "user_stated" or "user_confirmed" items are eligible as durable personal preferences.
+- Only "user_stated" or "user_confirmed" items are persisted in durable personal preferences_json.
+- Extracted summary items are memory-plane recall/candidate material, not an active behavioral baseline.
 - confidence ∈ [0.0, 1.0].
 - Omit empty arrays; use [] rather than null.
 - Respond ONLY with the JSON object — no explanation.`;
@@ -168,12 +168,12 @@ export function writeSummary(args: {
 
   // Enforce PRD §12.2 gate on preferences BEFORE persisting: any
   // preference whose provenance is not user_stated / user_confirmed
-  // is dropped from the durable preferences_json (not persisted as
-  // a preference). Other item types are untouched.
+  // is dropped from the durable preferences_json. Other item types
+  // remain summary-plane recall/candidate material.
   const kept: SummaryPreference[] = [];
   let dropped = 0;
   for (const p of args.summary.preferences) {
-    if (mayPromoteToLongTerm(p.provenance, "preference")) kept.push(p);
+    if (mayPersistAsMemoryItem(p.provenance, "preference")) kept.push(p);
     else dropped += 1;
   }
 
@@ -219,33 +219,10 @@ export function writeSummary(args: {
       JSON.stringify(args.summary.source_turn_ids),
     );
 
-  // Promote summary items to individual memory_items rows (HLD §6.5, HLD §4.8 line 409).
-  // Each item is inserted with status='active' so the context packer can inject it.
-  let itemsInserted = 0;
-
-  function promoteItems(items: readonly { content: string; provenance: Provenance; confidence: number }[], itemType: ItemType): void {
-    for (const item of items) {
-      try {
-        insertMemoryItem(args.db, args.newId(), {
-          session_id: args.summary.session_id,
-          item_type: itemType,
-          content: item.content,
-          provenance: item.provenance,
-          confidence: item.confidence,
-          source_turn_ids: args.summary.source_turn_ids,
-        });
-        itemsInserted += 1;
-      } catch {
-        // MemoryProvenanceError: skip the item silently; summary row is still valid.
-      }
-    }
-  }
-
-  promoteItems(args.summary.facts, "fact");
-  promoteItems(kept, "preference"); // already provenance-gated above
-  promoteItems(args.summary.open_tasks, "open_task");
-  promoteItems(args.summary.decisions, "decision");
-  promoteItems(args.summary.cautions, "caution");
+  // ADR-0017 / DEC-039: summary extraction must not directly create active
+  // memory_items rows that act as a behavioral baseline. Candidate material
+  // remains in memory_summaries until a future judgment proposal path exists.
+  const itemsInserted = 0;
 
   return {
     summary_id: id,

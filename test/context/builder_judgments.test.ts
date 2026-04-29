@@ -48,7 +48,7 @@ describe("Phase 1B.2 — judgment_active slot", () => {
     expect(slot.droppable).toBe(true);
   });
 
-  test("judgment_active priority (600) sits between memory_user_stated (700) and recent_turns (500)", () => {
+  test("judgment_active priority sits above memory recall and recent turns", () => {
     const snap = buildContext({
       ...baseInput,
       judgment_items: [makeJudgment()],
@@ -61,7 +61,7 @@ describe("Phase 1B.2 — judgment_active slot", () => {
     const judgment = byKey["judgment_active"] ?? 0;
     const recent = byKey["recent_turns"] ?? 0;
 
-    expect(userStated).toBeGreaterThan(judgment);
+    expect(judgment).toBeGreaterThan(userStated);
     expect(judgment).toBeGreaterThan(recent);
   });
 

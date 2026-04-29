@@ -48,7 +48,7 @@ function sample(overrides: Partial<NewMemoryItem> = {}): NewMemoryItem {
 // Provenance gate
 // ---------------------------------------------------------------
 
-describe("provenance gate — long-term preferences", () => {
+describe("provenance gate — memory persistence preferences", () => {
   test("preference with user_stated provenance → inserted", () => {
     insertMemoryItem(db, "m-1", sample({ item_type: "preference" }));
     const row = db.prepare<{ n: number }>("SELECT COUNT(*) AS n FROM memory_items").get()!;

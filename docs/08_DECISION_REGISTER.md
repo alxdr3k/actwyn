@@ -1186,6 +1186,9 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
   context injection.
 - Supersedes / superseded by: —
 - Refs: ADR-0017; Q-027; Q-064.
+- History: 2026-04-29 first runtime slice split provenance gates, stopped
+  summary output from creating active `memory_items`, and made active judgments
+  outrank memory recall in context packing.
 
 ---
 

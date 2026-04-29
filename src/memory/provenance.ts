@@ -31,11 +31,38 @@ export function isValidProvenance(v: string): v is Provenance {
   return (ALL_PROVENANCE as readonly string[]).includes(v);
 }
 
+const JUDGMENT_PROPOSAL_ITEM_TYPES: readonly string[] = [
+  "fact",
+  "preference",
+  "decision",
+  "open_task",
+  "current_state",
+  "procedure",
+  "caution",
+];
+
 /**
- * PRD §12.2 gate: long-term personal preferences must originate
- * from user_stated or user_confirmed.
+ * Persistence-plane gate: personal preferences persisted as memory rows must
+ * originate from user_stated or user_confirmed. Other item types may still be
+ * stored as memory/candidate material; this helper does not grant authority.
  */
-export function mayPromoteToLongTerm(p: Provenance, item_type: string): boolean {
+export function mayPersistAsMemoryItem(p: Provenance, item_type: string): boolean {
   if (item_type !== "preference") return true;
   return p === "user_stated" || p === "user_confirmed";
+}
+
+/**
+ * Candidate-plane gate for Judgment proposals. Provenance alone does not make
+ * a candidate authoritative; approval, evidence, and commit rules decide that.
+ */
+export function mayProposeJudgment(_p: Provenance, item_type: string): boolean {
+  return JUDGMENT_PROPOSAL_ITEM_TYPES.includes(item_type);
+}
+
+/**
+ * @deprecated Use mayPersistAsMemoryItem or mayProposeJudgment so persistence
+ * and behavior-baseline semantics stay separate (ADR-0017 / Q-064).
+ */
+export function mayPromoteToLongTerm(p: Provenance, item_type: string): boolean {
+  return mayPersistAsMemoryItem(p, item_type);
 }
