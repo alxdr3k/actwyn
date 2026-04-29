@@ -1,4 +1,4 @@
-// Phase 1B.3 — /judgment and /judgment_explain Telegram commands.
+// Phase 1B.3-1B.5 — Judgment Telegram system commands.
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -73,7 +73,7 @@ function seedCommandJob(id: string, ikey: string, command: string, args = ""): v
   ).run(id, "sess-1", JSON.stringify({ command, args }), ikey);
 }
 
-// Judgment commands do not create turns (Phase 1B.3 design: prevents replay contamination).
+// Judgment commands do not create turns (prevents replay contamination).
 // Verify via StubOutboundTransport.call_log — the text is sent to Telegram, not stored in DB.
 function lastSentText(): string {
   const log = outboundStub.call_log;

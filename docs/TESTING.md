@@ -114,8 +114,8 @@ Migration shape is asserted by:
 
 Judgment System Phase 1A.2–1A.8 (proposal, review, source-recording,
 evidence-linking, commit, query, explain, retirement lifecycle, Control
-Gate) and Phase 1B.1–1B.3 (runtime telemetry, context injection, Telegram
-read commands) tests live under:
+Gate) and Phase 1B.1–1B.5 (runtime telemetry, context injection,
+Telegram read/write/retirement commands) tests live under:
 
 - `test/judgment/validators.test.ts` — pure-TS judgment validator coverage.
 - `test/judgment/repository.test.ts` — judgment repository lifecycle,
@@ -131,8 +131,8 @@ read commands) tests live under:
   rendering and priority behavior.
 - `test/queue/control_gate_telemetry.test.ts` — worker telemetry writes
   and system-command exclusions.
-- `test/queue/judgment_commands.test.ts` — `/judgment` and
-  `/judgment_explain` dispatch/output behavior.
+- `test/queue/judgment_commands.test.ts` — Judgment read, write, and
+  retirement Telegram command dispatch/output behavior.
 - `test/queue/judgment_context_injection.test.ts` — worker-side
   active judgment query filters and packed-context injection (both
   replay_mode and resume_mode judgment refresh, issue #44).

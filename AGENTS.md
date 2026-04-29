@@ -69,8 +69,11 @@ Do not read `docs/design/archive/` by default. Those are history.
     (local unregistered approval/rejection review surface).
     `src/judgment/tool.ts` now also exports `JUDGMENT_APPROVE_TOOL` /
     `JUDGMENT_REJECT_TOOL` and `executeJudgmentApproveTool` /
-    `executeJudgmentRejectTool`. These are **not runtime-wired**.
-    Approval does **not** activate a judgment.
+    `executeJudgmentRejectTool`. The typed-tool contracts are not
+    registered as provider tools; they are reachable only through
+    worker-dispatched `/judgment_approve` and `/judgment_reject`
+    Telegram system commands (Phase 1B.4). Approval does **not**
+    activate a judgment.
   - **Phase 1A.4 (landed)**: `src/judgment/repository.ts` now also
     exports `recordJudgmentSource` (writes `judgment_sources` +
     `judgment_events`) and `linkJudgmentEvidence` (writes
@@ -79,20 +82,23 @@ Do not read `docs/design/archive/` by default. Those are history.
     `src/judgment/tool.ts` now also exports
     `JUDGMENT_RECORD_SOURCE_TOOL` / `JUDGMENT_LINK_EVIDENCE_TOOL` and
     `executeJudgmentRecordSourceTool` /
-    `executeJudgmentLinkEvidenceTool`. These are **not runtime-wired**.
-    Evidence linking does **not** activate, approve, or make a
-    judgment context-visible.
+    `executeJudgmentLinkEvidenceTool`. The typed-tool contracts are
+    not registered as provider tools; they are reachable only through
+    worker-dispatched `/judgment_source` and `/judgment_link` Telegram
+    system commands (Phase 1B.4). Evidence linking does **not**
+    activate, approve, or make a judgment context-visible.
   - **Phase 1A.5 (landed)**: `src/judgment/repository.ts` now also
     exports `commitApprovedJudgment`. Commit requires an approved,
     evidence-linked proposed judgment and sets
     `lifecycle_status=active` / `activation_state=eligible` /
     `authority_source=user_confirmed`. `src/judgment/tool.ts` now also
     exports `JUDGMENT_COMMIT_TOOL` / `executeJudgmentCommitTool`.
-    These are **not runtime-wired** (write path). Active/eligible rows
-    are now read by `src/queue/worker.ts` for context injection (Phase
-    1B.2) and via `/judgment` / `/judgment_explain` Telegram commands
-    (Phase 1B.3). Full Context Compiler and write-path commands remain
-    future work.
+    The typed-tool contract is not registered as a provider tool.
+    Active/eligible rows are now read by `src/queue/worker.ts` for
+    context injection (Phase 1B.2) and via `/judgment` /
+    `/judgment_explain` Telegram commands (Phase 1B.3). Commit is
+    reachable only through the worker-dispatched `/judgment_commit`
+    Telegram system command (Phase 1B.4).
   - **Phase 1A.6 (landed)**: `src/judgment/repository.ts` now also
     exports `queryJudgments` and `explainJudgment`, and
     `src/judgment/tool.ts` now also exports `JUDGMENT_QUERY_TOOL` /
@@ -107,10 +113,12 @@ Do not read `docs/design/archive/` by default. Those are history.
     `JUDGMENT_EXPIRE_TOOL` and the corresponding `execute*` functions.
     These are **local, unregistered** write surfaces that retire
     `active/eligible` judgments. `supersedeJudgment` can write
-    `judgment_edges`. None of these surfaces make judgments
-    context-visible or register tools. They are **not runtime-wired**.
-    Future agents must not implement context/compiler/provider
-    integration unless explicitly tasked.
+    `judgment_edges`. These surfaces do not register provider tools;
+    they are reachable only through the worker-dispatched
+    `/judgment_supersede`, `/judgment_revoke`, and `/judgment_expire`
+    Telegram system commands (Phase 1B.5). Future agents must not
+    implement provider-tool or additional runtime integration unless
+    explicitly tasked.
   - **Phase 1A.8 (landed)**: `src/judgment/control_gate.ts` exports
     `ControlGateDecision`, `evaluateTurn`, `evaluateCandidate`, and
     `recordControlGateDecision`. `migrations/005_control_gate_events.sql`
@@ -139,9 +147,23 @@ Do not read `docs/design/archive/` by default. Those are history.
     added to `SYSTEM_COMMANDS` in `worker.ts` and dispatched via
     `dispatchSystemCommand`. Uses `executeJudgmentQueryTool` and
     `executeJudgmentExplainTool` from `src/judgment/tool.ts`.
-    `src/judgment/tool.ts` is now imported from `worker.ts` (for these
-    two executors only). System commands do not trigger Control Gate
-    evaluation.
+    System commands do not trigger Control Gate evaluation.
+  - **Phase 1B.4 (landed)**: `/judgment_propose`,
+    `/judgment_approve`, `/judgment_reject`, `/judgment_source`,
+    `/judgment_link`, and `/judgment_commit` added to
+    `KNOWN_COMMANDS` / `SYSTEM_COMMANDS` and dispatched via
+    `dispatchSystemCommand`. These commands route through
+    `src/judgment/tool.ts`, send outbound notification output, do not
+    store conversation turns, and do not trigger Control Gate
+    evaluation. `/judgment_commit` activates only approved,
+    evidence-linked proposed judgments.
+  - **Phase 1B.5 (landed)**: `/judgment_supersede`,
+    `/judgment_revoke`, and `/judgment_expire` added to
+    `KNOWN_COMMANDS` / `SYSTEM_COMMANDS` and dispatched via
+    `dispatchSystemCommand`. These commands retire active/eligible
+    judgments through `src/judgment/tool.ts`, send outbound
+    notification output, do not store conversation turns, and do not
+    trigger Control Gate evaluation.
   - Remaining Phase 1A constraints still apply to all modules except
     `src/queue/worker.ts`:
     - `src/main.ts`, `src/providers/*`, `src/context/*` (except
@@ -149,10 +171,11 @@ Do not read `docs/design/archive/` by default. Those are history.
       `src/telegram/*`, and `src/commands/*` must NOT import from
       `src/judgment/*`.
   - Do **not** implement Tension, ReflectionTriageEvent,
-    `current_operating_view`, Context Compiler (provider-level),
-    provider/context integration beyond `builder.ts` slot injection,
-    vector / graph projections, Critique Lens, or Claude tool registration
-    for judgment tools unless the task explicitly authorizes them.
+    `current_operating_view`, provider/context integration beyond the
+    existing compiler/context-injection path, vector / graph projections,
+    Critique Lens, Claude tool registration for judgment tools, or
+    additional Judgment runtime paths unless the task explicitly
+    authorizes them.
 
 ## When changing code
 

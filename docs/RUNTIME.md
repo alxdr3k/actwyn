@@ -188,10 +188,11 @@ rows so the conversation path keeps moving.
 
 The Judgment System has local schema/repository/tool-contract
 substrate under `src/judgment/*`, but runtime access is intentionally
-limited. Provider context still uses `src/context/builder.ts` +
-`src/context/packer.ts`; the write path
-(propose → approve → link → commit) is not exposed through Telegram,
-provider tools, or background workers.
+limited. Provider context is assembled through `src/context/compiler.ts`
+and packed through `src/context/packer.ts`. The write path
+(propose → approve → link → commit) and retirement path are exposed
+only through worker-dispatched Telegram system commands, not provider
+tools or background workers.
 
 Runtime access:
 
@@ -200,11 +201,13 @@ Runtime access:
   before non-system `provider_run` jobs, not `summary_generation`.
   `job_id` attribution is present in schema version 6. Signal
   detection is still deferred; current worker telemetry records L0.
-- `src/judgment/tool.ts` — `executeJudgmentQueryTool` +
-  `executeJudgmentExplainTool` imported by `src/queue/worker.ts`
-  for `/judgment` and `/judgment_explain <id>` only. Output is sent
-  through outbound notifications and is not stored as conversation
-  turns.
+- `src/judgment/tool.ts` — executors imported by `src/queue/worker.ts`
+  for Judgment Telegram commands:
+  `/judgment`, `/judgment_explain`, `/judgment_propose`,
+  `/judgment_approve`, `/judgment_reject`, `/judgment_source`,
+  `/judgment_link`, `/judgment_commit`, `/judgment_supersede`,
+  `/judgment_revoke`, and `/judgment_expire`. Output is sent through
+  outbound notifications and is not stored as conversation turns.
 - `src/context/builder.ts` — gains `judgment_items` slot type
   (priority 600). `src/queue/worker.ts` populates it with
   active/eligible/normal/global/time-valid rows in `replay_mode`
@@ -225,8 +228,7 @@ a task explicitly authorizes a further Judgment runtime slice.
 
 - Automatic extraction of candidate `JudgmentItem` rows from provider
   output.
-- Telegram write commands (propose/approve/commit) and provider tool
-  registration for any Judgment write path.
+- Provider tool registration for any Judgment write path.
 - `current_operating_view` and `current_operating_view`-sourced Compiler input
   (`src/context/compiler.ts` is now wired; `builder.ts` remains in tree for regression parity).
 - Runtime readers for `judgment_edges`.
@@ -238,9 +240,9 @@ a task explicitly authorizes a further Judgment runtime slice.
 The 6-stage pipeline in `docs/JUDGMENT_SYSTEM.md` remains the
 architectural authority for the Judgment System direction
 (ADR-0009 … ADR-0013, DEC-037). Until a task explicitly
-authorizes a further Judgment runtime slice, do not wire the
-existing proposal, review, source-recording, evidence-linking, commit,
-supersede, revoke, or expire surfaces into any runtime path.
+authorizes a further Judgment runtime slice, do not wire these
+surfaces into provider tools, background workers, or additional
+runtime paths.
 
 ## Failure / debug path (current)
 

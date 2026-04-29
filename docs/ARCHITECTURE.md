@@ -11,7 +11,7 @@
 > full P0 design rationale, see `docs/PRD.md` and `docs/02_HLD.md`.
 > For the architectural authority of the DB-native AI-first
 > Judgment System direction, see `docs/JUDGMENT_SYSTEM.md` (Phase 0 /
-> 0.5 design record; Phase 1A.1–1A.8 implemented; Phase 1B.1–1B.3
+> 0.5 design record; Phase 1A.1–1A.8 implemented; Phase 1B.1–1B.5
 > runtime-wired). For current schema and code layout, see
 > `docs/DATA_MODEL.md` and `docs/CODE_MAP.md`.
 
@@ -26,7 +26,7 @@
 | Redaction at the persistence boundary             | implemented |
 | Memory summaries with provenance + confidence     | implemented |
 | Telegram attachment two-phase capture             | implemented |
-| DB-native AI-first Judgment System (Phase 1A+)    | Phase 1A.1–1A.8 locally implemented; **Phase 1B.1–1B.3 runtime-wired**: Control Gate telemetry on non-system provider_run, active judgment context injection in builder, `/judgment` + `/judgment_explain` Telegram commands |
+| DB-native AI-first Judgment System (Phase 1A+)    | Phase 1A.1–1A.8 locally implemented; **Phase 1B.1–1B.5 runtime-wired**: Control Gate telemetry on non-system provider_run, active judgment context injection, Telegram read commands, Telegram write commands, and Telegram retirement commands |
 | Vector / graph derived projections                | planned     |
 | second-brain repo as canonical runtime memory     | not planned (history/seed only) |
 | Obsidian / Markdown active write path             | not planned |
@@ -41,13 +41,17 @@ Current Judgment slice:
 - Phase 1A.1–1A.8: schema, local repository operations, typed-tool
   contracts, query/explain, retirement operations, and Control Gate
   substrate are implemented under `src/judgment/*`.
-- Phase 1B.1–1B.3: runtime wiring is limited to Control Gate telemetry
+- Phase 1B.1–1B.5: runtime wiring is limited to Control Gate telemetry
   in `src/queue/worker.ts`, active/eligible/global judgment context
-  injection, and Telegram read commands (`/judgment`,
-  `/judgment_explain`).
-- Judgment write-path tools remain local and unregistered. Full Context
-  Compiler, provider tool registration, memory-promotion integration,
-  and Telegram write commands are future scope.
+  injection, Telegram read commands (`/judgment`, `/judgment_explain`),
+  Telegram write commands (`/judgment_propose`, `/judgment_approve`,
+  `/judgment_reject`, `/judgment_source`, `/judgment_link`,
+  `/judgment_commit`), and Telegram retirement commands
+  (`/judgment_supersede`, `/judgment_revoke`, `/judgment_expire`).
+- Judgment typed-tool contracts remain unregistered as provider tools.
+  Automatic extraction, provider tool registration, memory-promotion
+  integration, `current_operating_view`, and vector/graph projections
+  are future scope.
 
 ## System overview
 
@@ -110,9 +114,9 @@ Detailed module / state-machine diagrams live in `docs/02_HLD.md`.
   `/var/lib/actwyn/actwyn.db` on prod).
 - **Architecture decisions** — `docs/adr/*` (ADR-0001 … ADR-0016
   accepted on `main`; ADR-0009 … ADR-0013 + ADR-0015 cover the
-  Judgment System direction; Phase 1A.1–1A.8 and Phase 1B.1–1B.3
-  implemented — DEC-038 records the Phase 1B runtime wiring decision;
-  full Context Compiler and Telegram write commands remain future work;
+  Judgment System direction; Phase 1A.1–1A.8 and Phase 1B.1–1B.5
+  implemented — DEC-038 records the initial Phase 1B.1–1B.3 runtime
+  wiring decision; provider tool registration remains future work;
   ADR-0016 records the future internal task-runner security boundary,
   not implemented runtime behavior).
 - **Tactical decisions and open questions** —
@@ -172,8 +176,9 @@ Implemented local substrate:
   and 006 add `control_gate_events` with `job_id` attribution.
 - `src/judgment/repository.ts` owns proposal, review, source,
   evidence, commit, query/explain, and retirement operations.
-- `src/judgment/tool.ts` defines local typed-tool contracts. Write-path
-  contracts are not registered in runtime modules.
+- `src/judgment/tool.ts` defines local typed-tool contracts. They are
+  not registered as provider tools; `src/queue/worker.ts` imports
+  executors for Telegram Judgment system commands.
 - `src/judgment/control_gate.ts` owns Control Gate evaluation and
   `control_gate_events` writes.
 
@@ -185,13 +190,19 @@ Runtime-wired surface:
   judgment rows into the `judgment_items` slot.
 - `/judgment` and `/judgment_explain <id>` expose read-only Telegram
   command output through outbound notifications.
+- `/judgment_propose`, `/judgment_approve`, `/judgment_reject`,
+  `/judgment_source`, `/judgment_link`, and `/judgment_commit` expose
+  the proposal/review/evidence/commit write path as worker-dispatched
+  Telegram system commands.
+- `/judgment_supersede`, `/judgment_revoke`, and `/judgment_expire`
+  expose retirement operations as worker-dispatched Telegram system
+  commands.
 
-Still future: automatic extraction, Telegram write commands, provider
-tool registration, memory promotion integration, `Tension` /
-`ReflectionTriageEvent`, `current_operating_view`, vector/graph
-projections, and the full Context Compiler. Until explicitly tasked,
-do not expand Judgment runtime reachability beyond the worker-mediated
-read/telemetry paths above.
+All Judgment Telegram command output is sent through outbound
+notifications and is not stored as conversation turns. Still future:
+automatic extraction, provider tool registration, memory promotion
+integration, `Tension` / `ReflectionTriageEvent`,
+`current_operating_view`, and vector/graph projections.
 
 ## Salvage audit pointer
 

@@ -24,10 +24,8 @@
 //   JUDGMENT_EXPIRE_TOOL         — name + description constant  (Phase 1A.7)
 //   executeJudgmentExpireTool(db, input, deps?) → ExpireToolResult
 //
-// These tools are NOT registered anywhere. Write-path tools and other
-// runtime modules must not import from this file. Exception: worker.ts
-// may import executeJudgmentQueryTool and executeJudgmentExplainTool
-// for Phase 1B.3 read-only Telegram commands (/judgment, /judgment_explain).
+// These tools are NOT registered as provider tools. worker.ts may import
+// executors for worker-dispatched Telegram Judgment system commands.
 // All other imports from src/main.ts, src/providers/*, src/context/*,
 // src/memory/*, src/telegram/*, or src/commands/* remain prohibited.
 //

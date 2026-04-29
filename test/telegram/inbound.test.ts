@@ -211,6 +211,24 @@ describe("classifyUpdate — pure", () => {
     }
   });
 
+  test("/judgment_propose is recognized as a known command with args (Phase 1B.4)", () => {
+    const c = classifyUpdate(textMessageUpdate(9, "/judgment_propose kind:decision SQLite는 state store다"), opts);
+    expect(c.kind).toBe("command");
+    if (c.kind === "command") {
+      expect(c.command).toBe("/judgment_propose");
+      expect(c.args).toBe("kind:decision SQLite는 state store다");
+    }
+  });
+
+  test("/judgment_revoke is recognized as a known command with args (Phase 1B.5)", () => {
+    const c = classifyUpdate(textMessageUpdate(10, "/judgment_revoke jdg-1 더 이상 유효하지 않음"), opts);
+    expect(c.kind).toBe("command");
+    if (c.kind === "command") {
+      expect(c.command).toBe("/judgment_revoke");
+      expect(c.args).toBe("jdg-1 더 이상 유효하지 않음");
+    }
+  });
+
   test("unsupported update (no message, no from) → skip/unsupported_type", () => {
     const c = classifyUpdate({ update_id: 7, edited_message: {} } as TelegramUpdate, opts);
     expect(c.kind).toBe("skip");

@@ -185,7 +185,7 @@ Migration 004 added `judgment_sources`, `judgment_items`,
 `judgment_evidence_links`, `judgment_edges`, `judgment_events`, and
 the external-content FTS5 table `judgment_items_fts`.
 `src/judgment/repository.ts` is the sole writer for these tables and
-also owns the local read-only `queryJudgments` / `explainJudgment`
+also owns the local `queryJudgments` / `explainJudgment` read
 surfaces.
 
 `judgment_items` is the core row. Important CHECK-constrained enums:
@@ -239,7 +239,9 @@ Active/eligible rows can exist after the local commit operation.
 - **`/judgment_explain <id>` command** — reads a single row by ID regardless
   of scope.
 
-Write-path tool contracts remain unregistered.
+Judgment typed-tool contracts remain unregistered as provider tools.
+Telegram system commands route through `src/queue/worker.ts` and then
+through `src/judgment/tool.ts` / `src/judgment/repository.ts`.
 
 ### `control_gate_events`
 
@@ -278,17 +280,17 @@ reasoning.
 | `outbound_notifications.status`       | `src/telegram/outbound.ts` (rolled up from chunks)                                |
 | `outbound_notification_chunks`        | `src/telegram/outbound.ts` (insert in same txn as parent + status); `src/startup/recovery.ts` (insert) |
 | `allowed_users`                       | out-of-band config — not written at runtime                                       |
-| `judgment_items` (insert)             | `src/judgment/repository.ts` (`proposeJudgment`) — proposal rows only. No other module may write `judgment_items` directly. |
-| `judgment_items` (approve transition) | `src/judgment/repository.ts` (`approveProposedJudgment`) — sets `approval_state=approved` only. Does not activate. |
-| `judgment_items` (reject transition)  | `src/judgment/repository.ts` (`rejectProposedJudgment`) — sets `approval_state=rejected` / `lifecycle_status=rejected` / `activation_state=excluded`. |
-| `judgment_items` (evidence arrays)    | `src/judgment/repository.ts` (`linkJudgmentEvidence`) — updates `source_ids_json` / `evidence_ids_json` denormalized arrays only. No activation. |
-| `judgment_items` (commit transition)  | `src/judgment/repository.ts` (`commitApprovedJudgment`) — sets `lifecycle_status=active` / `activation_state=eligible` / `authority_source=user_confirmed`, syncs denormalized arrays. Local unregistered write. Active/eligible rows now read by `src/queue/worker.ts` for context injection (Phase 1B.2) and Telegram read commands (Phase 1B.3). |
-| `judgment_items` (supersede transition) | `src/judgment/repository.ts` (`supersedeJudgment`) — sets `lifecycle_status=superseded` / `activation_state=excluded` on old; updates `supersedes_json` / `superseded_by_json` arrays on both. Local unregistered. |
-| `judgment_items` (revoke transition)  | `src/judgment/repository.ts` (`revokeJudgment`) — sets `lifecycle_status=revoked` / `activation_state=excluded`. Local unregistered. |
-| `judgment_items` (expire transition)  | `src/judgment/repository.ts` (`expireJudgment`) — sets `lifecycle_status=expired` / `activation_state=excluded`, optionally sets `valid_until`. Local unregistered. |
-| `judgment_sources` (insert)           | `src/judgment/repository.ts` (`recordJudgmentSource`) — local unregistered writer. No runtime path. |
-| `judgment_evidence_links` (insert)    | `src/judgment/repository.ts` (`linkJudgmentEvidence`) — local unregistered writer. No runtime path. |
-| `judgment_edges` (insert)             | `src/judgment/repository.ts` (`supersedeJudgment`) — inserts one edge with `relation=supersedes` (from=replacement, to=old). Local unregistered. |
+| `judgment_items` (insert)             | `src/judgment/repository.ts` (`proposeJudgment`) — proposal rows only. Runtime path: worker-dispatched `/judgment_propose`. No other module may write `judgment_items` directly. |
+| `judgment_items` (approve transition) | `src/judgment/repository.ts` (`approveProposedJudgment`) — sets `approval_state=approved` only. Runtime path: worker-dispatched `/judgment_approve`. Does not activate. |
+| `judgment_items` (reject transition)  | `src/judgment/repository.ts` (`rejectProposedJudgment`) — sets `approval_state=rejected` / `lifecycle_status=rejected` / `activation_state=excluded`. Runtime path: worker-dispatched `/judgment_reject`. |
+| `judgment_items` (evidence arrays)    | `src/judgment/repository.ts` (`linkJudgmentEvidence`) — updates `source_ids_json` / `evidence_ids_json` denormalized arrays only. Runtime path: worker-dispatched `/judgment_link`. No activation. |
+| `judgment_items` (commit transition)  | `src/judgment/repository.ts` (`commitApprovedJudgment`) — sets `lifecycle_status=active` / `activation_state=eligible` / `authority_source=user_confirmed`, syncs denormalized arrays. Runtime path: worker-dispatched `/judgment_commit`. Active/eligible rows are read by `src/queue/worker.ts` for context injection and Telegram read commands. |
+| `judgment_items` (supersede transition) | `src/judgment/repository.ts` (`supersedeJudgment`) — sets `lifecycle_status=superseded` / `activation_state=excluded` on old; updates `supersedes_json` / `superseded_by_json` arrays on both. Runtime path: worker-dispatched `/judgment_supersede`. |
+| `judgment_items` (revoke transition)  | `src/judgment/repository.ts` (`revokeJudgment`) — sets `lifecycle_status=revoked` / `activation_state=excluded`. Runtime path: worker-dispatched `/judgment_revoke`. |
+| `judgment_items` (expire transition)  | `src/judgment/repository.ts` (`expireJudgment`) — sets `lifecycle_status=expired` / `activation_state=excluded`, optionally sets `valid_until`. Runtime path: worker-dispatched `/judgment_expire`. |
+| `judgment_sources` (insert)           | `src/judgment/repository.ts` (`recordJudgmentSource`) — runtime path: worker-dispatched `/judgment_source`. |
+| `judgment_evidence_links` (insert)    | `src/judgment/repository.ts` (`linkJudgmentEvidence`) — runtime path: worker-dispatched `/judgment_link`. |
+| `judgment_edges` (insert)             | `src/judgment/repository.ts` (`supersedeJudgment`) — inserts one edge with `relation=supersedes` (from=replacement, to=old). Runtime path: worker-dispatched `/judgment_supersede`. |
 | `judgment_events` (insert)            | `src/judgment/repository.ts` — `judgment.proposed`, `judgment.approved`, `judgment.rejected`, `judgment.source.recorded`, `judgment.evidence.linked`, `judgment.committed`, `judgment.superseded`, `judgment.revoked`, `judgment.expired` events only. |
 | `control_gate_events` (insert)        | `src/judgment/control_gate.ts` (`recordControlGateDecision`) — append-only; BEFORE UPDATE/DELETE/INSERT triggers block mutation. Runtime caller: `src/queue/worker.ts` (Phase 1B.1, non-system `provider_run` only). `job_id` attribution implemented (migration 006, issue #45). |
 

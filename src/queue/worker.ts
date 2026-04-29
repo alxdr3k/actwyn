@@ -1342,7 +1342,7 @@ async function runSystemCommandJob(
   }
 
   // Persist a turn for conversational context replay and summaries.
-  // Phase 1B.3: judgment commands (/judgment, /judgment_explain) are EXCLUDED
+  // Phase 1B.3-1B.5: judgment commands are EXCLUDED
   // from turn storage. Their output contains judgment statements that would
   // flow into context replay and summaries even after revoke/expire. Notification
   // retry uses outbound_notification_chunks, not turns, so omitting the turn

@@ -112,12 +112,18 @@ slice:
   refresh path. Excluded from `summary_generation`.
 - **Phase 1B.3**: `/judgment` and `/judgment_explain <id>` are known commands in
   `KNOWN_COMMANDS` (inbound) and `SYSTEM_COMMANDS` (worker). `executeJudgmentQueryTool`
-  + `executeJudgmentExplainTool` from `src/judgment/tool.ts` imported by worker for
-  these commands only. Command output not stored as turns.
+  + `executeJudgmentExplainTool` from `src/judgment/tool.ts` are imported by worker.
+- **Phase 1B.4**: `/judgment_propose`, `/judgment_approve`, `/judgment_reject`,
+  `/judgment_source`, `/judgment_link`, and `/judgment_commit` are worker-dispatched
+  Telegram system commands that route through `src/judgment/tool.ts`.
+- **Phase 1B.5**: `/judgment_supersede`, `/judgment_revoke`, and
+  `/judgment_expire` are worker-dispatched Telegram system commands that retire
+  active judgments through `src/judgment/tool.ts`.
+- Judgment command output is not stored as turns and system commands do not produce
+  Control Gate rows.
 
-Pending: Telegram write commands (propose/approve/commit).
-`control_gate_events` `job_id` attribution resolved (#45, migration 006).
-Resume-mode judgment refresh resolved (#44).
+Pending: provider tool registration and automatic judgment extraction;
+`control_gate_events` job attribution (#45) and resume-mode refresh (#44) are resolved.
 See `docs/RUNTIME.md` for the full runtime boundary description.
 
 ## Judgment
@@ -126,15 +132,15 @@ See `docs/RUNTIME.md` for the full runtime boundary description.
 | ------------------------------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
 | `src/judgment/types.ts`               | Judgment enum literals, defaults, and shared TS types. Pure TS.                     | implemented |
 | `src/judgment/validators.ts`          | Pure-TS validators for judgment inputs and query/explain filters.                   | implemented |
-| `src/judgment/repository.ts`          | Sole writer for `judgment_*` tables; owns local lifecycle operations and query/explain. | implemented; write paths local/unregistered |
-| `src/judgment/tool.ts`                | Local typed-tool contracts. Only query/explain executors are runtime-reachable via worker system commands. | implemented |
+| `src/judgment/repository.ts`          | Sole writer for `judgment_*` tables; owns lifecycle operations and query/explain. Worker-dispatched Telegram commands route through it. | implemented |
+| `src/judgment/tool.ts`                | Local typed-tool contracts. Worker imports executors only for Telegram Judgment system commands; provider tool registration is not implemented. | implemented |
 | `src/judgment/control_gate.ts`        | Control Gate evaluation and `control_gate_events` writer.                           | implemented; worker telemetry path only |
 
 ## Queue / orchestration
 
 | Path                                  | Purpose                                                                              | Status                                       |
 | ------------------------------------- | ------------------------------------------------------------------------------------ | -------------------------------------------- |
-| `src/queue/worker.ts`                 | Single job claim + dispatch loop; one `provider_run` at a time. Also: attachment capture, Control Gate telemetry, judgment context injection, and judgment read-command dispatch. | implemented · salvage:ADAPT |
+| `src/queue/worker.ts`                 | Single job claim + dispatch loop; one `provider_run` at a time. Also: attachment capture, Control Gate telemetry, judgment context injection, and judgment Telegram command dispatch. | implemented · salvage:ADAPT |
 | `src/queue/notification_retry.ts`     | Handlers / helpers used by the worker to process `notification_retry` jobs (per-chunk re-send of `outbound_notification_chunks`). Not a separate loop. | implemented · salvage:KEEP |
 | `src/startup/recovery.ts`             | Boot-time reconciliation of stale `running` jobs (force `interrupted`, requeue if `safe_retry`, kill orphan PIDs); offset fast-forward; enqueues one `storage_sync` job for `failed` / `delete_failed` rows only (not for `pending`). | implemented · salvage:KEEP |
 
@@ -159,12 +165,9 @@ See `docs/RUNTIME.md` for the full runtime boundary description.
 | `src/commands/summary.ts`             | `/summary` and `/end` triggers.                                                      |
 | `src/commands/whoami.ts`              | `/whoami` and `BOOTSTRAP_WHOAMI` flow (DEC-009).                                     |
 
-**Phase 1B.3 inline commands (dispatched directly in `src/queue/worker.ts`):**
-
-| Command | Purpose |
-| ------- | ------- |
-| `/judgment` | List active/eligible/valid judgments. Applies same temporal validity filter as context injection. |
-| `/judgment_explain <id>` | Show detail (kind, status, sources, evidence links, events) for one judgment row. |
+**Phase 1B.3–1B.5 inline commands** are dispatched directly in
+`src/queue/worker.ts`: `/judgment`, `/judgment_explain`, and the
+`/judgment_*` write/retirement commands listed in `/help`.
 
 ## Scripts
 
@@ -203,7 +206,7 @@ See `docs/RUNTIME.md` for the full runtime boundary description.
 | `test/judgment/tool.test.ts`                      | Typed-tool contracts, executor outcomes, and runtime import-boundary assertions. |
 | `test/context/builder_judgments.test.ts`          | Judgment context slot rendering and priority behavior.                           |
 | `test/queue/control_gate_telemetry.test.ts`       | Worker telemetry writes and system-command exclusions.                           |
-| `test/queue/judgment_commands.test.ts`            | `/judgment` and `/judgment_explain` dispatch/output behavior.                    |
+| `test/queue/judgment_commands.test.ts`            | Judgment read/write/retirement Telegram command dispatch/output behavior.        |
 | `test/queue/judgment_context_injection.test.ts`   | Worker-side active judgment query filters and packed-context injection.          |
 | `test/judgment/control_gate.test.ts`              | Control Gate decisions, fixture coverage, persistence, and import-boundary assertions. |
 | `test/memory/correction.test.ts`                  | Memory correction supersede semantics (AC-MEM-004).                              |
