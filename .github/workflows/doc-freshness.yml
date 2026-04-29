@@ -60,8 +60,13 @@ jobs:
           touched_roadmap_doc=$(printf '%s\n' "$CHANGED" | grep -E '^docs/04_IMPLEMENTATION_PLAN\.md$' || true)
           touched_current_state=$(printf '%s\n' "$CHANGED" | grep -E '^docs/context/current-state\.md$' || true)
           touched_acceptance_doc=$(printf '%s\n' "$CHANGED" | grep -E '^docs/06_ACCEPTANCE_TESTS\.md$' || true)
+          touched_runbook=$(printf '%s\n' "$CHANGED" | grep -E '^docs/05_RUNBOOK\.md$' || true)
+          touched_testing_doc=$(printf '%s\n' "$CHANGED" | grep -E '^docs/TESTING\.md$' || true)
+          touched_operations_doc=$(printf '%s\n' "$CHANGED" | grep -E '^docs/OPERATIONS\.md$' || true)
+          touched_ci_cd_doc=$(printf '%s\n' "$CHANGED" | grep -E '^docs/11_CI_CD\.md$' || true)
           touched_generated=$(printf '%s\n' "$CHANGED" | grep -E '^docs/generated/' || true)
           touched_adr=$(printf '%s\n' "$CHANGED" | grep -E '^docs/adr/' || true)
+          touched_workflows=$(printf '%s\n' "$CHANGED" | grep -E '^\.github/workflows/.*\.ya?ml(\.example)?$' || true)
 
           if [ -n "$touched_src" ] &&
              [ -z "$touched_any_thin_doc" ] &&
@@ -83,6 +88,16 @@ jobs:
 
           if [ -n "$touched_migrations" ] && [ -z "$touched_data_doc" ] && [ -z "$touched_generated" ] && [ -z "$touched_adr" ]; then
             missing+=("migrations/ changed → update \`docs/DATA_MODEL.md\` and run \`bun run docs:generate:schema\` then commit \`docs/generated/schema.md\`.")
+          fi
+
+          if [ -n "$touched_workflows" ] &&
+             [ -z "$touched_testing_doc" ] &&
+             [ -z "$touched_operations_doc" ] &&
+             [ -z "$touched_runbook" ] &&
+             [ -z "$touched_ci_cd_doc" ] &&
+             [ -z "$touched_acceptance_doc" ] &&
+             [ -z "$touched_adr" ]; then
+            missing+=("workflow files changed → update \`docs/11_CI_CD.md\`, \`docs/TESTING.md\`, \`docs/OPERATIONS.md\`, \`docs/05_RUNBOOK.md\`, \`docs/06_ACCEPTANCE_TESTS.md\`, or add an ADR if CI/CD behavior, required checks, release gates, or deployment behavior changed.")
           fi
 
           if [ ${#missing[@]} -eq 0 ]; then
@@ -112,7 +127,7 @@ jobs:
               marker,
               '### Doc freshness check',
               '',
-              'Code changes were detected that may require roadmap/status, gate, thin-doc, generated-doc, or ADR updates.',
+              'Changes were detected that may require roadmap/status, gate, thin-doc, generated-doc, CI/CD-doc, or ADR updates.',
               '',
               missing,
               '',
@@ -151,7 +166,7 @@ jobs:
           {
             echo "### Doc freshness check"
             echo ""
-            echo "Code changes were detected that may require roadmap/status, gate, thin-doc, generated-doc, or ADR updates."
+            echo "Changes were detected that may require roadmap/status, gate, thin-doc, generated-doc, CI/CD-doc, or ADR updates."
             echo ""
             printf '%s\n' "$MISSING"
             echo ""

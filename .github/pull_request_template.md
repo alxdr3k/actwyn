@@ -32,6 +32,8 @@ this template is a checklist, not a place for long prose.
       committed the output
 - [ ] Updated SHA header (`Last verified against code: <SHA> (<date>)`) on any
       thin doc whose subject area this PR touches
+- [ ] Updated CI/CD docs or workflow files/examples (`docs/11_CI_CD.md`,
+      `.github/workflows/*.yml*`)
 - [ ] Archived or superseded an old design note
       (`docs/design/archive/`)
 
@@ -42,6 +44,7 @@ See [`docs/DOCUMENTATION.md`](../docs/DOCUMENTATION.md) for the
 
 - [ ] `bun run ci` passed locally (`lint:redactor` + `lint:thin-docs` + `typecheck` + `bun test`)
 - [ ] If schema changed: bumped `expected_schema_version` in `src/main.ts`
+- [ ] CI/CD impact checked
 - [ ] Verified the PR does not touch unrelated runtime code
 
 <!--

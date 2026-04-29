@@ -1,0 +1,94 @@
+# Generic CI skeleton.
+#
+# Copy to `.github/workflows/ci.yml`, then replace or delete every placeholder
+# step before enabling branch protection. This file intentionally fails until
+# adapted to the project's real stack and commands.
+
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up runtime
+        run: |
+          set -euo pipefail
+          echo "Replace this step with the project's runtime setup."
+          echo "Examples: actions/setup-node, actions/setup-python, ruby/setup-ruby, actions/setup-go, dtolnay/rust-toolchain, docker/setup-buildx-action."
+          exit 1
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          echo "Replace with the project's locked install command."
+          echo "Examples: npm ci, pnpm install --frozen-lockfile, uv sync --frozen, bundle install, go mod download, cargo fetch."
+          exit 1
+
+      - name: Lint
+        run: |
+          set -euo pipefail
+          echo "Replace with lint command, or delete this step if none exists."
+          exit 1
+
+      - name: Typecheck or compile
+        run: |
+          set -euo pipefail
+          echo "Replace with typecheck or compile command, or delete this step if not applicable."
+          exit 1
+
+      - name: Unit tests
+        run: |
+          set -euo pipefail
+          echo "Replace with unit test command."
+          exit 1
+
+      - name: Integration tests
+        run: |
+          set -euo pipefail
+          echo "Replace with integration test command, service-container setup, or delete if not applicable."
+          exit 1
+
+      - name: Build or package
+        run: |
+          set -euo pipefail
+          echo "Replace with build/package command, or delete if not applicable."
+          exit 1
+
+      - name: Migration or schema checks
+        run: |
+          set -euo pipefail
+          echo "Replace with migration/schema/generated-doc checks, or delete if not applicable."
+          exit 1
+
+      - name: Upload debug artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-debug-${{ github.run_id }}
+          path: |
+            logs/
+            coverage/
+            test-results/
+          if-no-files-found: ignore

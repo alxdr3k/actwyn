@@ -20,11 +20,12 @@ authoritative, and what to update when something changes.
    current-state docs (`docs/ARCHITECTURE.md`, `docs/CODE_MAP.md`,
    `docs/DATA_MODEL.md`, `docs/RUNTIME.md`, `docs/TESTING.md`,
    `docs/OPERATIONS.md`)
-5. ADRs in `docs/adr/`
-6. Q / DEC registers and traceability matrix
+5. CI/CD guidance (`docs/11_CI_CD.md`)
+6. ADRs in `docs/adr/`
+7. Q / DEC registers and traceability matrix
    (`docs/07_QUESTIONS_REGISTER.md`, `docs/08_DECISION_REGISTER.md`,
    `docs/09_TRACEABILITY_MATRIX.md`)
-7. Long design documents and archived design notes
+8. Long design documents and archived design notes
    (`docs/PRD.md`, `docs/02_HLD.md`, `docs/00_PROJECT_DELIVERY_PLAYBOOK.md`,
    `docs/03_RISK_SPIKES.md`, `docs/05_RUNBOOK.md`, `docs/06_ACCEPTANCE_TESTS.md`,
    `docs/JUDGMENT_SYSTEM.md` (Phase 0 / 0.5 architectural design
@@ -48,6 +49,9 @@ output.
 - Thin current-state docs explain the current code shape but never
   override the code.
 - Thin current-state docs do not own future roadmap inventory.
+- `docs/11_CI_CD.md` describes stack-neutral CI/CD guidance. Actual commands
+  live in `docs/TESTING.md`; deployment ownership and runbooks live in
+  `docs/OPERATIONS.md` and `docs/05_RUNBOOK.md`.
 - ADRs explain **why** major decisions were made.
 - Accepted ADRs are not edited to reflect later changes in
   implementation. If an architecture decision changes, create a new
@@ -74,6 +78,7 @@ output.
 | DB / schema / migration changes              | update `docs/DATA_MODEL.md` + run `bun run docs:generate:schema` |
 | Test / lint / typecheck command changes      | update `docs/TESTING.md`                           |
 | Operational, env, or run-loop changes        | update `docs/OPERATIONS.md`                        |
+| CI/CD workflow, required check, release, branch protection, or deployment pipeline changes | update `docs/TESTING.md`, `docs/OPERATIONS.md`, `docs/05_RUNBOOK.md`, `docs/06_ACCEPTANCE_TESTS.md`, and `docs/11_CI_CD.md` as applicable |
 | Major architecture decision                  | add a new ADR (or supersede an existing one)       |
 | Tactical / policy decision                   | add an entry in `docs/08_DECISION_REGISTER.md`     |
 | Open question that needs an answer           | add an entry in `docs/07_QUESTIONS_REGISTER.md`    |
@@ -101,6 +106,26 @@ roadmap language into `docs/04_IMPLEMENTATION_PLAN.md`:
    issue, or commit when known. If unknown, write `anchor missing` rather
    than inventing one.
 
+## CI/CD migration
+
+When adopting or updating CI/CD documentation, migrate actual behavior rather
+than inventing a cleaner process.
+
+1. Inventory workflow files, external CI/CD systems, release scripts, deploy
+   platforms, package registries, cron jobs, local scripts, and manual steps.
+2. Copy real validation commands into `docs/TESTING.md`. If a command is
+   unknown, write `needs audit` instead of guessing.
+3. Record deployment ownership, environments, secret ownership, release
+   triggers, rollback boundaries, and systemd/manual deploy state in
+   `docs/OPERATIONS.md`.
+4. Move step-by-step deploy, rollback, monitor, and incident procedures into
+   `docs/05_RUNBOOK.md`.
+5. Use `docs/11_CI_CD.md` for guidance and
+   `docs/templates/CI_CD_TEMPLATE.md` as a worksheet when a migration packet or
+   single planning view is useful.
+6. Preserve source anchors: workflow path, CI run, commit SHA, DEC, ADR, Q, or
+   incident link. If unknown, write `anchor missing`.
+
 ## Enforcement mechanisms
 
 These tools make the policy self-enforcing rather than honor-system only.
@@ -108,11 +133,11 @@ These tools make the policy self-enforcing rather than honor-system only.
 ### Doc Freshness CI
 
 `.github/workflows/doc-freshness.yml` fires on every PR and on every direct
-push to `main`. If code in `src/` or `migrations/` changes without a
-corresponding roadmap/status, acceptance gate, thin current-state doc,
-generated doc, or ADR update, the workflow posts a warning listing the
-missing items. The warning is non-blocking (does not prevent merge), but
-should not be ignored.
+push to `main`. If code in `src/`, migrations, or workflow files changes
+without a corresponding roadmap/status, acceptance gate, thin current-state
+doc, generated doc, CI/CD doc, or ADR update, the workflow posts a warning
+listing the missing items. The warning is non-blocking (does not prevent
+merge), but should not be ignored.
 
 Temporary: during the early-development period, direct `main` pushes are
 permitted. The workflow covers this via a `push` trigger in addition to

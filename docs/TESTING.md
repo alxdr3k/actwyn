@@ -191,20 +191,19 @@ This is the all-in-one pre-PR check. It runs (per
 bun run lint:redactor && bun run lint:thin-docs && bun run typecheck && bun test
 ```
 
+## CI / required checks
+
+No active app CI workflow runs `bun run ci`; only doc freshness soft-warnings run on PRs and direct `main` pushes. If active CI is introduced, update this file and `docs/11_CI_CD.md`.
+
 ## Before opening a PR
 
-Recommended checklist:
-
 - [ ] Run `bun run ci` locally and confirm it passes.
-- [ ] If you changed migrations or schema, also confirm
-      `expected_schema_version` in `src/main.ts` matches the new
-      highest migration number, and `docs/DATA_MODEL.md` is updated.
+- [ ] If you changed migrations or schema, update `expected_schema_version` in
+      `src/main.ts` and `docs/DATA_MODEL.md`.
 - [ ] If you changed runtime behavior, update `docs/RUNTIME.md`.
 - [ ] If you added or moved files, update `docs/CODE_MAP.md`.
 - [ ] If you changed scripts in `package.json`, update this file.
-- [ ] If you made an architecture-level decision, add or supersede
-      an ADR.
+- [ ] If you made an architecture-level decision, add or supersede an ADR.
 
-If you cannot run `bun run ci` (no Bun on the machine, no network
-for `bun install`, etc.), say so explicitly in the PR description
-rather than claiming green.
+If you cannot run `bun run ci` (no Bun on the machine, no network for
+`bun install`, etc.), say so explicitly in the PR description.

@@ -172,6 +172,13 @@ Operational invariants encoded in the unit:
   `ProtectHome=yes`, `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX`,
   etc. — bound blast radius if the process is exploited.
 
+### CD / release pipeline
+
+No active CD workflow deploys Actwyn. Deployment is manual systemd operation: `deploy/install.sh`, `deploy/systemd/actwyn.service`, host sync, and `systemctl`.
+Release source is direct `main` during `docs/policies/TEMP_MAIN_PUSH.md`;
+identify artifacts by commit SHA and smoke with `/doctor` plus `journalctl -u actwyn`. If Actions or another CD system
+starts owning deploys, update this section, `docs/11_CI_CD.md`, and runbook.
+
 ## Database
 
 - Engine: SQLite (WAL mode), single file under `ACTWYN_DB_PATH`.

@@ -69,6 +69,9 @@
 
 ## 2. Deploy (fresh host or clean reinstall)
 
+Current deployment is manual systemd operation. No active GitHub Actions CD
+workflow deploys this service.
+
 Prerequisites:
 
 - Hetzner CX22 running Debian/Ubuntu LTS, kernel 6.x.
@@ -422,4 +425,3 @@ Follow-up: <what still needs to change; open a Q in 07>
 
 Keep entries short and dated; this is an operator log, not a
 postmortem artifact.
-

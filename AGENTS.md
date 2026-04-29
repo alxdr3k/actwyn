@@ -14,8 +14,9 @@ soon as you have enough:
 3. `docs/ARCHITECTURE.md` — what is implemented, what is planned.
 4. `docs/CODE_MAP.md` — where the relevant module lives.
 5. `docs/TESTING.md` — how to validate.
-6. The task-relevant files in `src/` and `test/`.
-7. The relevant ADR in `docs/adr/` **only if** the task changes
+6. `docs/11_CI_CD.md` — only if changing CI/CD, release, deployment pipeline, or required checks.
+7. The task-relevant files in `src/` and `test/`.
+8. The relevant ADR in `docs/adr/` **only if** the task changes
    architecture.
 
 Do not read the long P0 design docs (`docs/PRD.md`, `docs/02_HLD.md`,
@@ -60,6 +61,9 @@ Do not read `docs/design/archive/` by default. Those are history.
   `docs/DATA_MODEL.md`, `docs/RUNTIME.md`, `docs/TESTING.md`,
   `docs/OPERATIONS.md`) explain the current shape but never override
   the code. They do not own future roadmap inventory.
+- `docs/11_CI_CD.md` owns stack-neutral CI/CD guidance. Actual commands
+  live in `docs/TESTING.md`; operational deployment state lives in
+  `docs/OPERATIONS.md` and `docs/05_RUNBOOK.md`.
 - ADRs explain why decisions were made; accepted ADRs are not edited
   to chase later changes.
 - Long design docs are historical reasoning and an acceptance
@@ -128,6 +132,10 @@ Do not read `docs/design/archive/` by default. Those are history.
   update `docs/TESTING.md`.
 - If you change env vars, run paths, or operational steps, update
   `docs/OPERATIONS.md`.
+- If you change CI/CD workflow, required check, branch protection,
+  release, or deployment pipeline behavior, update `docs/11_CI_CD.md`,
+  `docs/TESTING.md`, `docs/OPERATIONS.md`, or `docs/05_RUNBOOK.md`
+  as applicable.
 - If you make an architecture-level decision, add a new ADR (or
   supersede an existing one) under `docs/adr/`.
 - Do not rewrite long design docs to reflect implementation

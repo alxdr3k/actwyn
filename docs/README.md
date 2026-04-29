@@ -15,6 +15,7 @@ specific file you need.
 | Runtime flow (boot, inbound, jobs, outbound)                           | [`RUNTIME.md`](./RUNTIME.md)                                 |
 | Tests and validation commands                                          | [`TESTING.md`](./TESTING.md)                                 |
 | Local operations / deploy / env                                        | [`OPERATIONS.md`](./OPERATIONS.md)                           |
+| CI/CD guidance and migration checklist                                 | [`11_CI_CD.md`](./11_CI_CD.md)                               |
 | Architecture decisions                                                 | [`adr/`](./adr/) (start at [`adr/README.md`](./adr/README.md)) |
 | Tactical / policy decisions                                            | [`08_DECISION_REGISTER.md`](./08_DECISION_REGISTER.md)       |
 | Open questions                                                         | [`07_QUESTIONS_REGISTER.md`](./07_QUESTIONS_REGISTER.md)     |
@@ -47,9 +48,10 @@ needs the *why* or the acceptance criterion.
 2. Generated docs / schemas produced from those sources
 3. Roadmap / status ledger (`04_IMPLEMENTATION_PLAN.md`)
 4. Compressed current state + thin current-state docs
-5. ADRs (`adr/`)
-6. Q / DEC registers + traceability matrix
-7. Long design / historical / archived docs
+5. CI/CD guidance (`11_CI_CD.md`)
+6. ADRs (`adr/`)
+7. Q / DEC registers + traceability matrix
+8. Long design / historical / archived docs
 
 See [`DOCUMENTATION.md`](./DOCUMENTATION.md) for the full policy
 and the "what to update when" table.
