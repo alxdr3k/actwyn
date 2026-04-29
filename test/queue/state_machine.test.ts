@@ -324,6 +324,88 @@ describe("/end: summary_generation job marks session ended on success", () => {
     expect(sumRow).not.toBeNull();
   });
 
+  test("JDG-1C.2a: summary_generation proposes judgments from structured output only", async () => {
+    const summaryJson = JSON.stringify({
+      session_id: "sess-1",
+      summary_type: "session",
+      facts: [{ content: "사용자는 Bun을 선호한다", provenance: "observed", confidence: 0.85 }],
+      preferences: [{ content: "짧은 답변을 선호한다", provenance: "user_stated", confidence: 0.9 }],
+      decisions: [{ content: "SQLite WAL을 유지한다", provenance: "user_confirmed", confidence: 0.95 }],
+      open_tasks: [{ content: "acceptance 환경을 준비한다", provenance: "user_stated", confidence: 0.7 }],
+      cautions: [{ content: "provider tool 등록은 명시 승인 전 금지", provenance: "assistant_generated", confidence: 0.8 }],
+      source_turn_ids: ["turn-1"],
+    });
+    db.prepare<unknown, [string, string, string, string]>(
+      `INSERT INTO jobs
+         (id, status, job_type, session_id, user_id, chat_id, request_json, idempotency_key, provider)
+       VALUES(?, 'queued', 'summary_generation', ?, 'user-1', 'chat-1', ?, ?, 'fake')`,
+    ).run(
+      "j-summary-proposals",
+      "sess-1",
+      JSON.stringify({ command: "/summary", args: "", text: "", has_attachments: false }),
+      "telegram:summary-proposals",
+    );
+
+    await runWorkerOnce(deps({
+      summaryAdapter: {
+        name: "fake",
+        run: async () => ({
+          kind: "succeeded" as const,
+          response: {
+            provider: "fake",
+            session_id: "fake-session",
+            final_text: summaryJson,
+            raw_events: [],
+            duration_ms: 1,
+            exit_code: 0,
+            parser_status: "parsed" as const,
+          },
+        }),
+      },
+    }));
+
+    const summaryRow = db
+      .prepare<{ id: string }>("SELECT id FROM memory_summaries WHERE session_id = 'sess-1' LIMIT 1")
+      .get();
+    expect(summaryRow).not.toBeNull();
+
+    const rows = db
+      .prepare<{
+        kind: string;
+        lifecycle_status: string;
+        approval_state: string;
+        activation_state: string;
+        authority_source: string;
+        scope_json: string;
+        source_ids_json: string | null;
+        evidence_ids_json: string | null;
+      }, never[]>(
+        `SELECT kind, lifecycle_status, approval_state, activation_state,
+                authority_source, scope_json, source_ids_json, evidence_ids_json
+         FROM judgment_items ORDER BY id`,
+      )
+      .all();
+    expect(rows.map((r) => r.kind)).toEqual([
+      "fact",
+      "preference",
+      "decision",
+      "current_state",
+      "caution",
+    ]);
+    expect(rows.every((r) => r.lifecycle_status === "proposed")).toBe(true);
+    expect(rows.every((r) => r.approval_state === "pending")).toBe(true);
+    expect(rows.every((r) => r.activation_state === "history_only")).toBe(true);
+    expect(rows.every((r) => r.authority_source === "none")).toBe(true);
+    expect(rows.every((r) => r.source_ids_json === null && r.evidence_ids_json === null)).toBe(true);
+    expect(JSON.parse(rows[0]!.scope_json).summary_id).toBe(summaryRow!.id);
+    expect(JSON.parse(rows[3]!.scope_json).summary_item_type).toBe("open_task");
+
+    const memoryItemCount = db
+      .prepare<{ n: number }>("SELECT COUNT(*) AS n FROM memory_items WHERE session_id = 'sess-1'")
+      .get()!.n;
+    expect(memoryItemCount).toBe(0);
+  });
+
   test("/end on empty session (fake returns no JSON) still closes session + inserts minimal summary", async () => {
     // Fake adapter returns empty text — no valid JSON summary.
     db.prepare<unknown, [string, string, string, string]>(

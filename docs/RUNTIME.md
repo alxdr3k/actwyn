@@ -208,6 +208,10 @@ Runtime access:
   `/judgment_link`, `/judgment_commit`, `/judgment_supersede`,
   `/judgment_revoke`, and `/judgment_expire`. Output is sent through
   outbound notifications and is not stored as conversation turns.
+- `src/judgment/summary_proposals.ts` — worker-called
+  `summary_generation` bridge that creates proposal-only
+  `judgment_items`; no source/evidence link, approval, commit,
+  activation, or provider-tool registration.
 - `src/context/builder.ts` — gains `judgment_items` slot type
   (priority 790, above memory recall). `src/queue/worker.ts` populates it with
   active/eligible/normal/global/time-valid rows in `replay_mode`
@@ -217,23 +221,19 @@ Runtime access:
   `src/commands/*`, and `src/main.ts` do **not** import from
   `src/judgment/`.
 
-Schema version is **6** (migration 005 adds `control_gate_events`; migration 006 adds
-`job_id` attribution and a pre-migration upgrade guard — see `src/main.ts`
-`assertNoPendingProviderRunsBeforeMigration006()`).
+Schema version is **6**: migrations 005–006 add `control_gate_events`, `job_id`, and the migration-006 preflight guard.
 
-ADR-0017 / DEC-039 first runtime slice is implemented: provenance
-gates are split into memory persistence vs Judgment proposal helpers;
-summary output stays in `memory_summaries` and does not create active
-`memory_items`; active/eligible judgments outrank memory recall in
-context packing.
+ADR-0017 / DEC-039 runtime slices are implemented: memory persistence
+and Judgment proposal gates are split; summary output stays in
+`memory_summaries`, creates proposal-only Judgments, and never creates
+active `memory_items`; active/eligible judgments outrank memory recall.
 
 ### What is not implemented
 
-The following are not implemented. Do not wire any of these until
-a task explicitly authorizes a further Judgment runtime slice.
+Do not wire any of these until explicitly authorized:
 
-- Automatic extraction of candidate `JudgmentItem` rows from provider
-  or summary output.
+- Provider-output extraction of candidate `JudgmentItem` rows.
+- Automatic approval/evidence-link/commit/activation of summary proposals, or operator-facing review affordances.
 - Provider tool registration for any Judgment write path.
 - `current_operating_view` and `current_operating_view`-sourced Compiler input
   (`compiler.ts` is wired; `builder.ts` remains active slot helper until Q-066).

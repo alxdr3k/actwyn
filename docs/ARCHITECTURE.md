@@ -49,14 +49,19 @@ Current Judgment slice:
   `/judgment_reject`, `/judgment_source`, `/judgment_link`,
   `/judgment_commit`), and Telegram retirement commands
   (`/judgment_supersede`, `/judgment_revoke`, `/judgment_expire`).
+- Phase 1C.2a: successful `summary_generation` structured output is
+  converted into proposed Judgment rows only; those rows are not
+  approved, evidence-linked, committed, activated, or exposed as
+  provider tools.
 - Judgment typed-tool contracts remain unregistered as provider tools.
-  Automatic extraction/proposal, provider tool registration,
+  Provider-output extraction/proposal, provider tool registration,
   `current_operating_view`, and vector/graph projections are future
   scope.
 - ADR-0017 resolves Q-027: context-visible durable behavioral baselines
   converge on `judgment_items`. The first runtime slice is implemented:
-  summary extraction no longer writes active `memory_items`, and
-  context packing keeps active/eligible judgments above memory recall.
+  summary extraction no longer writes active `memory_items`; summary
+  output creates proposal-only Judgment rows; context packing keeps
+  active/eligible judgments above memory recall.
 
 ## System overview
 
@@ -213,8 +218,8 @@ Runtime-wired surface:
 
 All Judgment Telegram command output is sent through outbound
 notifications and is not stored as conversation turns. Still future:
-automatic extraction, provider tool registration, memory promotion
-integration, `Tension` / `ReflectionTriageEvent`,
+provider-output extraction, provider tool registration, summary
+proposal review visibility, `Tension` / `ReflectionTriageEvent`,
 `current_operating_view`, and vector/graph projections.
 
 ## Salvage audit pointer
@@ -224,8 +229,9 @@ The 2026-04 salvage audit
 runtime stays. `src/context/builder.ts` remains a REPLACE candidate
 after the Stage 4 Context Compiler landing; deletion timing is tracked
 by Q-066. `src/queue/worker.ts` and `src/memory/*` are ADAPT surfaces:
-summary output now stays in `memory_summaries`, while automatic
-Judgment extraction/proposal remains future work. Q-027 is resolved by
-ADR-0017: behavioral baselines converge on `judgment_items`. See the
-audit for the historical table and follow-up sequence; this file only
-records the current architectural shape.
+summary output now stays in `memory_summaries` and creates
+proposal-only Judgment rows, while provider-output extraction remains
+future work. Q-027 is resolved by ADR-0017: behavioral baselines
+converge on `judgment_items`. See the audit for the historical table
+and follow-up sequence; this file only records the current
+architectural shape.

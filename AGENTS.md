@@ -82,6 +82,10 @@ Do not read `docs/design/archive/` by default. Those are history.
     provenance gates are split, summary extraction no longer writes
     active `memory_items`, and active judgments outrank memory recall
     in context packing.
+  - JDG-1C.2a is landed: successful `summary_generation` structured
+    output creates proposal-only `judgment_items` through
+    `src/judgment/summary_proposals.ts`. It does not approve, link
+    evidence, commit, activate, or register provider tools.
   - The `judgment_items` context slot priority is 790.
   - Remaining Phase 1A constraints still apply to all modules except
     `src/queue/worker.ts`:
@@ -92,11 +96,11 @@ Do not read `docs/design/archive/` by default. Those are history.
       compiler input types, but do not add new Judgment runtime paths
       there unless explicitly tasked.
   - Do **not** implement Tension, ReflectionTriageEvent,
-    `current_operating_view`, provider/context integration beyond the
-    existing compiler/context-injection path, vector / graph projections,
-    Critique Lens, Claude tool registration for judgment tools, or
-    additional Judgment runtime paths unless the task explicitly
-    authorizes them.
+    `current_operating_view`, provider-output Judgment extraction,
+    provider/context integration beyond the existing compiler/context-
+    injection path, vector / graph projections, Critique Lens, Claude
+    tool registration for judgment tools, or additional Judgment runtime
+    paths unless the task explicitly authorizes them.
 
 ## When changing code
 

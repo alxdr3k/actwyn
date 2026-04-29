@@ -98,7 +98,6 @@ not require a running service, S3 endpoint, or Telegram credentials.
 
 There is no standalone migration-check command in `package.json`.
 Migration shape is asserted by:
-
 - `test/db/schema.test.ts` — schema-level shape and migration
   ordering.
 - `test/db/judgment_schema.test.ts` — Judgment System schema
@@ -124,6 +123,7 @@ Telegram read/write/retirement commands) tests live under:
   fixture coverage, persistence, and import-boundary assertions.
 - `test/judgment/tool.test.ts` — typed-tool contracts, executor
   outcomes, and runtime import-boundary assertions.
+- `test/judgment/summary_proposals.test.ts` — summary-output to proposal-only Judgment conversion.
 - `test/context/compiler.test.ts` — Stage 4 Context Compiler v0:
   replay/resume modes, judgment scope/time filters, summary-generation
   exclusion (skipJudgments), and PromptOverflowError propagation.

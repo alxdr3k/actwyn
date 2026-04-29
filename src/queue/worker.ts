@@ -92,6 +92,7 @@ import {
   executeJudgmentSupersedeTool,
 } from "~/judgment/tool.ts";
 import { JUDGMENT_KINDS } from "~/judgment/types.ts";
+import { proposeJudgmentsFromSummary } from "~/judgment/summary_proposals.ts";
 
 export interface WorkerConfig {
   readonly capture: CaptureConfig;
@@ -707,6 +708,36 @@ async function runOneClaimedInner(
       }
     }
   });
+
+  // JDG-1C.2a: summary extraction can create Judgment proposals, but it must
+  // not approve, link evidence, commit, activate, or register provider tools.
+  if (summaryResult.sync !== null) {
+    try {
+      const proposalResult = proposeJudgmentsFromSummary({
+        db: deps.db,
+        summary_id: summaryResult.sync.summaryId,
+        summary: summaryResult.sync.summaryData,
+      }, {
+        newId: deps.newId,
+        actor: "summary_generation",
+        nowIso: () => deps.now().toISOString(),
+      });
+      if (proposalResult.proposed > 0 || proposalResult.skipped > 0) {
+        deps.events.info("queue.summary.judgment_proposals", {
+          job_id: job.id,
+          summary_id: summaryResult.sync.summaryId,
+          proposed: proposalResult.proposed,
+          skipped: proposalResult.skipped,
+        });
+      }
+    } catch (e) {
+      deps.events.warn("queue.summary.judgment_proposals_failed", {
+        job_id: job.id,
+        summary_id: summaryResult.sync.summaryId,
+        error: (e as Error).message,
+      });
+    }
+  }
 
   // AC-MEM-001: write local snapshot file + enqueue storage_sync after summary succeeds.
   // Runs outside the tx to avoid blocking I/O inside a transaction (HLD §7.10).

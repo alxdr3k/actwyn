@@ -100,12 +100,10 @@ projections) is architecturally committed under ADR-0009 … ADR-0013
 and `docs/JUDGMENT_SYSTEM.md`. Current implemented/runtime-reachable
 slice:
 
-- **Phase 1A.1–1A.8**: schema skeleton, proposal/review/source/evidence/commit/retirement
-  repositories, query/explain read surfaces, typed-tool contracts, Control Gate evaluator +
-  `control_gate_events` migration. All Phase 1A surfaces are local and unregistered.
+- **Phase 1A.1–1A.8**: schema, repository/tool/query/explain/retirement
+  surfaces, and Control Gate substrate. Provider tools remain unregistered.
 - **Phase 1B.1**: `src/judgment/control_gate.ts` now imported by `src/queue/worker.ts`.
-  `evaluateTurn()` + `recordControlGateDecision()` called per non-system `provider_run` (not
-  `summary_generation`). L0-only telemetry; signal detection deferred.
+  Non-system `provider_run` jobs record L0 Control Gate telemetry.
 - **Phase 1B.2**: `src/context/builder.ts` gains `judgment_items` slot (priority 790).
   Worker queries active/eligible/normal/global/time-valid judgments and injects them
   into `buildContext()` in `replay_mode` and into the bounded resume-mode judgment
@@ -119,12 +117,11 @@ slice:
 - **Phase 1B.5**: `/judgment_supersede`, `/judgment_revoke`, and
   `/judgment_expire` are worker-dispatched Telegram system commands that retire
   active judgments through `src/judgment/tool.ts`.
-- Judgment command output is not stored as turns and system commands do not produce
-  Control Gate rows.
+- **Phase 1C.2a**: successful `summary_generation` output creates proposal-only
+  `judgment_items`; no source/evidence link, approval, commit, or activation.
 
-Pending: provider tool registration, automatic judgment extraction/proposal,
-and `current_operating_view`; #44 and #45 are resolved.
-See `docs/RUNTIME.md` for the full runtime boundary description.
+Pending: provider-output extraction/proposal, summary-proposal review visibility,
+provider tool registration, and `current_operating_view`. See `docs/RUNTIME.md`.
 
 ## Judgment
 
@@ -135,12 +132,13 @@ See `docs/RUNTIME.md` for the full runtime boundary description.
 | `src/judgment/repository.ts`          | Sole writer for `judgment_*` tables; owns lifecycle operations and query/explain. Worker-dispatched Telegram commands route through it. | implemented |
 | `src/judgment/tool.ts`                | Local typed-tool contracts. Worker imports executors only for Telegram Judgment system commands; provider tool registration is not implemented. | implemented |
 | `src/judgment/control_gate.ts`        | Control Gate evaluation and `control_gate_events` writer.                           | implemented; worker telemetry path only |
+| `src/judgment/summary_proposals.ts`   | Converts structured `summary_generation` output into proposal-only Judgment rows.    | implemented; worker summary path only |
 
 ## Queue / orchestration
 
 | Path                                  | Purpose                                                                              | Status                                       |
 | ------------------------------------- | ------------------------------------------------------------------------------------ | -------------------------------------------- |
-| `src/queue/worker.ts`                 | Single job claim + dispatch loop; one `provider_run` at a time. Also: attachment capture, Control Gate telemetry, judgment context injection, and judgment Telegram command dispatch. | implemented · salvage:ADAPT |
+| `src/queue/worker.ts`                 | Single job claim + dispatch loop; one `provider_run` at a time. Also: attachment capture, Control Gate telemetry, judgment context injection, summary-to-Judgment proposals, and judgment Telegram command dispatch. | implemented · salvage:ADAPT |
 | `src/queue/notification_retry.ts`     | Handlers / helpers used by the worker to process `notification_retry` jobs (per-chunk re-send of `outbound_notification_chunks`). Not a separate loop. | implemented · salvage:KEEP |
 | `src/startup/recovery.ts`             | Boot-time reconciliation of stale `running` jobs (force `interrupted`, requeue if `safe_retry`, kill orphan PIDs); offset fast-forward; enqueues one `storage_sync` job for `failed` / `delete_failed` rows only (not for `pending`). | implemented · salvage:KEEP |
 
@@ -204,6 +202,7 @@ See `docs/RUNTIME.md` for the full runtime boundary description.
 | `test/judgment/validators.test.ts`                | Pure-TS judgment validator coverage.                                             |
 | `test/judgment/repository.test.ts`                | Judgment repository lifecycle, transaction, query/explain, and retirement coverage. |
 | `test/judgment/tool.test.ts`                      | Typed-tool contracts, executor outcomes, and runtime import-boundary assertions. |
+| `test/judgment/summary_proposals.test.ts`         | Summary-output to proposal-only Judgment conversion coverage.                    |
 | `test/context/builder_judgments.test.ts`          | Judgment context slot rendering and priority behavior.                           |
 | `test/queue/control_gate_telemetry.test.ts`       | Worker telemetry writes and system-command exclusions.                           |
 | `test/queue/judgment_commands.test.ts`            | Judgment read/write/retirement Telegram command dispatch/output behavior.        |
