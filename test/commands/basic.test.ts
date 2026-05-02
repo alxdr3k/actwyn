@@ -317,7 +317,7 @@ describe("/doctor", () => {
     expect(results.some((r) => r.name === "s3_endpoint_smoke")).toBe(true);
   });
 
-  test("storage_capacity check warns when thresholds are crossed", async () => {
+  test("storage_capacity check fails when capacity is critical", async () => {
     const critical = evaluateStorageCapacity({
       objects_path: "/objects",
       used_bytes: 301,
@@ -341,7 +341,7 @@ describe("/doctor", () => {
       storage_capacity_check: () => critical,
     });
     const check = results.find((r) => r.name === "storage_capacity")!;
-    expect(check.status).toBe("warn");
+    expect(check.status).toBe("fail");
     expect(check.detail).toContain("critical");
   });
 });

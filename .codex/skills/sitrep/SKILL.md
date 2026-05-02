@@ -21,10 +21,10 @@ do-not-edit: edit .codex/skill-overrides/sitrep.md instead
 1. `git log --oneline -20` — 최근 커밋 흐름
 2. `git status -sb` — 현재 워킹트리 상태
 3. `git branch --show-current` — 현재 브랜치
-4. `AGENTS.md`, `README.md`, `CLAUDE.md` 등 repo-local guidance (존재하는 것만)
+4. `AGENTS.md`, `README.md` 등 repo-local guidance (존재하는 것만)
 5. `docs/context/current-state.md`가 있으면 해당 파일
 6. `docs/04_IMPLEMENTATION_PLAN.md`가 있으면 current roadmap/status ledger 부분
-7. `docs/current/CODE_MAP.md`, `docs/current/TESTING.md`, `ARCHITECTURE.md`, `docs/**` 중 필요한 thin current docs
+7. `docs/current/CODE_MAP.md`, `docs/current/TESTING.md`, `docs/ARCHITECTURE.md`, `docs/**` 중 필요한 thin current docs
 8. 로드맵이 별도 파일에 있으면 해당 파일 (ROADMAP.md, docs/ROADMAP.md 등)
 
 긴 P0 설계 문서 (PRD, HLD 등), archive, generated file은 기본으로 열지 않는다.

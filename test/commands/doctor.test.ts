@@ -341,7 +341,7 @@ describe("AC-OBS-001 / Blocker 8 — s3_endpoint_smoke attributes failures to st
 });
 
 describe("storage_capacity check", () => {
-  test("warns when artifact capacity is above threshold", async () => {
+  test("fails when artifact capacity is critical", async () => {
     const capacity = evaluateStorageCapacity({
       objects_path: "/objects",
       used_bytes: 301,
@@ -363,7 +363,7 @@ describe("storage_capacity check", () => {
       storage_capacity_check: () => capacity,
     });
     const check = results.find((r) => r.name === "storage_capacity")!;
-    expect(check.status).toBe("warn");
+    expect(check.status).toBe("fail");
     expect(check.detail).toContain("long_term=blocked");
   });
 });
