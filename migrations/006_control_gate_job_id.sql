@@ -12,7 +12,7 @@
 -- new row with job_id set; the old NULL row does not conflict.
 -- The application checks for in-flight provider_run jobs at boot time
 -- (before migrate()) and aborts with an error if any are found in
--- running/queued state. See src/main.ts assertNoPendingProviderRuns().
+-- running/queued state. See src/main.ts assertNoPendingProviderRunsBeforeMigration006().
 
 ALTER TABLE control_gate_events
   ADD COLUMN job_id TEXT;

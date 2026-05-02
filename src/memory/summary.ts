@@ -156,6 +156,7 @@ export interface WriteSummaryResult {
   readonly summary_id: string;
   readonly kept_preferences: number;
   readonly dropped_preferences: number;
+  /** Always 0 since ADR-0017: summary no longer promotes items to memory_items. */
   readonly memory_items_inserted: number;
 }
 

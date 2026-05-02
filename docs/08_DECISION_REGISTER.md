@@ -1130,7 +1130,7 @@ been promoted to ADRs (`ADR-0001`..`ADR-0005` plus `ADR-0006`..
 
 - **Date**: 2026-04-28
 - **Status**: accepted
-- **Decision**: Wire Phase 1A judgment surfaces into the live runtime in three incremental steps. Phase 1B.1: `evaluateTurn()` + `recordControlGateDecision()` called per non-system `provider_run` in `src/queue/worker.ts` (L0-only telemetry). Phase 1B.2: active/eligible/normal/global/time-valid `judgment_items` injected into `buildContext()` as `judgment_active` slot (priority 600) in `replay_mode`; excluded from `summary_generation`. Phase 1B.3: `/judgment` and `/judgment_explain <id>` Telegram commands dispatched in worker; output via outbound notification only (not stored as turns).
+- **Decision**: Wire Phase 1A judgment surfaces into the live runtime in three incremental steps. Phase 1B.1: `evaluateTurn()` + `recordControlGateDecision()` called per non-system `provider_run` in `src/queue/worker.ts` (L0-only telemetry). Phase 1B.2: active/eligible/normal/global/time-valid `judgment_items` injected into `buildContext()` as `judgment_active` slot (priority 600; later raised to 790 per ADR-0017) in `replay_mode`; excluded from `summary_generation`. Phase 1B.3: `/judgment` and `/judgment_explain <id>` Telegram commands dispatched in worker; output via outbound notification only (not stored as turns).
 - **Context**: Phase 1A.1–1A.8 implemented all judgment surfaces as local, unregistered modules. Phase 1B was the first runtime integration step — authorised explicitly by the operator on 2026-04-28.
 - **Key constraints preserved**:
   - Write-path tool contracts (propose/approve/commit/…) remain unregistered in runtime.

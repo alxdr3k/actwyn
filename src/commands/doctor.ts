@@ -195,7 +195,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<readonly CheckResult[
     results.push(await timed("storage_capacity", "deep", async () => {
       const r = await deps.storage_capacity_check!();
       return {
-        status: r.level === "ok" ? "ok" : "warn",
+        status: r.level === "ok" ? "ok" : r.level === "critical" ? "fail" : "warn",
         detail: r.detail,
       };
     }));

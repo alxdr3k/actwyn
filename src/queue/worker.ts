@@ -92,7 +92,6 @@ import {
   executeJudgmentRevokeTool,
   executeJudgmentSupersedeTool,
 } from "~/judgment/tool.ts";
-import { JUDGMENT_KINDS } from "~/judgment/types.ts";
 import {
   proposeJudgmentsFromSummary,
   type ProposeSummaryJudgmentsResult,
@@ -384,8 +383,8 @@ async function runOneClaimedInner(
   // is_doubt_signal, but Phase 1B.1 passes neither — signal detection deferred.
   // direct_commit_allowed is always false per ADR-0012.
   if (!isSummaryJob) {
-    // INSERT OR IGNORE in recordControlGateDecision handles retry idempotency
-    // via the partial unique index on (job_id) WHERE phase='turn'.
+    // recordControlGateDecision uses a SELECT pre-check on (job_id, phase='turn') for
+    // retry idempotency; the partial UNIQUE index in migration 006 backstops it at the DB.
     const cgDecision = evaluateTurn({ text: baseRequest.message });
     recordControlGateDecision(deps.db, cgDecision, job.id);
     deps.events.debug("queue.control_gate", {
