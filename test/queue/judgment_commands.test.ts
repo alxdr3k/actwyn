@@ -121,7 +121,7 @@ describe("Phase 1B.3 — /judgment command", () => {
 
   test("/judgment lists all active judgments regardless of scope (command-level query)", async () => {
     // /judgment uses executeJudgmentQueryTool which queries all active judgments.
-    // Scope filtering only applies to context injection in buildContextForRun.
+    // Scope filtering only applies to context injection in compile()/buildContext().
     seedActiveJudgment("jdg-list-1", "판단 항목 A");
     seedActiveJudgment("jdg-list-2", "판단 항목 B");
     seedCommandJob("j-jq-multi", "k-jq-multi", "/judgment");
