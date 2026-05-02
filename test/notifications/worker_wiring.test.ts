@@ -11,6 +11,7 @@ import { migrate } from "../../src/db/migrator.ts";
 import { createEmitter } from "../../src/observability/events.ts";
 import { createRedactor } from "../../src/observability/redact.ts";
 import { createFakeAdapter } from "../../src/providers/fake.ts";
+import type { ProviderAdapter } from "../../src/providers/types.ts";
 import { runWorkerOnce, type WorkerDeps } from "../../src/queue/worker.ts";
 import { StubOutboundTransport } from "../../src/telegram/outbound.ts";
 
@@ -129,6 +130,52 @@ describe("worker → outbound wiring", () => {
       .get()!;
     expect(row.notification_type).toBe("job_failed");
     expect(row.status).toBe("sent");
+  });
+
+  test("Claude rate limit failure is surfaced in the chat notification", async () => {
+    seedJob("j-rate-limit", "hello");
+    const transport = new StubOutboundTransport();
+    const adapter: ProviderAdapter = {
+      name: "claude",
+      async run() {
+        return {
+          kind: "failed",
+          error_type: "non_zero_exit",
+          response: {
+            provider: "claude",
+            session_id: "claude-session",
+            final_text: "",
+            raw_events: [
+              {
+                index: 0,
+                stream: "stderr",
+                payload: JSON.stringify({
+                  type: "rate_limit_event",
+                  retry_after_seconds: 60,
+                }),
+                parser_status: "parsed",
+              },
+            ],
+            duration_ms: 42,
+            exit_code: 1,
+            parser_status: "parsed",
+          },
+        };
+      },
+    };
+    await runWorkerOnce(buildDeps(transport, { adapter }));
+
+    const row = db
+      .prepare<
+        { notification_type: string; status: string; payload_text: string | null },
+        []
+      >("SELECT notification_type, status, payload_text FROM outbound_notifications WHERE notification_type = 'job_failed' LIMIT 1")
+      .get()!;
+    expect(row.notification_type).toBe("job_failed");
+    expect(row.status).toBe("sent");
+    expect(row.payload_text).toContain("Claude rate limit");
+    expect(row.payload_text).toContain("1분 후 다시 시도해주세요.");
+    expect(row.payload_text).not.toContain("/status");
   });
 
   test("transport failure does NOT roll back jobs.status or provider_runs.status", async () => {

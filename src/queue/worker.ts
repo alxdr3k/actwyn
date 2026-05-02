@@ -36,6 +36,7 @@ import type {
   AgentOutcome,
   AgentRequest,
   AgentRequestAttachment,
+  AgentRawEvent,
   ProviderAdapter,
 } from "~/providers/types.ts";
 import { buildStatusReport, formatStatus } from "~/commands/status.ts";
@@ -789,7 +790,12 @@ async function runOneClaimedInner(
       : buildNotificationText(outcome.kind, outcome.response.final_text, {
           duration_ms: outcome.response.duration_ms,
           provider: outcome.response.provider,
-        });
+        }, outcome.kind === "failed" ? {
+          provider: outcome.response.provider,
+          error_type: outcome.error_type,
+          ...(outcome.response.stderr !== undefined ? { stderr: outcome.response.stderr } : {}),
+          raw_events: outcome.response.raw_events,
+        } : undefined);
     const created = createNotificationAndChunks({
       db: deps.db,
       newId: deps.newId,
@@ -880,6 +886,7 @@ function buildNotificationText(
   kind: "succeeded" | "failed" | "cancelled",
   finalText: string,
   meta?: { duration_ms?: number; provider?: string },
+  failure?: FailureNotificationDetail,
 ): string {
   if (kind === "succeeded") {
     const base = finalText.length > 0 ? finalText : "(empty response)";
@@ -892,7 +899,59 @@ function buildNotificationText(
   if (kind === "cancelled") {
     return "작업이 취소됐습니다.";
   }
-  return finalText.length > 0 ? finalText : "작업이 실패했습니다. /status 를 확인하세요.";
+  if (finalText.length > 0) return finalText;
+  const publicFailure = failure ? describePublicProviderFailure(failure) : null;
+  return publicFailure ?? "작업이 실패했습니다. /status 를 확인하세요.";
+}
+
+interface FailureNotificationDetail {
+  readonly provider: string;
+  readonly error_type: string;
+  readonly stderr?: string;
+  readonly raw_events: readonly AgentRawEvent[];
+}
+
+function describePublicProviderFailure(failure: FailureNotificationDetail): string | null {
+  if (!isClaudeRateLimitFailure(failure)) return null;
+  const retryAfter = extractRetryAfterSeconds(failure);
+  const retryHint = retryAfter !== null
+    ? `${formatRetryAfter(retryAfter)} 후 다시 시도해주세요.`
+    : "잠시 후 다시 시도해주세요.";
+  return `Claude rate limit에 걸려 작업이 실패했습니다. ${retryHint}`;
+}
+
+function isClaudeRateLimitFailure(failure: FailureNotificationDetail): boolean {
+  if (failure.provider.toLowerCase() !== "claude") return false;
+  const signals = [
+    failure.error_type,
+    failure.stderr ?? "",
+    ...failure.raw_events.map((event) => event.payload),
+  ];
+  return signals.some((signal) => {
+    const lower = signal.toLowerCase();
+    return lower.includes("rate_limit_event") ||
+      lower.includes("rate limit") ||
+      lower.includes("rate limited") ||
+      lower.includes("429");
+  });
+}
+
+function extractRetryAfterSeconds(failure: FailureNotificationDetail): number | null {
+  const text = [
+    failure.stderr ?? "",
+    ...failure.raw_events.map((event) => event.payload),
+  ].join("\n");
+  const msMatch = text.match(/["']?retry_after_ms["']?\s*:\s*(\d+)/i);
+  if (msMatch?.[1]) return Math.max(1, Math.ceil(Number(msMatch[1]) / 1000));
+  const secMatch = text.match(/["']?retry_after(?:_seconds|_sec|_s)?["']?\s*:\s*(\d+)/i);
+  if (secMatch?.[1]) return Math.max(1, Number(secMatch[1]));
+  return null;
+}
+
+function formatRetryAfter(seconds: number): string {
+  if (seconds < 60) return `${seconds}초`;
+  const minutes = Math.ceil(seconds / 60);
+  return `${minutes}분`;
 }
 
 // ---------------------------------------------------------------

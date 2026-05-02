@@ -1,7 +1,7 @@
 # Personal Agent P0 — Implementation Plan
 
 > Status: living roadmap/status ledger + historical P0 build plan ·
-> Owner: project lead · Last updated: 2026-04-29
+> Owner: project lead · Last updated: 2026-05-03
 >
 > This file owns the canonical roadmap/status ledger for milestone,
 > track, phase, slice, gate, status, evidence, and next work. The
@@ -150,6 +150,7 @@ executed.
 | `P0-5A.1` | `P0-M1` | Phase 5 | Outbound notification parent + chunk ledger | `bun run ci` | `passing` | `landed` | `src/telegram/outbound.ts`; `test/notifications/chunk_ledger.test.ts`; `test/notifications/splitting.test.ts`; DEC-020 | Acceptance chunk failure proof lives in `OPS-1A.5c`. |
 | `P0-5A.2` | `P0-M1` | Phase 5 | Notification retry independent from provider/job terminal state | `bun run ci` | `passing` | `landed` | `src/queue/notification_retry.ts`; `test/notifications/retry_driver.test.ts`; AC-NOTIF-001, AC-NOTIF-003, AC-NOTIF-005 | No code follow-up. |
 | `P0-5A.3` | `P0-M1` | Phase 5 | Worker notification creation/sending wiring | `bun run ci` | `passing` | `landed` | `src/queue/worker.ts`; `test/notifications/worker_wiring.test.ts`; AC-TEL-002 | Staging Telegram delivery proof lives in `OPS-1A.5a`. |
+| `P0-5A.4` | `P0-M5` | Phase 5 | User-visible allow-listed provider failure detail in chat notifications | `bun run ci` | `passing` | `landed` | `src/queue/worker.ts`; `test/notifications/worker_wiring.test.ts`; user VOC 2026-05-02 Claude rate-limit failure | Keep raw provider output out of chat; add only allow-listed user-actionable failures. |
 | `P0-6A.1` | `P0-M1` | Phase 6 | Walking Skeleton staging report with fake provider | Walking Skeleton gate | `not_run` | `planned` | `docs/04_IMPLEMENTATION_PLAN.md` Phase 6; playbook §5.5 | Run alongside `OPS-1A.5a`, `OPS-1A.5c`, and `OPS-1A.5d` before marking `P0-M1` accepted. |
 | `P0-7A.1` | `P0-M2` | Phase 7 | Claude provider adapter and command builder | `bun run ci` | `passing` | `landed` | `src/providers/claude.ts`; `test/providers/claude.test.ts`; ADR-0005/0007 | Provider smoke lives in `OPS-1A.5b`. |
 | `P0-7A.2` | `P0-M2` | Phase 7 | Stream-json parser and final-text normalization | `bun run ci` | `passing` | `landed` | `src/providers/stream_json.ts`; `test/providers/parser.test.ts`; AC-PROV-005 | Re-run fixtures on Claude CLI bumps. |

@@ -1,7 +1,7 @@
 # Current State
 
 > Status: compressed current-state entrypoint · Owner: project lead ·
-> Last updated: 2026-04-29
+> Last updated: 2026-05-03
 >
 > First read for new AI/human sessions. Keep this short. The full
 > roadmap/status ledger lives in `docs/04_IMPLEMENTATION_PLAN.md`.
@@ -21,8 +21,10 @@ the acceptance plan is executed on a configured host.
 - Active tracks: `OPS` (acceptance/dogfood) and `JDG` (future Judgment
   convergence slices when explicitly authorized).
 - Current ready OPS leaf: `OPS-1A.1` acceptance environment inventory.
-- Current ready feature leaf: none. `JDG-1C.2c` landed DEC-041; known
-  future feature leaves are inventoried but not ready.
+- Current ready feature leaf: none. Latest runtime VOC slice is
+  `P0-5A.4` user-visible allow-listed provider failure detail.
+  `JDG-1C.2c` landed DEC-041; known future feature leaves are
+  inventoried but not ready.
 - Latest docs slice: `DOC-1B.2` known future/deferred leaf inventory.
 - Last local validation: `bun run ci` passed on 2026-04-29 for the
   `DOC-1B.2` known future/deferred leaf inventory update.
@@ -48,6 +50,9 @@ the acceptance plan is executed on a configured host.
   commit, activate, or register provider tools.
 - `JDG-1C.2b`: summary completion notifications now include
   auto-proposed Judgment counts, short IDs, and review command hints.
+- `P0-5A.4`: failed Claude provider runs now surface allow-listed
+  rate-limit detail directly in the chat failure notification instead
+  of only pointing the user to `/status`.
 
 ## Planned / deferred
 

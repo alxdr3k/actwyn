@@ -1,7 +1,7 @@
 # Testing
 
 > Status: thin current-state map · Owner: project lead ·
-> Last updated: 2026-04-29
+> Last updated: 2026-05-03
 
 ## Testing policy
 
@@ -122,31 +122,11 @@ Migration shape is asserted by:
 - `src/db/migrator.ts` — refuses missing prior versions at runtime,
   records applied versions in `settings`.
 
-Judgment System Phase 1A.2–1A.8 (proposal, review, source-recording,
-evidence-linking, commit, query, explain, retirement lifecycle, Control
-Gate) and Phase 1B.1–1B.5 (runtime telemetry, context injection,
-Telegram read/write/retirement commands) tests live under:
-
-- `test/judgment/validators.test.ts` — pure-TS judgment validator coverage.
-- `test/judgment/repository.test.ts` — judgment repository lifecycle,
-  transaction, query/explain, and retirement coverage.
-- `test/judgment/control_gate.test.ts` — Control Gate decisions,
-  fixture coverage, persistence, and import-boundary assertions.
-- `test/judgment/tool.test.ts` — typed-tool contracts, executor
-  outcomes, and runtime import-boundary assertions.
-- `test/judgment/summary_proposals.test.ts` — summary-output to proposal-only Judgment conversion.
-- `test/context/compiler.test.ts` — Stage 4 Context Compiler v0:
-  replay/resume modes, judgment scope/time filters, summary-generation
-  exclusion (skipJudgments), and PromptOverflowError propagation.
-- `test/context/builder_judgments.test.ts` — judgment context slot
-  rendering and priority behavior.
-- `test/queue/control_gate_telemetry.test.ts` — worker telemetry writes
-  and system-command exclusions.
-- `test/queue/judgment_commands.test.ts` — Judgment read, write, and
-  retirement Telegram command dispatch/output behavior.
-- `test/queue/judgment_context_injection.test.ts` — worker-side
-  active judgment query filters and packed-context injection (both
-  replay_mode and resume_mode judgment refresh, issue #44).
+Judgment System Phase 1A.2–1A.8 and Phase 1B.1–1B.5 coverage lives in
+`test/judgment/*`, `test/context/compiler.test.ts`,
+`test/context/builder_judgments.test.ts`, and `test/queue/judgment_*`.
+Those files cover validators, repository/tool/control-gate contracts,
+summary proposals, context injection, telemetry, and Telegram commands.
 
 When you add a migration:
 
