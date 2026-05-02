@@ -18,6 +18,11 @@
 > 3. Evidence is linked by source anchor (path, test, Q, DEC, ADR,
 >    AC, issue, commit when known) instead of copying implementation
 >    detail into this ledger.
+> 4. User feedback from real usage is triaged before it enters the roadmap:
+>    clear defects, UX regressions, or acceptance failures can become small
+>    hotfix slices; broader product/architecture changes go through Q / DEC
+>    / PRD / roadmap updates. Record only the actionable slice, gate,
+>    evidence, and next work here.
 
 ## Current roadmap / status ledger
 
@@ -35,7 +40,7 @@ docs own fast navigation for implemented behavior.
 | Milestone | Product / user-facing delivery gate | `P0-M5` | Defined by what the user or operator can rely on. |
 | Track | Technical stream or major implementation flow | `JDG` | Examples: P0 runtime, Judgment, docs, ops. |
 | Phase | Ordered stage inside a track | `JDG-1B` | Reuses existing Judgment phase names where already established. |
-| Slice / Task | Commit-sized or PR-sized work unit | `JDG-1B.5` | Should be small enough to review and validate. |
+| Slice | Commit-sized implementation/verification unit | `JDG-1B.5` | Should be small enough to review and validate. |
 | Gate | Acceptance, test, staging, or manual verification criterion | `AC-MEM-004` / `bun run ci` | Gate definitions live in `docs/06_ACCEPTANCE_TESTS.md` or test files. |
 | Evidence | Anchor proving status | code, tests, docs, Q, DEC, ADR | Prefer links / IDs over copied details. |
 

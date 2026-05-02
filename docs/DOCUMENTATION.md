@@ -72,6 +72,7 @@ output.
 | Change type                                  | Required doc action                                |
 | -------------------------------------------- | -------------------------------------------------- |
 | Roadmap taxonomy, slice status, gate status, evidence, or next work changes | update `docs/04_IMPLEMENTATION_PLAN.md` |
+| User feedback reveals a defect, UX regression, or acceptance failure | triage through `docs/04_IMPLEMENTATION_PLAN.md`; update `docs/06_ACCEPTANCE_TESTS.md` and `docs/TESTING.md` when gate or regression evidence changes |
 | Active milestone / track / phase / slice changes | update `docs/context/current-state.md` |
 | Runtime behavior changes                     | update `docs/RUNTIME.md`                           |
 | Module / file layout changes                 | update `docs/CODE_MAP.md`                          |
