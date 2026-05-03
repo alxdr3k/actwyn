@@ -1,6 +1,6 @@
 # Traceability Matrix
 
-> Status: living document · Owner: project lead · Last updated: 2026-04-29
+> Status: living document · Owner: project lead · Last updated: 2026-05-03
 >
 > This matrix is the index that connects questions, decisions, and
 > source-of-truth artifacts. See
@@ -177,6 +177,7 @@ PRD §   HLD §   Runbook §   AC##   SP-##
 | DEC-038 | Judgment System Phase 1B.1–1B.3 Runtime Wiring (2026-04-28)  | —                        | —                  | `src/queue/worker.ts`; `src/context/builder.ts`; `src/telegram/inbound.ts`; Phase 1B tests |
 | DEC-039 | MVP memory-to-judgment convergence implementation posture      | §12 (taxonomy 확장 예정) | §11.3              | ADR-0017; Q-027; Q-064; first `src/memory/*` + context-priority slice landed; extraction / `current_operating_view` future |
 | DEC-040 | Roadmap/status taxonomy and ledger ownership                  | —                        | —                  | Q-068; `docs/04_IMPLEMENTATION_PLAN.md`; `docs/context/current-state.md`; `docs/DOCUMENTATION.md`; `AGENTS.md` |
+| DEC-041 | Provider-output Judgment extraction boundary for MVP          | —                        | —                  | `AGENTS.md`; `docs/04_IMPLEMENTATION_PLAN.md` JDG-1C.2c; `docs/context/current-state.md` |
 
 ## Matrix — PRD acceptance criteria → evidence
 
