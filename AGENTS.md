@@ -2,6 +2,7 @@
 
 Guidance for AI coding agents working in this repo. Keep it short.
 
+See also: `AGENTS.policy.md` — boilerplate-owned cross-cutting agent behaviour rules.
 ## Read order
 
 For a normal implementation task, read in this order and stop as
